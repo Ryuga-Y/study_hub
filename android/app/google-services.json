@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "79357900802",
+    "project_id": "studyhub-d0239",
+    "storage_bucket": "studyhub-d0239.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:79357900802:android:3b249dd8f4bb4e2a544f1b",
+        "android_client_info": {
+          "package_name": "my.tarc.edu.study_hub"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPJ4wRTdrMh2uy_ygb7lOSqEckG3h3yvw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
