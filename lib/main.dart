@@ -16,7 +16,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Study Hub',
+      title: 'Study Hub HII',
       home: SignUpPage(),
     );
   }
