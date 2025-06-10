@@ -1,6 +1,13 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'Authentication/role_selection.dart';
+import 'Authentication/sign_in.dart';
+import 'Authentication/sign_up.dart';
 
-void main() {
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(); // Firebase initialization
   runApp(MyApp());
 }
 
@@ -8,133 +15,123 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Study Hub',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      home: AuthPage(),
+      debugShowCheckedModeBanner: false,
+      home: OnboardingScreen(),
+      routes: {
+        '/roleSelection': (context) => RoleSelectionPage(), // Navigate to RoleSelectionPage
+        '/signIn': (context) => SignInPage(), // Navigate to SignInPage
+      },
     );
   }
 }
 
-class AuthPage extends StatelessWidget {
+
+class OnboardingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    // Get the screen width and height using MediaQuery
+    double screenWidth = MediaQuery.of(context).size.width;
+    double screenHeight = MediaQuery.of(context).size.height;
+
+    // Scale the font sizes based on screen width
+    double titleFontSize = screenWidth * 0.15; // Increased font size
+    double subTitleFontSize = screenWidth * 0.06;
+    double buttonFontSize = screenWidth * 0.05;
+
+    // Define padding based on screen width
+    double horizontalPadding = screenWidth * 0.05;
+    double verticalPadding = screenHeight * 0.05;
+
     return Scaffold(
-      resizeToAvoidBottomInset: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10.0),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              // Get the screen width and height
-              double width = constraints.maxWidth;
-              double height = constraints.maxHeight;
-
-              return Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text(
-                    'Study Hub',
-                    style: TextStyle(
-                      fontSize: width * 0.12, // Adjust text size dynamically
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue[800],
-                    ),
+      backgroundColor: Colors.white,
+      body: Padding(
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start, // Align the text to the left
+            children: [
+              // Separate "Study Hub" into two lines with the new color and enlarged text
+              Text(
+                'Study',
+                style: TextStyle(
+                  fontSize: titleFontSize,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF3E4A89), // #3E4A89 color
+                ),
+              ),
+              Text(
+                'Hub',
+                style: TextStyle(
+                  fontSize: titleFontSize,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF3E4A89), // #3E4A89 color
+                ),
+              ),
+              SizedBox(height: verticalPadding / 2),
+              Text(
+                'Let\'s Get Started!',
+                style: TextStyle(
+                  fontSize: subTitleFontSize,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+              ),
+              SizedBox(height: verticalPadding / 3),
+              Text(
+                'Let\'s dive into study',
+                style: TextStyle(
+                  fontSize: subTitleFontSize * 0.8, // Slightly smaller text
+                  color: Colors.blueGrey,
+                ),
+              ),
+              SizedBox(height: verticalPadding),
+              ElevatedButton(
+                onPressed: () {
+                  // Navigate to the RoleSelectionPage
+                  Navigator.pushNamed(context, '/roleSelection');
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purple[400], // Background color
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30), // Rounded corners
                   ),
-                  SizedBox(height: 10),
-                  Text(
-                    "Let's Get Started!",
-                    style: TextStyle(
-                      fontSize: width * 0.05,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                    ),
+                  padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.3, vertical: screenHeight * 0.02),
+                ),
+                child: Text(
+                  'Sign Up',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: buttonFontSize,
+                    fontWeight: FontWeight.w600,
                   ),
-                  SizedBox(height: 5),
-                  Text(
-                    'Let\'s dive into study',
-                    style: TextStyle(
-                      fontSize: width * 0.04,
-                      color: Colors.grey[600],
-                    ),
+                ),
+              ),
+              SizedBox(height: verticalPadding / 2),
+              OutlinedButton(
+                onPressed: () {
+                  // Navigate to the SignInPage
+                  Navigator.pushNamed(context, '/signIn');
+                },
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: Colors.purple[400]!, width: 2),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
                   ),
-                  SizedBox(height: height * 0.1), // Dynamic spacing
-
-                  // Sign Up Button
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.purple,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      padding: EdgeInsets.symmetric(vertical: height * 0.02, horizontal: width * 0.3),
-                    ),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => SignUpPage()),
-                      );
-                    },
-                    child: Text(
-                      'Sign Up',
-                      style: TextStyle(fontSize: width * 0.05, color: Colors.white),
-                    ),
+                  padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.3, vertical: screenHeight * 0.02),
+                ),
+                child: Text(
+                  'Sign In',
+                  style: TextStyle(
+                    color: Colors.purple[400],
+                    fontSize: buttonFontSize,
+                    fontWeight: FontWeight.w600,
                   ),
-                  SizedBox(height: 20),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => SignInPage()),
-                      );
-                    },
-                    child: Text(
-                      'Sign In',
-                      style: TextStyle(
-                        fontSize: width * 0.05,
-                        color: Colors.purple,
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
+                ),
+              ),
+            ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class SignUpPage extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Sign Up'),
-        backgroundColor: Colors.blue,
-      ),
-      body: Center(
-        child: Text('Sign Up Page'),
-      ),
-    );
-  }
-}
-
-class SignInPage extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Sign In'),
-        backgroundColor: Colors.blue,
-      ),
-      body: Center(
-        child: Text('Sign In Page'),
       ),
     );
   }

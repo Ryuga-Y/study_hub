@@ -65,7 +65,7 @@ class _SignInPageState extends State<SignInPage> {
                 onPressed: () {
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(builder: (_) => SignUpPage()),
+                    MaterialPageRoute(builder: (_) => SignUpPage(role: '',)),
                   );
                 },
                 child: Text('Don’t have an account? Sign Up'),

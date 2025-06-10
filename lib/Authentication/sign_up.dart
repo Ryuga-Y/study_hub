@@ -3,6 +3,11 @@ import 'package:study_hub/Authentication/sign_in.dart';
 import 'auth_service.dart';
 
 class SignUpPage extends StatefulWidget {
+  final String role; // Declare the 'role' parameter
+
+  // Constructor to accept the 'role' parameter
+  SignUpPage({required this.role});
+
   @override
   _SignUpPageState createState() => _SignUpPageState();
 }
@@ -24,6 +29,12 @@ class _SignUpPageState extends State<SignUpPage> {
           key: _formKey,
           child: Column(
             children: [
+              // Display role above the form (optional)
+              Text(
+                'Role: ${widget.role}', // Display the selected role
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 20),
               if (errorMessage != null)
                 Text(errorMessage!, style: TextStyle(color: Colors.red)),
               TextFormField(
@@ -49,8 +60,9 @@ class _SignUpPageState extends State<SignUpPage> {
                           _passwordController.text.trim());
                       // Navigate to Sign In or Home page after sign up
                       Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (_) => SignInPage()));
+                        context,
+                        MaterialPageRoute(builder: (_) => SignInPage()),
+                      );
                     } catch (e) {
                       setState(() {
                         errorMessage = e.toString();
