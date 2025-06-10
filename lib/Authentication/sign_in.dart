@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:study_hub/sign_up.dart';
+import 'package:study_hub/Authentication/sign_up.dart';
 import 'auth_service.dart';
 
 class SignInPage extends StatefulWidget {
@@ -65,7 +65,7 @@ class _SignInPageState extends State<SignInPage> {
                 onPressed: () {
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(builder: (_) => SignUpPage()),
+                    MaterialPageRoute(builder: (_) => SignUpPage(role: '',)),
                   );
                 },
                 child: Text('Don’t have an account? Sign Up'),
