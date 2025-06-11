@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'lecturer_SignUp.dart';
-import 'student_SignUp.dart';
+import 'lecturer_sign_up.dart';
+import 'student_sign_up.dart';
 
 class RoleSelectionPage extends StatelessWidget {
   @override

@@ -2,8 +2,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'Authentication/role_selection.dart';
 import 'Authentication/sign_in.dart';
-import 'Authentication/sign_up.dart';
-
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

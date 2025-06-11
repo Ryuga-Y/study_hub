@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:study_hub/Authentication/role_selection.dart';
 import 'auth_service.dart';
-import 'package:study_hub/Authentication/lecturer_sign_up.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-class SignInPage extends StatefulWidget {
+import 'package:study_hub/Authentication/sign_in.dart';
+
+class LecturerSignUpPage extends StatefulWidget {
+  const LecturerSignUpPage({super.key});
+
   @override
-  _SignInPageState createState() => _SignInPageState();
+  LecturerSignUpPageState createState() => LecturerSignUpPageState();
 }
 
-class _SignInPageState extends State<SignInPage> {
+class LecturerSignUpPageState extends State<LecturerSignUpPage> {
   final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  final _departmentController = TextEditingController();
   final AuthService _authService = AuthService();
   String? errorMessage;
 
@@ -20,14 +24,14 @@ class _SignInPageState extends State<SignInPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text('Sign In'),
+        title: Text(' '),
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
           onPressed: () {
             Navigator.pop(context); // Go back to the previous page
           },
         ),
-        backgroundColor: Colors.blueAccent,
+        backgroundColor: Colors.white,
       ),
       body: Padding(
         padding: EdgeInsets.all(16),
@@ -37,13 +41,30 @@ class _SignInPageState extends State<SignInPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Sign In to Study Hub',
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, fontFamily: 'Abeezee', color: Colors.black),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Join Study Hub Today',
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Abeezee',
+                        color: Colors.black,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Image.asset(
+                      'assets/images/sparkle.png',
+                      height: 35,
+                      width: 35,
+                    ),
+                  ],
                 ),
+
                 SizedBox(height: 10),
                 Text(
-                  'Enter your email and password to access your account.',
+                  'Create your account and unlock a world of study.',
                   style: TextStyle(color: Colors.blueGrey, fontSize: 16, fontFamily: 'Abeezee'),
                 ),
                 SizedBox(height: 30),
@@ -55,61 +76,83 @@ class _SignInPageState extends State<SignInPage> {
                     style: TextStyle(color: Colors.red),
                   ),
 
+                _buildTextField(_nameController, 'Name', Icons.person),
+                SizedBox(height: 15),
+
                 _buildTextField(_emailController, 'Email', Icons.email),
                 SizedBox(height: 15),
 
                 _buildTextField(_passwordController, 'Password', Icons.lock, obscureText: true),
+                SizedBox(height: 15),
+
+                _buildTextField(_confirmPasswordController, 'Confirm Password', Icons.lock, obscureText: true),
+                SizedBox(height: 15),
+
+                // Change 'Program' to 'Department'
+                _buildTextField(_departmentController, 'Department', Icons.school),
                 SizedBox(height: 30),
 
-                // Sign In button
+                // Sign Up button
                 ElevatedButton(
                   onPressed: () async {
                     if (_formKey.currentState!.validate()) {
                       try {
-                        User? user = await _authService.signIn(
+                        // Call sign up and pass all the required fields
+                        await _authService.signUp(
                           _emailController.text.trim(),
                           _passwordController.text.trim(),
+                          _nameController.text.trim(),
+                          _departmentController.text.trim(), // This is the "department" field for lecturers
+                          'lecturer', // Role as lecturer
                         );
-                        if (user != null) {
-                          // Navigate to home or dashboard page
+                        if (mounted) { // Check if widget is still mounted before using context
                           Navigator.pushReplacement(
                             context,
-                            MaterialPageRoute(builder: (_) => RoleSelectionPage()), // Replace with your home page
+                            MaterialPageRoute(builder: (_) => SignInPage()),
                           );
                         }
                       } catch (e) {
-                        setState(() {
-                          errorMessage = e.toString();
-                        });
+                        if (mounted) { // Check if widget is still mounted before setting state
+                          setState(() {
+                            errorMessage = e.toString();
+                          });
+                        }
                       }
                     }
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple,
+                    backgroundColor: Colors.purple[400],
                     padding: EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     minimumSize: Size(double.infinity, 50),
                   ),
                   child: Text(
-                    'Sign In',
+                    'Sign Up',
                     style: TextStyle(fontSize: 18, color: Colors.white),
                   ),
                 ),
                 SizedBox(height: 15),
 
-                // Sign Up button
+                // Sign In button
                 TextButton(
                   onPressed: () {
                     Navigator.pushReplacement(
                       context,
-                      MaterialPageRoute(builder: (_) => LecturerSignUpPage()), // Change to StudentSignUpPage if needed
+                      MaterialPageRoute(builder: (_) => SignInPage()),
                     );
                   },
-                  child: Text(
-                    'Don\'t have an account? Sign Up',
-                    style: TextStyle(color: Colors.blue),
+                  child: Align(
+                    alignment: Alignment.centerLeft, // Aligns the text to the left
+                    child: Text(
+                      'Already have an account? Sign In',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        fontFamily: 'Abeezee',
+                        fontSize: 18, // Font size set to 18
+                      ),
+                    ),
                   ),
-                ),
+                )
               ],
             ),
           ),
@@ -144,6 +187,9 @@ class _SignInPageState extends State<SignInPage> {
         }
         if (label == 'Password' && val.length < 6) {
           return 'Password must be at least 6 characters';
+        }
+        if (label == 'Confirm Password' && val != _passwordController.text) {
+          return 'Passwords do not match';
         }
         return null;
       },

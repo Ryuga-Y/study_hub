@@ -3,11 +3,13 @@ import 'auth_service.dart';
 import 'package:study_hub/Authentication/sign_in.dart';
 
 class StudentSignUpPage extends StatefulWidget {
+  const StudentSignUpPage({super.key});
+
   @override
-  _StudentSignUpPageState createState() => _StudentSignUpPageState();
+  StudentSignUpPageState createState() => StudentSignUpPageState();
 }
 
-class _StudentSignUpPageState extends State<StudentSignUpPage> {
+class StudentSignUpPageState extends State<StudentSignUpPage> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -22,27 +24,48 @@ class _StudentSignUpPageState extends State<StudentSignUpPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text('Join Study Hub Today'),
+        title: Text(''),
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
           onPressed: () {
             Navigator.pop(context); // Go back to the previous page
           },
         ),
-        backgroundColor: Colors.blueAccent,
+        backgroundColor: Colors.white,
       ),
       body: Padding(
         padding: EdgeInsets.all(16),
         child: Form(
           key: _formKey,
-          child: SingleChildScrollView( // To avoid overflow on smaller screens
+          child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Title and subtitle
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Join Study Hub Today',
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Abeezee',
+                        color: Colors.black,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Image.asset(
+                      'assets/images/sparkle.png',
+                      height: 35,
+                      width: 35,
+                    ),
+                  ],
+                ),
+
+                SizedBox(height: 10),
                 Text(
                   'Create your account and unlock a world of study.',
-                  style: TextStyle(color: Colors.blueGrey, fontSize: 16),
+                  style: TextStyle(color: Colors.blueGrey, fontSize: 16, fontFamily: 'Abeezee'),
                 ),
                 SizedBox(height: 30),
 
@@ -53,23 +76,18 @@ class _StudentSignUpPageState extends State<StudentSignUpPage> {
                     style: TextStyle(color: Colors.red),
                   ),
 
-                // Name input field
                 _buildTextField(_nameController, 'Name', Icons.person),
                 SizedBox(height: 15),
 
-                // Email input field
                 _buildTextField(_emailController, 'Email', Icons.email),
                 SizedBox(height: 15),
 
-                // Password input field
                 _buildTextField(_passwordController, 'Password', Icons.lock, obscureText: true),
                 SizedBox(height: 15),
 
-                // Confirm Password input field
                 _buildTextField(_confirmPasswordController, 'Confirm Password', Icons.lock, obscureText: true),
                 SizedBox(height: 15),
 
-                // Program input field
                 _buildTextField(_programController, 'Program', Icons.school),
                 SizedBox(height: 30),
 
@@ -78,10 +96,15 @@ class _StudentSignUpPageState extends State<StudentSignUpPage> {
                   onPressed: () async {
                     if (_formKey.currentState!.validate()) {
                       try {
+                        // Call sign up and pass all the required fields
                         await _authService.signUp(
                           _emailController.text.trim(),
                           _passwordController.text.trim(),
+                          _nameController.text.trim(),
+                          _programController.text.trim(), // This is the "program" field for students
+                          'student', // Role as student
                         );
+
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(builder: (_) => SignInPage()),
@@ -94,11 +117,10 @@ class _StudentSignUpPageState extends State<StudentSignUpPage> {
                     }
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple, // Button color
+                    backgroundColor: Colors.purple[400],
                     padding: EdgeInsets.symmetric(vertical: 15),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    minimumSize: Size(double.infinity, 50),
                   ),
                   child: Text(
                     'Sign Up',
@@ -115,11 +137,18 @@ class _StudentSignUpPageState extends State<StudentSignUpPage> {
                       MaterialPageRoute(builder: (_) => SignInPage()),
                     );
                   },
-                  child: Text(
-                    'Already have an account? Sign In',
-                    style: TextStyle(color: Colors.blue),
+                  child: Align(
+                    alignment: Alignment.centerLeft, // Aligns the text to the left
+                    child: Text(
+                      'Already have an account? Sign In',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        fontFamily: 'Abeezee',
+                        fontSize: 18, // Font size set to 18
+                      ),
+                    ),
                   ),
-                ),
+                )
               ],
             ),
           ),
@@ -128,10 +157,7 @@ class _StudentSignUpPageState extends State<StudentSignUpPage> {
     );
   }
 
-  // Helper method for building text fields
-  Widget _buildTextField(
-      TextEditingController controller, String label, IconData icon,
-      {bool obscureText = false}) {
+  Widget _buildTextField(TextEditingController controller, String label, IconData icon, {bool obscureText = false}) {
     return TextFormField(
       controller: controller,
       decoration: InputDecoration(
