@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:study_hub/Authentication/role_selection.dart';
+import 'package:study_hub/lecturer_home.dart';
 import 'package:study_hub/student_home.dart'; // Replace with actual student home page
 //import 'package:study_hub/lecturer_home.dart';  // Replace with actual lecturer home page
 //import 'package:study_hub/admin_home.dart'; // Replace with actual admin home page
@@ -55,7 +56,7 @@ class _SignInPageState extends State<SignInPage> {
           } else if (role == 'lecturer') {
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (_) => StudentHomePage()),
+              MaterialPageRoute(builder: (_) => LecturerHomePage()),
             );
           } else if (role == 'admin') {
             Navigator.pushReplacement(

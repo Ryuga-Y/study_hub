@@ -1,9 +1,9 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:study_hub/student_home.dart';
 import 'Authentication/role_selection.dart';
 import 'Authentication/sign_in.dart';
 import 'Stu_courseState.dart';
+import 'lecturer_home.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,7 +16,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: StudentHomePage(),
+      home: OnboardingScreen(),
       routes: {
         '/roleSelection': (context) => RoleSelectionPage(), // Navigate to RoleSelectionPage
         '/signIn': (context) => SignInPage(), // Navigate to SignInPage
