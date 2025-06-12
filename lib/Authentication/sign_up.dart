@@ -1,30 +1,80 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'auth_service.dart';
-import 'package:study_hub/Authentication/sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:study_hub/Authentication/sign_in.dart'; // Assuming you have this page
 
-class StudentSignUpPage extends StatefulWidget {
-  const StudentSignUpPage({super.key});
+class SignUpPage extends StatefulWidget {
+  final String role; // The role passed from RoleSelectionPage (student or lecturer)
+
+  const SignUpPage({super.key, required this.role});
 
   @override
-  StudentSignUpPageState createState() => StudentSignUpPageState();
+  _SignUpPageState createState() => _SignUpPageState();
 }
 
-class StudentSignUpPageState extends State<StudentSignUpPage> {
+class _SignUpPageState extends State<SignUpPage> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _programController = TextEditingController();
-  final AuthService _authService = AuthService();
+  //final _programOrDepartmentController = TextEditingController();
   String? errorMessage;
+
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  String? _selectedProgramOrDepartment;
+
+  // Define lists of programs for students and departments for lecturers
+  final List<String> studentPrograms = ['Computer Science', 'Electrical Engineering', 'Mechanical Engineering'];
+  final List<String> lecturerDepartments = ['Mathematics', 'Physics', 'Computer Science'];
+
+  // Sign Up method
+  Future<void> signUp() async {
+    try {
+      // Create a new user with Firebase Authentication
+      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+
+      // Get the user data
+      User? user = userCredential.user;
+
+      if (user != null) {
+        // Reference to the users collection in Firestore
+        CollectionReference users = _firestore.collection('users');
+
+        // Add user data to Firestore
+        await users.doc(user.uid).set({
+          'name': _nameController.text.trim(),
+          'email': _emailController.text.trim(),
+          'role': widget.role, // Store role as either 'student' or 'lecturer'
+          'uid': user.uid,
+          'createdAt': FieldValue.serverTimestamp(), // Timestamp of when the account was created
+          widget.role == 'student' ? 'program' : 'department': _selectedProgramOrDepartment,
+        });
+
+        // Navigate to sign-in page after successful signup
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => SignInPage()),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        errorMessage = e.message ?? 'Error during sign-up';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(''),
+        title: Text(widget.role == 'student' ? 'Student Sign Up' : 'Lecturer Sign Up'),
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
           onPressed: () {
@@ -61,10 +111,9 @@ class StudentSignUpPageState extends State<StudentSignUpPage> {
                     ),
                   ],
                 ),
-
                 SizedBox(height: 10),
                 Text(
-                  'Create your account and unlock a world of study.',
+                  widget.role == 'student' ? 'Create your Student account and unlock a world of study.' : 'Create your Lecturer account and unlock a world of study',
                   style: TextStyle(color: Colors.blueGrey, fontSize: 16, fontFamily: 'Abeezee'),
                 ),
                 SizedBox(height: 30),
@@ -88,32 +137,53 @@ class StudentSignUpPageState extends State<StudentSignUpPage> {
                 _buildTextField(_confirmPasswordController, 'Confirm Password', Icons.lock, obscureText: true),
                 SizedBox(height: 15),
 
-                _buildTextField(_programController, 'Program', Icons.school),
+                // Dropdown for program or department based on the role
+                DropdownButtonFormField<String>(
+                  value: _selectedProgramOrDepartment,
+                  onChanged: (newValue) {
+                    setState(() {
+                      _selectedProgramOrDepartment = newValue;
+                    });
+                  },
+                  items: widget.role == 'student'
+                      ? studentPrograms.map((program) {
+                    return DropdownMenuItem<String>(
+                      value: program,
+                      child: Text(program),
+                    );
+                  }).toList()
+                      : lecturerDepartments.map((department) {
+                    return DropdownMenuItem<String>(
+                      value: department,
+                      child: Text(department),
+                    );
+                  }).toList(),
+                  decoration: InputDecoration(
+                    labelText: widget.role == 'student' ? 'Program' : 'Department',
+                    prefixIcon: Icon(Icons.school, color: Colors.blueAccent),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.blueAccent),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please select ${widget.role == 'student' ? 'program' : 'department'}';
+                    }
+                    return null;
+                  },
+                ),
                 SizedBox(height: 30),
 
                 // Sign Up button
                 ElevatedButton(
                   onPressed: () async {
                     if (_formKey.currentState!.validate()) {
-                      try {
-                        // Call sign up and pass all the required fields
-                        await _authService.signUp(
-                          _emailController.text.trim(),
-                          _passwordController.text.trim(),
-                          _nameController.text.trim(),
-                          _programController.text.trim(), // This is the "program" field for students
-                          'student', // Role as student
-                        );
-
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (_) => SignInPage()),
-                        );
-                      } catch (e) {
-                        setState(() {
-                          errorMessage = e.toString();
-                        });
-                      }
+                      await signUp();
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -128,27 +198,6 @@ class StudentSignUpPageState extends State<StudentSignUpPage> {
                   ),
                 ),
                 SizedBox(height: 15),
-
-                // Sign In button
-                TextButton(
-                  onPressed: () {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (_) => SignInPage()),
-                    );
-                  },
-                  child: Align(
-                    alignment: Alignment.centerLeft, // Aligns the text to the left
-                    child: Text(
-                      'Already have an account? Sign In',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        fontFamily: 'Abeezee',
-                        fontSize: 18, // Font size set to 18
-                      ),
-                    ),
-                  ),
-                )
               ],
             ),
           ),

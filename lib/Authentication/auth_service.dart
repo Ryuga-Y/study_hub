@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
+//import 'package:flutter/material.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -40,20 +40,32 @@ class AuthService {
     }
   }
 
-  // Sign In method
   Future<User?> signIn(String email, String password) async {
     try {
-      // Sign in with email and password using Firebase Authentication
       UserCredential userCredential = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
-
-      // Return the signed-in user
       return userCredential.user;
     } on FirebaseAuthException catch (e) {
-      // Handle sign-in errors
-      throw e.message ?? 'Error during sign-in';
+      // Print detailed logs for debugging (in development, you can remove this later)
+      print("FirebaseAuthException: ${e.code} - ${e.message}");
+
+      // Return user-friendly error messages based on the Firebase error codes
+      if (e.code == 'invalid-email') {
+        throw 'The email address is badly formatted.';
+      } else if (e.code == 'user-not-found') {
+        throw 'No user found for that email.';
+      } else if (e.code == 'wrong-password') {
+        throw 'Incorrect password. Please try again.';
+      } else {
+        throw 'An error occurred. Please try again later.';
+      }
+
+    } catch (e) {
+      // Catch other errors (non-Firebase related)
+      print('Unknown Error: $e');
+      throw 'Something went wrong. Please try again later.';
     }
   }
 

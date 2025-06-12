@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'lecturer_sign_up.dart';
-import 'student_sign_up.dart';
+import 'package:study_hub/Authentication/sign_up.dart';
 
 class RoleSelectionPage extends StatelessWidget {
   @override
@@ -42,11 +41,11 @@ class RoleSelectionPage extends StatelessWidget {
               // Student Button
               GestureDetector(
                 onTap: () {
-                  // Navigate to Student SignUp page
+                  // Navigate to UnifiedSignUpPage with role 'student'
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => StudentSignUpPage(),
+                      builder: (context) => SignUpPage(role: 'student'),
                     ),
                   );
                 },
@@ -91,11 +90,10 @@ class RoleSelectionPage extends StatelessWidget {
               // Lecturer Button
               GestureDetector(
                 onTap: () {
-                  // Navigate to Lecturer SignUp page
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => LecturerSignUpPage(),
+                      builder: (context) => SignUpPage(role: 'lecturer'),
                     ),
                   );
                 },

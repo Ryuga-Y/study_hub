@@ -1,29 +1,4 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:study_hub/student_home.dart';
-import 'Authentication/role_selection.dart';
-import 'Authentication/sign_in.dart';
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(); // Firebase initialization
-  runApp(MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: StudentHomePage(),
-      routes: {
-        '/roleSelection': (context) => RoleSelectionPage(), // Navigate to RoleSelectionPage
-        '/signIn': (context) => SignInPage(), // Navigate to SignInPage
-      },
-    );
-  }
-}
-
 
 class OnboardingScreen extends StatelessWidget {
   @override
