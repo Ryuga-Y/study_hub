@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:study_hub/student_home.dart';
 import 'Authentication/role_selection.dart';
 import 'Authentication/sign_in.dart';
+import 'Stu_courseState.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
