@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:study_hub/Authentication/sign_in.dart';
+import 'package:study_hub/course_page.dart';
 import 'create_course.dart';
 
 class LecturerHomePage extends StatefulWidget {
@@ -16,7 +17,8 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
   String? lecturerUid;
   String? lecturerName;
   String? lecturerEmail;
-  List<Map<String, dynamic>> courses = []; // List to store courses created by the lecturer
+  List<Map<String, dynamic>> courses =
+  []; // List to store courses created by the lecturer
   String? errorMessage;
   int _currentIndex = 2; // Track the current tab index
 
@@ -36,9 +38,10 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
 
       // Fetch lecturer name from Firestore
       try {
-        DocumentSnapshot lecturerData = await _firestore
+        DocumentSnapshot lecturerData =
+        await _firestore
             .collection('users')
-            .doc(lecturerUid) // Access the lecturer's document using their UID
+            .doc(lecturerUid)
             .get();
 
         if (lecturerData.exists) {
@@ -51,16 +54,17 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
         // Fetch courses created by this lecturer from Firestore
         var courseData = await _firestore
             .collection('users')
-            .doc(lecturerUid) // Use the lecturer's UID to get their document
-            .collection('courses') // Access the 'courses' subcollection
+            .doc(lecturerUid)
+            .collection('courses')
             .get(); // Get all courses created by the lecturer
 
         setState(() {
           courses = courseData.docs.map((doc) {
             return {
-              'courseId': doc.id,  // Use document ID as courseId
+              'courseId': doc.id, // Use document ID as courseId
               'title': doc['title'],
               'description': doc['description'],
+              'lecturerName': lecturerName, // Include the lecturer's name
             };
           }).toList();
         });
@@ -76,10 +80,22 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
   void _createCourse() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => CreateCoursePage(lecturerUid: lecturerUid!)),
+      MaterialPageRoute(
+        builder: (context) => CreateCoursePage(lecturerUid: lecturerUid!),
+      ),
     ).then((_) {
       _fetchLecturerData(); // Reload courses after creating a new one
     });
+  }
+
+  // Navigate to the course details page
+  void _navigateToCoursePage(String courseId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CoursePage(courseId: courseId),
+      ),
+    );
   }
 
   // Log out the user
@@ -87,13 +103,14 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
     await _auth.signOut();
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => SignInPage()), // Replace with your login page
+      MaterialPageRoute(
+        builder: (context) => SignInPage(),
+      ), // Replace with your login page
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Get screen width and height using MediaQuery for responsiveness
     double screenWidth = MediaQuery.of(context).size.width;
 
     return Scaffold(
@@ -122,7 +139,6 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           child: ListView(
             padding: EdgeInsets.zero,
             children: [
-              // Profile Header
               DrawerHeader(
                 decoration: BoxDecoration(
                   color: Colors.blueAccent,
@@ -137,22 +153,29 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   children: [
                     CircleAvatar(
                       radius: screenWidth < 600 ? 40 : 50,
-                      backgroundImage: AssetImage('assets/images/profile_pic.png'),
+                      backgroundImage: AssetImage(
+                        'assets/images/profile_pic.png',
+                      ),
                     ),
                     SizedBox(height: 10),
                     Text(
                       lecturerName ?? 'Name not available',
-                      style: TextStyle(color: Colors.white, fontSize: screenWidth < 600 ? 16 : 20, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: screenWidth < 600 ? 16 : 20,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     Text(
                       lecturerEmail ?? 'Email not available',
-                      style: TextStyle(color: Colors.white, fontSize: screenWidth < 600 ? 12 : 14),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: screenWidth < 600 ? 12 : 14,
+                      ),
                     ),
                   ],
                 ),
               ),
-
-              // Drawer items
               Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Column(
@@ -160,13 +183,16 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   children: [
                     ElevatedButton(
                       onPressed: () {
-                        // Navigate to Edit Profile page
                         Navigator.pushNamed(context, '/editProfile');
                       },
                       child: Text('Edit Profile'),
                       style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.blueAccent, backgroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: screenWidth < 600 ? 20 : 30, vertical: 10),
+                        foregroundColor: Colors.blueAccent,
+                        backgroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: screenWidth < 600 ? 20 : 30,
+                          vertical: 10,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
                         ),
@@ -175,13 +201,16 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                     SizedBox(height: 10),
                     ElevatedButton(
                       onPressed: () {
-                        // Navigate to Calendar page
                         Navigator.pushNamed(context, '/calendar');
                       },
                       child: Text('Calendar'),
                       style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.blueAccent, backgroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: screenWidth < 600 ? 20 : 30, vertical: 10),
+                        foregroundColor: Colors.blueAccent,
+                        backgroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: screenWidth < 600 ? 20 : 30,
+                          vertical: 10,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
                         ),
@@ -193,8 +222,12 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                       onPressed: _logOut,
                       child: Text('Log Out'),
                       style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.white, backgroundColor: Colors.redAccent,
-                        padding: EdgeInsets.symmetric(horizontal: screenWidth < 600 ? 20 : 30, vertical: 10),
+                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.redAccent,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: screenWidth < 600 ? 20 : 30,
+                          vertical: 10,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
                         ),
@@ -214,14 +247,14 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Heading for the courses
               Text(
                 'Courses You Handle',
-                style: TextStyle(fontSize: screenWidth < 600 ? 20 : 24, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: screenWidth < 600 ? 20 : 24,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               SizedBox(height: 20),
-
-              // Error message display if any
               if (errorMessage != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 16.0),
@@ -230,8 +263,6 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                     style: TextStyle(color: Colors.red),
                   ),
                 ),
-
-              // Display courses if there are any
               Expanded(
                 child: courses.isNotEmpty
                     ? ListView.builder(
@@ -242,7 +273,9 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                       margin: EdgeInsets.symmetric(vertical: 8),
                       child: ListTile(
                         title: Text(courses[index]['title']),
-                        subtitle: Text(courses[index]['description']),
+                        subtitle: Text(
+                            '${courses[index]['description']} \nLecturer: ${courses[index]['lecturerName']}'),
+                        onTap: () => _navigateToCoursePage(courses[index]['courseId']),
                       ),
                     );
                   },
@@ -263,44 +296,39 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
         backgroundColor: Colors.blueAccent,
         child: Icon(Icons.add),
       ),
-      bottomNavigationBar: Theme(
-        data: ThemeData(
-          bottomNavigationBarTheme: BottomNavigationBarThemeData(
-            backgroundColor: Colors.red, // Set red background color here
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        selectedItemColor: Colors.blueAccent,
+        unselectedItemColor: Colors.black,
+        backgroundColor: Colors.grey[300],
+        type: BottomNavigationBarType.fixed,
+        items: [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people),
+            label: 'Community',
           ),
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex, // Use the local _currentIndex
-          onTap: (index) {
-            setState(() {
-              _currentIndex = index;
-            });
-          },
-          selectedItemColor: Colors.blueAccent,
-          unselectedItemColor: Colors.black,
-          items: [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.people),
-              label: 'Community',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.chat),
-              label: 'Chat',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.book),
-              label: 'Course',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.flag),
-              label: 'Goal',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person),
-              label: 'Profile',
-            ),
-          ],
-        ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.chat),
+            label: 'Chat',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.book),
+            label: 'Course',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.flag),
+            label: 'Goal',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person),
+            label: 'Profile',
+          ),
+        ],
       ),
     );
   }
