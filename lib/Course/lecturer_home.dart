@@ -2,7 +2,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:study_hub/Authentication/sign_in.dart';
-import 'package:study_hub/course_page.dart';
+
+import 'course_page.dart';
 import 'create_course.dart';
 
 class LecturerHomePage extends StatefulWidget {

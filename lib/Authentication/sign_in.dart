@@ -2,7 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:study_hub/Authentication/role_selection.dart';
-import 'package:study_hub/lecturer_home.dart';
+import 'package:study_hub/Course/lecturer_home.dart';
 import 'package:study_hub/student_home.dart';
 //import 'package:study_hub/admin_home.dart'; // Replace with actual admin home page
 

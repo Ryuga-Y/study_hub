@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:study_hub/create_assignment.dart';
-import 'package:study_hub/create_material.dart';
-import 'package:study_hub/material_details.dart';
+import 'package:study_hub/Course/create_assignment.dart';
+
 import 'assignment_details.dart';
+import 'create_material.dart';
+import 'material_details.dart';
+
 
 class CoursePage extends StatefulWidget {
   final String courseId;

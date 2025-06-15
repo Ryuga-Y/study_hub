@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:study_hub/Authentication/sign_up.dart';
+import 'package:study_hub/Authentication/admin_sign_up.dart';
 
 class RoleSelectionPage extends StatelessWidget {
   @override
@@ -10,7 +11,7 @@ class RoleSelectionPage extends StatelessWidget {
 
     // Define button sizes based on screen size for responsiveness
     double buttonWidth = screenWidth * 0.75;
-    double buttonHeight = screenHeight * 0.30;
+    double buttonHeight = screenHeight * 0.25; // Reduced height to fit 3 buttons
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -41,7 +42,7 @@ class RoleSelectionPage extends StatelessWidget {
               // Student Button
               GestureDetector(
                 onTap: () {
-                  // Navigate to UnifiedSignUpPage with role 'student'
+                  // Navigate to SignUpPage with role 'student'
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -69,15 +70,15 @@ class RoleSelectionPage extends StatelessWidget {
                       children: [
                         Image.asset(
                           'assets/images/student.png',
-                          height: 100,
-                          width: 100,
+                          height: 80,
+                          width: 80,
                         ),
-                        SizedBox(height: 10),
+                        SizedBox(height: 8),
                         Text(
                           'Student',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 30,
+                            fontSize: 24,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -86,7 +87,7 @@ class RoleSelectionPage extends StatelessWidget {
                   ),
                 ),
               ),
-              SizedBox(height: 50),
+              SizedBox(height: 30),
               // Lecturer Button
               GestureDetector(
                 onTap: () {
@@ -117,15 +118,64 @@ class RoleSelectionPage extends StatelessWidget {
                       children: [
                         Image.asset(
                           'assets/images/lecturer.png',
-                          height: 100,
-                          width: 100,
+                          height: 80,
+                          width: 80,
                         ),
-                        SizedBox(height: 10),
+                        SizedBox(height: 8),
                         Text(
                           'Lecturer',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 30,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(height: 30),
+              // Admin Button
+              GestureDetector(
+                onTap: () {
+                  // Navigate to AdminSignUpPage with role 'admin'
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => AdminSignUpPage(),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: buttonWidth,
+                  height: buttonHeight,
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 6,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Image.asset(
+                          'assets/images/admin.png',
+                          height: 80,
+                          width: 80,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Admin',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
