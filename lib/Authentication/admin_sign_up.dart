@@ -17,7 +17,6 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
   final _organizationNameController = TextEditingController();
   final _organizationCodeController = TextEditingController();
   final _fullNameController = TextEditingController();
-  final _phoneController = TextEditingController();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -31,7 +30,6 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
     _organizationNameController.dispose();
     _organizationCodeController.dispose();
     _fullNameController.dispose();
-    _phoneController.dispose();
     super.dispose();
   }
 
@@ -53,20 +51,42 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
       // Generate organization ID
       String organizationId = _generateOrganizationId();
 
-      // Create organization document
-      await _createOrganization(organizationId, userCredential.user!.uid);
-
-      // Create admin user document
       await _createAdminUser(userCredential.user!.uid, organizationId);
 
-      // Update user display name
+      await _createOrganization(organizationId, userCredential.user!.uid);
+
       await userCredential.user!.updateDisplayName(_fullNameController.text.trim());
 
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Admin account created successfully!'),
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Admin account created successfully!',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      'Organization code: ${_organizationCodeController.text.trim().toUpperCase()}',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: EdgeInsets.all(20),
+          duration: Duration(seconds: 4),
         ),
       );
 
@@ -94,15 +114,34 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
         SnackBar(
           content: Text(errorMessage),
           backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: EdgeInsets.all(20),
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('An unexpected error occurred'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      // Check if it's a duplicate organization code error
+      if (e.toString().contains('organization-code-exists')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Organization code already exists. Please choose a different code.'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: EdgeInsets.all(20),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: EdgeInsets.all(20),
+          ),
+        );
+      }
     } finally {
       setState(() {
         _isLoading = false;
@@ -119,7 +158,32 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
     return digest.toString().substring(0, 16);
   }
 
+  Future<void> _createAdminUser(String uid, String organizationId) async {
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .set({
+      'email': _emailController.text.trim(),
+      'fullName': _fullNameController.text.trim(),
+      'role': 'admin',
+      'organizationId': organizationId,
+      'organizationName': _organizationNameController.text.trim(),
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'isActive': true,
+      'permissions': [
+        'manage_organization',
+        'manage_faculties',
+        'manage_programs',
+        'manage_users',
+        'view_analytics',
+        'manage_settings'
+      ]
+    });
+  }
+
   Future<void> _createOrganization(String organizationId, String adminUid) async {
+    // Create organization document
     await FirebaseFirestore.instance
         .collection('organizations')
         .doc(organizationId)
@@ -137,6 +201,8 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
       }
     });
 
+    // Create subcollections individually (not in batch) to handle permissions properly
+
     // Create initial faculties subcollection with a placeholder
     await FirebaseFirestore.instance
         .collection('organizations')
@@ -149,29 +215,57 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
       'isActive': false,
       'createdAt': FieldValue.serverTimestamp(),
     });
-  }
 
-  Future<void> _createAdminUser(String uid, String organizationId) async {
+    // Create settings subcollection
     await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
+        .collection('organizations')
+        .doc(organizationId)
+        .collection('settings')
+        .doc('general')
         .set({
-      'email': _emailController.text.trim(),
-      'fullName': _fullNameController.text.trim(),
-      'phone': _phoneController.text.trim(),
-      'role': 'admin',
-      'organizationId': organizationId,
-      'createdAt': FieldValue.serverTimestamp(),
+      'allowStudentSelfRegistration': true,
+      'allowLecturerSelfRegistration': false,
+      'requireEmailVerification': true,
       'updatedAt': FieldValue.serverTimestamp(),
-      'isActive': true,
-      'permissions': [
-        'manage_organization',
-        'manage_faculties',
-        'manage_programs',
-        'manage_users',
-        'view_analytics',
-        'manage_settings'
-      ]
+    });
+
+    // Create initial audit log entry
+    await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(organizationId)
+        .collection('audit_logs')
+        .add({
+      'action': 'organization_created',
+      'performedBy': adminUid,
+      'timestamp': FieldValue.serverTimestamp(),
+      'details': {
+        'organizationName': _organizationNameController.text.trim(),
+        'organizationCode': _organizationCodeController.text.trim().toUpperCase(),
+      }
+    });
+
+    // Create admin activity entry
+    await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(organizationId)
+        .collection('admin_activities')
+        .add({
+      'adminId': adminUid,
+      'action': 'admin_account_created',
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    // Create admin settings
+    await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(organizationId)
+        .collection('admin_settings')
+        .doc(adminUid)
+        .set({
+      'notificationsEnabled': true,
+      'emailAlerts': true,
+      'dashboardLayout': 'default',
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -270,13 +364,14 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
               // Organization Code
               TextFormField(
                 controller: _organizationCodeController,
+                textCapitalization: TextCapitalization.characters,
                 decoration: InputDecoration(
                   labelText: 'Organization Code',
                   prefixIcon: Icon(Icons.code),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  helperText: 'Unique identifier for your organization',
+                  helperText: 'Unique identifier for your organization (e.g., TARC, UM, USM)',
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
@@ -284,6 +379,12 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
                   }
                   if (value.trim().length < 3) {
                     return 'Code must be at least 3 characters';
+                  }
+                  if (value.trim().length > 10) {
+                    return 'Code must be less than 10 characters';
+                  }
+                  if (!RegExp(r'^[A-Za-z0-9]+$').hasMatch(value.trim())) {
+                    return 'Code can only contain letters and numbers';
                   }
                   return null;
                 },
@@ -337,26 +438,6 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
                   }
                   if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
                     return 'Please enter a valid email';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 15),
-
-              // Phone
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(
-                  labelText: 'Phone Number',
-                  prefixIcon: Icon(Icons.phone),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter your phone number';
                   }
                   return null;
                 },
@@ -437,7 +518,21 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
                   ),
                 ),
                 child: _isLoading
-                    ? CircularProgressIndicator(color: Colors.white)
+                    ? Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    Text('Creating Account...'),
+                  ],
+                )
                     : Text(
                   'Create Admin Account',
                   style: TextStyle(
@@ -447,6 +542,30 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
                 ),
               ),
               SizedBox(height: 20),
+
+              // Already have account
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Already have an account? ',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pushReplacementNamed(context, '/sign_in');
+                    },
+                    child: Text(
+                      'Sign In',
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 10),
 
               // Terms and Conditions
               Text(

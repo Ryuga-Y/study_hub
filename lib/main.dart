@@ -1,8 +1,10 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'Authentication/admin_sign_up.dart';
 import 'Authentication/role_selection.dart';
 import 'Authentication/sign_in.dart';
 import 'Stu_courseState.dart';
+import 'admin/admin_dashboard.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +21,8 @@ class MyApp extends StatelessWidget {
       routes: {
         '/roleSelection': (context) => RoleSelectionPage(), // Navigate to RoleSelectionPage
         '/signIn': (context) => SignInPage(), // Navigate to SignInPage
+        '/admin_signup': (context) => AdminSignUpPage(),
+        '/admin_dashboard': (context) => AdminDashboard(),
       },
     );
   }

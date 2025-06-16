@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:study_hub/Authentication/role_selection.dart';
 import 'package:study_hub/Course/lecturer_home.dart';
 import 'package:study_hub/student_home.dart';
-//import 'package:study_hub/admin_home.dart'; // Replace with actual admin home page
+import 'package:study_hub/admin/admin_dashboard.dart'; // Import admin dashboard
 
 class SignInPage extends StatefulWidget {
   @override
@@ -46,8 +46,23 @@ class _SignInPageState extends State<SignInPage> {
         var userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
         if (userDoc.exists) {
-          String role = userDoc.data()?['role'] ?? '';
-          String userName = userDoc.data()?['name'] ?? 'User';
+          final userData = userDoc.data()!;
+          String role = userData['role'] ?? '';
+          String userName = userData['fullName'] ?? userData['name'] ?? 'User';
+          bool isActive = userData['isActive'] ?? true;
+
+          // Check if user account is active
+          if (!isActive) {
+            // Sign out the user
+            await _auth.signOut();
+
+            setState(() {
+              _isLoading = false;
+              errorMessage = 'Your account has been deactivated. Please contact support.';
+            });
+            _showErrorSnackbar('Your account has been deactivated. Please contact support.');
+            return;
+          }
 
           // Stop loading
           setState(() {
@@ -73,7 +88,7 @@ class _SignInPageState extends State<SignInPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            'Welcome back, $userName! 👋',
+                            'Welcome back, ${userName.split(' ').first}! 👋',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
@@ -82,7 +97,7 @@ class _SignInPageState extends State<SignInPage> {
                           ),
                           SizedBox(height: 4),
                           Text(
-                            'Successfully signed in as ${role}',
+                            'Successfully signed in as ${role == 'admin' ? 'Administrator' : role}',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.white.withValues(alpha: 0.9),
@@ -121,7 +136,7 @@ class _SignInPageState extends State<SignInPage> {
           } else if (role == 'admin') {
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (_) => StudentHomePage()),
+              MaterialPageRoute(builder: (_) => AdminDashboard()),
             );
           } else {
             setState(() {
@@ -318,8 +333,9 @@ class _SignInPageState extends State<SignInPage> {
       appBar: AppBar(
         title: Text('Sign In'),
         backgroundColor: Colors.white,
+        elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back),
+          icon: Icon(Icons.arrow_back, color: Colors.black),
           onPressed: () {
             Navigator.pushReplacement(
               context,
@@ -528,6 +544,21 @@ class _SignInPageState extends State<SignInPage> {
                           ),
                         ],
                       ),
+                    ),
+                  ),
+                ),
+
+                // Admin sign up hint
+                Center(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Are you an organization admin? Create your organization account',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 ),

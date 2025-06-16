@@ -18,77 +18,149 @@ class _SignUpPageState extends State<SignUpPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _organizationCodeController = TextEditingController();
+
   String? errorMessage;
-  bool _isLoading = false; // Track loading state
+  bool _isLoading = false;
+  bool _isCheckingOrgCode = false;
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  String? _selectedFaculty;
-  String? _selectedProgram;
+  String? _organizationId;
+  String? _organizationName;
+  String? _selectedFacultyId;
+  String? _selectedProgramId;
 
-  // Faculty list with short forms and full names
-  final Map<String, String> faculties = {
-    'FAFB': 'Faculty of Accountancy, Finance and Business',
-    'FOAS': 'Faculty of Applied Sciences',
-    'FOCS': 'Faculty of Computing and Information Technology',
-    'FOBE': 'Faculty of Built Environment',
-    'FOET': 'Faculty of Engineering and Technology',
-    'FCCI': 'Faculty of Communication and Creative Industries',
-    'FSSH': 'Faculty of Social Science and Humanities',
-  };
+  List<Map<String, dynamic>> _faculties = [];
+  List<Map<String, dynamic>> _programs = [];
 
-  // Programs for each faculty (3 programs per faculty)
-  final Map<String, List<String>> facultyPrograms = {
-    'FAFB': [
-      'Bachelor of Accounting',
-      'Bachelor of Finance',
-      'Bachelor of Business Administration'
-    ],
-    'FOAS': [
-      'Bachelor of Science (Biology)',
-      'Bachelor of Science (Chemistry)',
-      'Bachelor of Science (Physics)'
-    ],
-    'FOCS': [
-      'Bachelor of Computer Science',
-      'Bachelor of Information Technology',
-      'Bachelor of Software Engineering'
-    ],
-    'FOBE': [
-      'Bachelor of Architecture',
-      'Bachelor of Quantity Surveying',
-      'Bachelor of Construction Management'
-    ],
-    'FOET': [
-      'Bachelor of Electrical Engineering',
-      'Bachelor of Mechanical Engineering',
-      'Bachelor of Civil Engineering'
-    ],
-    'FCCI': [
-      'Bachelor of Communication',
-      'Bachelor of Graphic Design',
-      'Bachelor of Multimedia'
-    ],
-    'FSSH': [
-      'Bachelor of Psychology',
-      'Bachelor of English Language',
-      'Bachelor of Public Relations'
-    ],
-  };
+  // Check if organization code exists and get organization details
+  Future<void> _checkOrganizationCode() async {
+    if (_organizationCodeController.text.trim().isEmpty) {
+      setState(() {
+        _organizationId = null;
+        _organizationName = null;
+        _faculties = [];
+        _programs = [];
+        _selectedFacultyId = null;
+        _selectedProgramId = null;
+      });
+      return;
+    }
 
-  // Get programs for selected faculty
-  List<String> getProgramsForFaculty() {
-    if (_selectedFaculty == null) return [];
-    return facultyPrograms[_selectedFaculty] ?? [];
+    setState(() {
+      _isCheckingOrgCode = true;
+    });
+
+    try {
+      String orgCode = _organizationCodeController.text.trim().toUpperCase();
+
+      // Query organizations by code
+      QuerySnapshot orgSnapshot = await _firestore
+          .collection('organizations')
+          .where('code', isEqualTo: orgCode)
+          .where('isActive', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (orgSnapshot.docs.isNotEmpty) {
+        DocumentSnapshot orgDoc = orgSnapshot.docs.first;
+
+        setState(() {
+          _organizationId = orgDoc.id;
+          _organizationName = orgDoc['name'];
+          errorMessage = null;
+        });
+
+        // Load faculties for this organization
+        await _loadFaculties();
+      } else {
+        setState(() {
+          _organizationId = null;
+          _organizationName = null;
+          _faculties = [];
+          _programs = [];
+          _selectedFacultyId = null;
+          _selectedProgramId = null;
+          errorMessage = 'Invalid organization code';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        errorMessage = 'Error checking organization code';
+      });
+    } finally {
+      setState(() {
+        _isCheckingOrgCode = false;
+      });
+    }
   }
 
-  // Sign Up method with loading and snackbar
+  // Load faculties for the organization
+  Future<void> _loadFaculties() async {
+    if (_organizationId == null) return;
+
+    try {
+      QuerySnapshot facultySnapshot = await _firestore
+          .collection('organizations')
+          .doc(_organizationId)
+          .collection('faculties')
+          .where('isActive', isEqualTo: true)
+          .orderBy('name')
+          .get();
+
+      setState(() {
+        _faculties = facultySnapshot.docs.map((doc) => {
+          'id': doc.id,
+          'name': doc['name'],
+          'code': doc['code'],
+        }).toList();
+      });
+    } catch (e) {
+      print('Error loading faculties: $e');
+    }
+  }
+
+  // Load programs for selected faculty
+  Future<void> _loadPrograms(String facultyId) async {
+    if (_organizationId == null || facultyId.isEmpty) return;
+
+    try {
+      QuerySnapshot programSnapshot = await _firestore
+          .collection('organizations')
+          .doc(_organizationId)
+          .collection('faculties')
+          .doc(facultyId)
+          .collection('programs')
+          .where('isActive', isEqualTo: true)
+          .orderBy('name')
+          .get();
+
+      setState(() {
+        _programs = programSnapshot.docs.map((doc) => {
+          'id': doc.id,
+          'name': doc['name'],
+          'code': doc['code'],
+        }).toList();
+      });
+    } catch (e) {
+      print('Error loading programs: $e');
+    }
+  }
+
+  // Sign Up method
   Future<void> signUp() async {
-    // Start loading
+    if (_organizationId == null) {
+      setState(() {
+        errorMessage = 'Please enter a valid organization code';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
-      errorMessage = null; // Clear any previous errors
+      errorMessage = null;
     });
 
     try {
@@ -98,38 +170,70 @@ class _SignUpPageState extends State<SignUpPage> {
         password: _passwordController.text.trim(),
       );
 
-      // Get the user data
       User? user = userCredential.user;
 
       if (user != null) {
-        // Reference to the users collection in Firestore
-        CollectionReference users = _firestore.collection('users');
+        // Update display name
+        await user.updateDisplayName(_nameController.text.trim());
+
+        // Get selected faculty details
+        Map<String, dynamic>? selectedFaculty = _faculties.firstWhere(
+              (f) => f['id'] == _selectedFacultyId,
+          orElse: () => {},
+        );
 
         // Prepare user data
         Map<String, dynamic> userData = {
-          'name': _nameController.text.trim(),
+          'fullName': _nameController.text.trim(),
           'email': _emailController.text.trim(),
           'role': widget.role,
-          'uid': user.uid,
+          'organizationId': _organizationId,
+          'organizationName': _organizationName,
+          'facultyId': _selectedFacultyId,
+          'facultyName': selectedFaculty['name'] ?? '',
+          'facultyCode': selectedFaculty['code'] ?? '',
           'createdAt': FieldValue.serverTimestamp(),
-          'faculty': _selectedFaculty,
-          'facultyFullName': faculties[_selectedFaculty], // Store full name too
+          'updatedAt': FieldValue.serverTimestamp(),
+          'isActive': true,
         };
 
-        // Add program only for students
-        if (widget.role == 'student') {
-          userData['program'] = _selectedProgram;
+        // Add program details for students
+        if (widget.role == 'student' && _selectedProgramId != null) {
+          Map<String, dynamic>? selectedProgram = _programs.firstWhere(
+                (p) => p['id'] == _selectedProgramId,
+            orElse: () => {},
+          );
+
+          userData['programId'] = _selectedProgramId;
+          userData['programName'] = selectedProgram['name'] ?? '';
+          userData['programCode'] = selectedProgram['code'] ?? '';
         }
 
         // Add user data to Firestore
-        await users.doc(user.uid).set(userData);
+        await _firestore.collection('users').doc(user.uid).set(userData);
 
-        // Stop loading
+        // Create audit log entry
+        await _firestore
+            .collection('organizations')
+            .doc(_organizationId)
+            .collection('audit_logs')
+            .add({
+          'action': '${widget.role}_account_created',
+          'performedBy': user.uid,
+          'timestamp': FieldValue.serverTimestamp(),
+          'details': {
+            'userEmail': _emailController.text.trim(),
+            'userName': _nameController.text.trim(),
+            'role': widget.role,
+            'faculty': selectedFaculty['name'] ?? '',
+          }
+        });
+
         setState(() {
           _isLoading = false;
         });
 
-        // Show custom success snackbar
+        // Show success snackbar
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Container(
@@ -148,7 +252,7 @@ class _SignUpPageState extends State<SignUpPage> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Welcome to Study Hub! 🎉',
+                          'Welcome to $_organizationName! 🎉',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -176,17 +280,9 @@ class _SignUpPageState extends State<SignUpPage> {
             ),
             margin: EdgeInsets.all(20),
             duration: Duration(seconds: 3),
-            action: SnackBarAction(
-              label: 'OK',
-              textColor: Colors.white,
-              onPressed: () {
-                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              },
-            ),
           ),
         );
 
-        // Wait a moment for the user to see the snackbar
         await Future.delayed(Duration(seconds: 2));
 
         // Navigate to sign-in page
@@ -196,42 +292,23 @@ class _SignUpPageState extends State<SignUpPage> {
         );
       }
     } on FirebaseAuthException catch (e) {
-      // Stop loading
       setState(() {
         _isLoading = false;
         errorMessage = e.message ?? 'Error during sign-up';
       });
 
-      // Show error snackbar
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Row(
-            children: [
-              Icon(
-                Icons.error_outline,
-                color: Colors.white,
-                size: 24,
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  errorMessage!,
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
-          ),
+          content: Text(errorMessage!),
           backgroundColor: Colors.red[600],
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
           margin: EdgeInsets.all(20),
-          duration: Duration(seconds: 4),
         ),
       );
     } catch (e) {
-      // Handle any other errors
       setState(() {
         _isLoading = false;
         errorMessage = 'An unexpected error occurred. Please try again.';
@@ -241,11 +318,11 @@ class _SignUpPageState extends State<SignUpPage> {
 
   @override
   void dispose() {
-    // Clean up controllers
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _organizationCodeController.dispose();
     super.dispose();
   }
 
@@ -257,11 +334,10 @@ class _SignUpPageState extends State<SignUpPage> {
         title: Text(widget.role == 'student' ? 'Student Sign Up' : 'Lecturer Sign Up'),
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
-          onPressed: () {
-            Navigator.pop(context); // Go back to the previous page
-          },
+          onPressed: () => Navigator.pop(context),
         ),
         backgroundColor: Colors.white,
+        elevation: 0,
       ),
       body: Padding(
         padding: EdgeInsets.all(16),
@@ -300,31 +376,57 @@ class _SignUpPageState extends State<SignUpPage> {
                 ),
                 SizedBox(height: 30),
 
-                // Error message display (if not shown in snackbar)
-                if (errorMessage != null)
-                  Container(
-                    padding: EdgeInsets.all(12),
-                    margin: EdgeInsets.only(bottom: 15),
-                    decoration: BoxDecoration(
-                      color: Colors.red[50],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red[200]!),
+                // Organization Code Field
+                TextFormField(
+                  controller: _organizationCodeController,
+                  decoration: InputDecoration(
+                    prefixIcon: Icon(Icons.business, color: Colors.blueAccent),
+                    suffixIcon: _isCheckingOrgCode
+                        ? Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                        : IconButton(
+                      icon: Icon(Icons.check_circle,
+                          color: _organizationId != null ? Colors.green : Colors.grey),
+                      onPressed: _checkOrganizationCode,
                     ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.error_outline, color: Colors.red[700], size: 20),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            errorMessage!,
-                            style: TextStyle(color: Colors.red[700], fontSize: 14),
-                          ),
-                        ),
-                      ],
+                    labelText: 'Organization Code',
+                    helperText: _organizationName ?? 'Enter your organization code',
+                    helperStyle: TextStyle(
+                      color: _organizationId != null ? Colors.green : null,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.blueAccent),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
+                  onChanged: (value) {
+                    if (value.length >= 3) {
+                      _checkOrganizationCode();
+                    }
+                  },
+                  validator: (val) {
+                    if (val == null || val.isEmpty) {
+                      return 'Please enter organization code';
+                    }
+                    if (_organizationId == null) {
+                      return 'Invalid organization code';
+                    }
+                    return null;
+                  },
+                ),
+                SizedBox(height: 15),
 
-                _buildTextField(_nameController, 'Name', Icons.person),
+                _buildTextField(_nameController, 'Full Name', Icons.person),
                 SizedBox(height: 15),
 
                 _buildTextField(_emailController, 'Email', Icons.email),
@@ -336,71 +438,52 @@ class _SignUpPageState extends State<SignUpPage> {
                 _buildTextField(_confirmPasswordController, 'Confirm Password', Icons.lock, obscureText: true),
                 SizedBox(height: 15),
 
-                // Faculty dropdown for both students and lecturers
+                // Faculty dropdown
                 DropdownButtonFormField<String>(
                   isExpanded: true,
-                  value: _selectedFaculty,
-                  onChanged: (newValue) {
+                  value: _selectedFacultyId,
+                  onChanged: _organizationId == null
+                      ? null
+                      : (newValue) {
                     setState(() {
-                      _selectedFaculty = newValue;
-                      if (widget.role == 'student') {
-                        _selectedProgram = null;
-                      }
+                      _selectedFacultyId = newValue;
+                      _selectedProgramId = null;
+                      _programs = [];
                     });
+                    if (newValue != null && widget.role == 'student') {
+                      _loadPrograms(newValue);
+                    }
                   },
-                  selectedItemBuilder: (BuildContext context) {
-                    return faculties.entries.map((entry) {
-                      return Container(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          entry.key,
-                          style: TextStyle(fontSize: 14),
-                        ),
-                      );
-                    }).toList();
-                  },
-                  items: faculties.entries.map((entry) {
+                  items: _faculties.map((faculty) {
                     return DropdownMenuItem<String>(
-                      value: entry.key,
-                      child: Container(
-                        constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width - 100,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              entry.key,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
+                      value: faculty['id'],
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            faculty['code'] ?? '',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
                             ),
-                            SizedBox(height: 2),
-                            Text(
-                              entry.value,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                              softWrap: true,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            faculty['name'] ?? '',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
                             ),
-                          ],
-                        ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
                     );
                   }).toList(),
                   decoration: InputDecoration(
                     labelText: 'Faculty',
-                    helperText: _selectedFaculty != null
-                        ? faculties[_selectedFaculty]
-                        : 'Select your faculty',
-                    helperMaxLines: 2,
-                    helperStyle: TextStyle(fontSize: 12),
                     prefixIcon: Icon(Icons.school, color: Colors.blueAccent),
                     focusedBorder: OutlineInputBorder(
                       borderSide: BorderSide(color: Colors.blueAccent),
@@ -410,6 +493,14 @@ class _SignUpPageState extends State<SignUpPage> {
                       borderSide: BorderSide(color: Colors.grey[300]!),
                       borderRadius: BorderRadius.circular(12),
                     ),
+                    filled: _organizationId == null,
+                    fillColor: _organizationId == null ? Colors.grey[100] : null,
+                  ),
+                  hint: Text(
+                    _organizationId == null
+                        ? 'Enter organization code first'
+                        : 'Select faculty',
+                    style: TextStyle(fontSize: 14),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -424,19 +515,39 @@ class _SignUpPageState extends State<SignUpPage> {
                 if (widget.role == 'student') ...[
                   DropdownButtonFormField<String>(
                     isExpanded: true,
-                    value: _selectedProgram,
-                    onChanged: _selectedFaculty == null ? null : (newValue) {
+                    value: _selectedProgramId,
+                    onChanged: _selectedFacultyId == null
+                        ? null
+                        : (newValue) {
                       setState(() {
-                        _selectedProgram = newValue;
+                        _selectedProgramId = newValue;
                       });
                     },
-                    items: getProgramsForFaculty().map((program) {
+                    items: _programs.map((program) {
                       return DropdownMenuItem<String>(
-                        value: program,
-                        child: Text(
-                          program,
-                          style: TextStyle(fontSize: 14),
-                          overflow: TextOverflow.ellipsis,
+                        value: program['id'],
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              program['code'] ?? '',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            Text(
+                              program['name'] ?? '',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       );
                     }).toList(),
@@ -451,8 +562,14 @@ class _SignUpPageState extends State<SignUpPage> {
                         borderSide: BorderSide(color: Colors.grey[300]!),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      filled: _selectedFaculty == null,
-                      fillColor: _selectedFaculty == null ? Colors.grey[100] : null,
+                      filled: _selectedFacultyId == null,
+                      fillColor: _selectedFacultyId == null ? Colors.grey[100] : null,
+                    ),
+                    hint: Text(
+                      _selectedFacultyId == null
+                          ? 'Select faculty first'
+                          : 'Select program',
+                      style: TextStyle(fontSize: 14),
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
@@ -460,18 +577,12 @@ class _SignUpPageState extends State<SignUpPage> {
                       }
                       return null;
                     },
-                    hint: Text(
-                      _selectedFaculty == null
-                          ? 'Select faculty first'
-                          : 'Select program',
-                      style: TextStyle(fontSize: 14),
-                    ),
                   ),
                   SizedBox(height: 30),
                 ] else
                   SizedBox(height: 15),
 
-                // Sign Up button with loading state
+                // Sign Up button
                 ElevatedButton(
                   onPressed: _isLoading
                       ? null
@@ -511,7 +622,33 @@ class _SignUpPageState extends State<SignUpPage> {
                     style: TextStyle(fontSize: 18, color: Colors.white),
                   ),
                 ),
-                SizedBox(height: 15),
+                SizedBox(height: 20),
+
+                // Already have account
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Already have an account? ',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(builder: (_) => SignInPage()),
+                        );
+                      },
+                      child: Text(
+                        'Sign In',
+                        style: TextStyle(
+                          color: Colors.purple[400],
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
