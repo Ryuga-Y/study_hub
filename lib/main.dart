@@ -4,6 +4,7 @@ import 'Authentication/admin_sign_up.dart';
 import 'Authentication/role_selection.dart';
 import 'Authentication/sign_in.dart';
 import 'Stu_courseState.dart';
+import 'Stu_goal.dart';
 import 'admin/admin_dashboard.dart';
 
 void main() async {
