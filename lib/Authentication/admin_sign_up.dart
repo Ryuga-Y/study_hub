@@ -1,584 +1,704 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:crypto/crypto.dart';
-import 'dart:convert';
 
 class AdminSignUpPage extends StatefulWidget {
   @override
   _AdminSignUpPageState createState() => _AdminSignUpPageState();
 }
 
-class _AdminSignUpPageState extends State<AdminSignUpPage> {
+class _AdminSignUpPageState extends State<AdminSignUpPage> with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _fullNameController = TextEditingController();
   final _organizationNameController = TextEditingController();
   final _organizationCodeController = TextEditingController();
-  final _fullNameController = TextEditingController();
 
+  bool _isJoiningExisting = false;
   bool _isLoading = false;
+  bool _organizationExists = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _isCheckingOrganization = false;
+
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+    _animationController.forward();
+  }
 
   @override
   void dispose() {
+    _animationController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _fullNameController.dispose();
     _organizationNameController.dispose();
     _organizationCodeController.dispose();
-    _fullNameController.dispose();
     super.dispose();
   }
 
   Future<void> _signUpAdmin() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      // Create user with Firebase Auth
+      // 1. Create Firebase Auth user
       UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      // Generate organization ID
-      String organizationId = _generateOrganizationId();
+      String orgCode = _organizationCodeController.text.trim().toUpperCase();
 
-      await _createAdminUser(userCredential.user!.uid, organizationId);
-
-      await _createOrganization(organizationId, userCredential.user!.uid);
+      if (_isJoiningExisting) {
+        await _joinExistingOrganization(userCredential.user!.uid, orgCode);
+      } else {
+        await _createNewOrganization(userCredential.user!.uid, orgCode);
+      }
 
       await userCredential.user!.updateDisplayName(_fullNameController.text.trim());
 
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.white),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Admin account created successfully!',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      'Organization code: ${_organizationCodeController.text.trim().toUpperCase()}',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          margin: EdgeInsets.all(20),
-          duration: Duration(seconds: 4),
-        ),
-      );
-
-      // Navigate to admin dashboard or login page
+      _showSuccessMessage();
       Navigator.pushReplacementNamed(context, '/admin_dashboard');
 
-    } on FirebaseAuthException catch (e) {
-      String errorMessage = 'An error occurred';
-
-      switch (e.code) {
-        case 'email-already-in-use':
-          errorMessage = 'This email is already registered';
-          break;
-        case 'weak-password':
-          errorMessage = 'Password is too weak';
-          break;
-        case 'invalid-email':
-          errorMessage = 'Invalid email address';
-          break;
-        default:
-          errorMessage = e.message ?? 'An error occurred';
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          margin: EdgeInsets.all(20),
-        ),
-      );
     } catch (e) {
-      // Check if it's a duplicate organization code error
-      if (e.toString().contains('organization-code-exists')) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Organization code already exists. Please choose a different code.'),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            margin: EdgeInsets.all(20),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            margin: EdgeInsets.all(20),
-          ),
-        );
-      }
+      _handleError(e);
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
-  String _generateOrganizationId() {
-    String input = _organizationNameController.text.trim() +
-        _organizationCodeController.text.trim() +
-        DateTime.now().millisecondsSinceEpoch.toString();
-    var bytes = utf8.encode(input);
-    var digest = sha256.convert(bytes);
-    return digest.toString().substring(0, 16);
-  }
+  Future<void> _createNewOrganization(String uid, String orgCode) async {
+    // Check if organization already exists
+    DocumentSnapshot orgDoc = await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(orgCode)
+        .get();
 
-  Future<void> _createAdminUser(String uid, String organizationId) async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .set({
-      'email': _emailController.text.trim(),
-      'fullName': _fullNameController.text.trim(),
-      'role': 'admin',
-      'organizationId': organizationId,
-      'organizationName': _organizationNameController.text.trim(),
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'isActive': true,
-      'permissions': [
-        'manage_organization',
-        'manage_faculties',
-        'manage_programs',
-        'manage_users',
-        'view_analytics',
-        'manage_settings'
-      ]
-    });
-  }
+    if (orgDoc.exists) {
+      throw Exception('Organization code already exists');
+    }
 
-  Future<void> _createOrganization(String organizationId, String adminUid) async {
+    // Use batch write for consistency
+    WriteBatch batch = FirebaseFirestore.instance.batch();
+
+    // Create user document
+    batch.set(
+        FirebaseFirestore.instance.collection('users').doc(uid),
+        {
+          'email': _emailController.text.trim(),
+          'fullName': _fullNameController.text.trim(),
+          'role': 'admin',
+          'organizationCode': orgCode,
+          'isActive': true,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }
+    );
+
     // Create organization document
-    await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(organizationId)
-        .set({
-      'name': _organizationNameController.text.trim(),
-      'code': _organizationCodeController.text.trim().toUpperCase(),
-      'adminUid': adminUid,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'isActive': true,
-      'settings': {
-        'allowStudentSelfRegistration': true,
-        'allowLecturerSelfRegistration': false,
-        'requireEmailVerification': true,
-      }
-    });
+    batch.set(
+        FirebaseFirestore.instance.collection('organizations').doc(orgCode),
+        {
+          'name': _organizationNameController.text.trim(),
+          'code': orgCode,
+          'createdBy': uid,
+          'admins': [uid], // Start with one admin
+          'isActive': true,
+          'createdAt': FieldValue.serverTimestamp(),
+          'settings': {
+            'allowStudentRegistration': true,
+            'allowLecturerRegistration': false,
+            'requireEmailVerification': true,
+          }
+        }
+    );
 
-    // Create subcollections individually (not in batch) to handle permissions properly
+    await batch.commit();
+  }
 
-    // Create initial faculties subcollection with a placeholder
-    await FirebaseFirestore.instance
+  Future<void> _joinExistingOrganization(String uid, String orgCode) async {
+    // Check if organization exists
+    DocumentSnapshot orgDoc = await FirebaseFirestore.instance
         .collection('organizations')
-        .doc(organizationId)
-        .collection('faculties')
-        .doc('_placeholder')
-        .set({
-      'name': 'Placeholder Faculty',
-      'code': 'PLACEHOLDER',
-      'isActive': false,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+        .doc(orgCode)
+        .get();
 
-    // Create settings subcollection
-    await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(organizationId)
-        .collection('settings')
-        .doc('general')
-        .set({
-      'allowStudentSelfRegistration': true,
-      'allowLecturerSelfRegistration': false,
-      'requireEmailVerification': true,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    if (!orgDoc.exists) {
+      throw Exception('Organization not found');
+    }
 
-    // Create initial audit log entry
-    await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(organizationId)
-        .collection('audit_logs')
-        .add({
-      'action': 'organization_created',
-      'performedBy': adminUid,
-      'timestamp': FieldValue.serverTimestamp(),
-      'details': {
-        'organizationName': _organizationNameController.text.trim(),
-        'organizationCode': _organizationCodeController.text.trim().toUpperCase(),
-      }
-    });
+    // Use batch write for consistency
+    WriteBatch batch = FirebaseFirestore.instance.batch();
 
-    // Create admin activity entry
-    await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(organizationId)
-        .collection('admin_activities')
-        .add({
-      'adminId': adminUid,
-      'action': 'admin_account_created',
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+    // Create user document
+    batch.set(
+        FirebaseFirestore.instance.collection('users').doc(uid),
+        {
+          'email': _emailController.text.trim(),
+          'fullName': _fullNameController.text.trim(),
+          'role': 'admin',
+          'organizationCode': orgCode,
+          'isActive': true,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }
+    );
 
-    // Create admin settings
-    await FirebaseFirestore.instance
+    // Add admin to organization's admin list
+    batch.update(
+        FirebaseFirestore.instance.collection('organizations').doc(orgCode),
+        {
+          'admins': FieldValue.arrayUnion([uid]),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }
+    );
+
+    await batch.commit();
+  }
+
+  Future<bool> _checkOrganizationExists(String orgCode) async {
+    DocumentSnapshot doc = await FirebaseFirestore.instance
         .collection('organizations')
-        .doc(organizationId)
-        .collection('admin_settings')
-        .doc(adminUid)
-        .set({
-      'notificationsEnabled': true,
-      'emailAlerts': true,
-      'dashboardLayout': 'default',
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+        .doc(orgCode)
+        .get();
+    return doc.exists;
+  }
+
+  void _showSuccessMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white),
+            SizedBox(width: 12),
+            Text(_isJoiningExisting
+                ? 'Successfully joined organization!'
+                : 'Organization created successfully!'),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  void _handleError(dynamic error) {
+    String message = 'An error occurred';
+    IconData icon = Icons.error;
+
+    if (error.toString().contains('Organization code already exists')) {
+      message = 'Organization code already exists. Try joining instead.';
+      icon = Icons.business_center;
+    } else if (error.toString().contains('Organization not found')) {
+      message = 'Organization not found. Try creating a new one.';
+      icon = Icons.search_off;
+    } else if (error.toString().contains('email-already-in-use')) {
+      message = 'Email already registered';
+      icon = Icons.email;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(icon, color: Colors.white),
+            SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: EdgeInsets.all(16),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
+        title: Text('Admin Sign Up', style: TextStyle(fontWeight: FontWeight.w600)),
         backgroundColor: Colors.white,
         elevation: 0,
-        title: Text(
-          'Admin Sign Up',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.black,
-          ),
-        ),
+        foregroundColor: Colors.black87,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.black),
+          icon: Icon(Icons.arrow_back_ios),
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(24.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Header
-              Container(
-                padding: EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.admin_panel_settings,
-                      size: 60,
-                      color: Colors.redAccent,
+      body: FadeTransition(
+        opacity: _fadeAnimation,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(24.0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header Section
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.blue[600]!, Colors.blue[800]!],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                    SizedBox(height: 10),
-                    Text(
-                      'Create Admin Account',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.blue.withOpacity(0.3),
+                        blurRadius: 20,
+                        offset: Offset(0, 10),
                       ),
-                    ),
-                    Text(
-                      'Set up your organization',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(Icons.admin_panel_settings, size: 48, color: Colors.white),
+                      SizedBox(height: 12),
+                      Text(
+                        'Welcome Admin!',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Create or join an organization to get started',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.white.withOpacity(0.9),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 32),
+
+                // Toggle Section
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Container(
+                    margin: EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ],
-                ),
-              ),
-              SizedBox(height: 30),
-
-              // Organization Details Section
-              Text(
-                'Organization Details',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-              SizedBox(height: 15),
-
-              // Organization Name
-              TextFormField(
-                controller: _organizationNameController,
-                decoration: InputDecoration(
-                  labelText: 'Organization Name',
-                  prefixIcon: Icon(Icons.business),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() => _isJoiningExisting = false),
+                            child: AnimatedContainer(
+                              duration: Duration(milliseconds: 200),
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              decoration: BoxDecoration(
+                                color: !_isJoiningExisting
+                                    ? Colors.blue[600]
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: !_isJoiningExisting ? [
+                                  BoxShadow(
+                                    color: Colors.blue.withOpacity(0.3),
+                                    blurRadius: 8,
+                                    offset: Offset(0, 4),
+                                  ),
+                                ] : [],
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.add_business,
+                                    color: !_isJoiningExisting ? Colors.white : Colors.grey[600],
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Create New',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: !_isJoiningExisting ? Colors.white : Colors.grey[600],
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() => _isJoiningExisting = true),
+                            child: AnimatedContainer(
+                              duration: Duration(milliseconds: 200),
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              decoration: BoxDecoration(
+                                color: _isJoiningExisting
+                                    ? Colors.green[600]
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: _isJoiningExisting ? [
+                                  BoxShadow(
+                                    color: Colors.green.withOpacity(0.3),
+                                    blurRadius: 8,
+                                    offset: Offset(0, 4),
+                                  ),
+                                ] : [],
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.group_add,
+                                    color: _isJoiningExisting ? Colors.white : Colors.grey[600],
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Join Existing',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: _isJoiningExisting ? Colors.white : Colors.grey[600],
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter organization name';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 15),
+                SizedBox(height: 32),
 
-              // Organization Code
-              TextFormField(
-                controller: _organizationCodeController,
-                textCapitalization: TextCapitalization.characters,
-                decoration: InputDecoration(
-                  labelText: 'Organization Code',
-                  prefixIcon: Icon(Icons.code),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  helperText: 'Unique identifier for your organization (e.g., TARC, UM, USM)',
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter organization code';
-                  }
-                  if (value.trim().length < 3) {
-                    return 'Code must be at least 3 characters';
-                  }
-                  if (value.trim().length > 10) {
-                    return 'Code must be less than 10 characters';
-                  }
-                  if (!RegExp(r'^[A-Za-z0-9]+$').hasMatch(value.trim())) {
-                    return 'Code can only contain letters and numbers';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 30),
-
-              // Personal Details Section
-              Text(
-                'Personal Details',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-              SizedBox(height: 15),
-
-              // Full Name
-              TextFormField(
-                controller: _fullNameController,
-                decoration: InputDecoration(
-                  labelText: 'Full Name',
-                  prefixIcon: Icon(Icons.person),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter your full name';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 15),
-
-              // Email
-              TextFormField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter your email';
-                  }
-                  if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-                    return 'Please enter a valid email';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 15),
-
-              // Password
-              TextFormField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter a password';
-                  }
-                  if (value.length < 6) {
-                    return 'Password must be at least 6 characters';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 15),
-
-              // Confirm Password
-              TextFormField(
-                controller: _confirmPasswordController,
-                obscureText: _obscureConfirmPassword,
-                decoration: InputDecoration(
-                  labelText: 'Confirm Password',
-                  prefixIcon: Icon(Icons.lock_outline),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscureConfirmPassword ? Icons.visibility : Icons.visibility_off),
-                    onPressed: () {
-                      setState(() {
-                        _obscureConfirmPassword = !_obscureConfirmPassword;
-                      });
-                    },
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please confirm your password';
-                  }
-                  if (value != _passwordController.text) {
-                    return 'Passwords do not match';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 30),
-
-              // Sign Up Button
-              ElevatedButton(
-                onPressed: _isLoading ? null : _signUpAdmin,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: _isLoading
-                    ? Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
+                // Form Fields
+                _buildFormCard([
+                  _buildTextField(
+                    controller: _organizationCodeController,
+                    label: 'Organization Code',
+                    icon: Icons.business,
+                    textCapitalization: TextCapitalization.characters,
+                    helperText: _isJoiningExisting
+                        ? 'Enter the code of organization you want to join'
+                        : 'Create a unique code for your organization',
+                    suffixIcon: _isCheckingOrganization
+                        ? SizedBox(
                       width: 20,
                       height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                        : _organizationCodeController.text.length >= 3
+                        ? Icon(
+                      _organizationExists ? Icons.check_circle : Icons.cancel,
+                      color: _organizationExists ? Colors.green : Colors.red,
+                    )
+                        : null,
+                    onChanged: (value) async {
+                      if (value.length >= 3) {
+                        setState(() => _isCheckingOrganization = true);
+                        bool exists = await _checkOrganizationExists(value.toUpperCase());
+                        setState(() {
+                          _organizationExists = exists;
+                          _isCheckingOrganization = false;
+                        });
+                      }
+                    },
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter organization code';
+                      }
+                      if (value.trim().length < 3) {
+                        return 'Code must be at least 3 characters';
+                      }
+                      return null;
+                    },
+                  ),
+
+                  if (!_isJoiningExisting) ...[
+                    SizedBox(height: 20),
+                    _buildTextField(
+                      controller: _organizationNameController,
+                      label: 'Organization Name',
+                      icon: Icons.school,
+                      validator: (value) {
+                        if (!_isJoiningExisting && (value == null || value.trim().isEmpty)) {
+                          return 'Please enter organization name';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+
+                  SizedBox(height: 20),
+                  Text(
+                    'Personal Information',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                  SizedBox(height: 16),
+
+                  _buildTextField(
+                    controller: _fullNameController,
+                    label: 'Full Name',
+                    icon: Icons.person,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter your full name';
+                      }
+                      return null;
+                    },
+                  ),
+
+                  SizedBox(height: 20),
+                  _buildTextField(
+                    controller: _emailController,
+                    label: 'Email Address',
+                    icon: Icons.email,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter your email';
+                      }
+                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                        return 'Please enter a valid email';
+                      }
+                      return null;
+                    },
+                  ),
+
+                  SizedBox(height: 20),
+                  _buildTextField(
+                    controller: _passwordController,
+                    label: 'Password',
+                    icon: Icons.lock,
+                    obscureText: _obscurePassword,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                        color: Colors.grey[600],
+                      ),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter a password';
+                      }
+                      if (value.length < 6) {
+                        return 'Password must be at least 6 characters';
+                      }
+                      return null;
+                    },
+                  ),
+
+                  SizedBox(height: 20),
+                  _buildTextField(
+                    controller: _confirmPasswordController,
+                    label: 'Confirm Password',
+                    icon: Icons.lock_outline,
+                    obscureText: _obscureConfirmPassword,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
+                        color: Colors.grey[600],
+                      ),
+                      onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please confirm your password';
+                      }
+                      if (value != _passwordController.text) {
+                        return 'Passwords do not match';
+                      }
+                      return null;
+                    },
+                  ),
+                ]),
+
+                SizedBox(height: 32),
+
+                // Submit Button
+                Container(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _signUpAdmin,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isJoiningExisting ? Colors.green[600] : Colors.blue[600],
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      shadowColor: (_isJoiningExisting ? Colors.green : Colors.blue).withOpacity(0.3),
+                    ),
+                    child: _isLoading
+                        ? SizedBox(
+                      width: 24,
+                      height: 24,
                       child: CircularProgressIndicator(
                         color: Colors.white,
                         strokeWidth: 2,
                       ),
-                    ),
-                    SizedBox(width: 12),
-                    Text('Creating Account...'),
-                  ],
-                )
-                    : Text(
-                  'Create Admin Account',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              SizedBox(height: 20),
-
-              // Already have account
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Already have an account? ',
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pushReplacementNamed(context, '/sign_in');
-                    },
-                    child: Text(
-                      'Sign In',
-                      style: TextStyle(
-                        color: Colors.redAccent,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    )
+                        : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _isJoiningExisting ? Icons.group_add : Icons.add_business,
+                          size: 24,
+                        ),
+                        SizedBox(width: 12),
+                        Text(
+                          _isJoiningExisting
+                              ? 'Join Organization'
+                              : 'Create Organization',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-              SizedBox(height: 10),
-
-              // Terms and Conditions
-              Text(
-                'By creating an admin account, you agree to our Terms of Service and Privacy Policy.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
                 ),
-                textAlign: TextAlign.center,
-              ),
-            ],
+                SizedBox(height: 24),
+
+                // Footer
+                Center(
+                  child: Text(
+                    'By signing up, you agree to our Terms of Service',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildFormCard(List<Widget> children) {
+    return Container(
+      padding: EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    TextInputType? keyboardType,
+    bool obscureText = false,
+    Widget? suffixIcon,
+    String? helperText,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    Function(String)? onChanged,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      textCapitalization: textCapitalization,
+      onChanged: onChanged,
+      validator: validator,
+      style: TextStyle(fontSize: 16),
+      decoration: InputDecoration(
+        labelText: label,
+        helperText: helperText,
+        helperMaxLines: 2,
+        prefixIcon: Container(
+          margin: EdgeInsets.only(right: 12),
+          child: Icon(icon, color: Colors.grey[600]),
+        ),
+        suffixIcon: suffixIcon,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.blue[600]!, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.red[400]!),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.red[400]!, width: 2),
+        ),
+        filled: true,
+        fillColor: Colors.grey[50],
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     );
   }
