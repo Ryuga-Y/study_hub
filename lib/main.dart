@@ -18,7 +18,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: OnboardingScreen(),
+      home: StuGoal(),
       routes: {
         '/roleSelection': (context) => RoleSelectionPage(), // Navigate to RoleSelectionPage
         '/signIn': (context) => SignInPage(), // Navigate to SignInPage
