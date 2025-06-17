@@ -1,3 +1,4 @@
+// user_management.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -11,674 +12,631 @@ class UserManagementPage extends StatefulWidget {
   _UserManagementPageState createState() => _UserManagementPageState();
 }
 
-class _UserManagementPageState extends State<UserManagementPage> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _fullNameController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _studentIdController = TextEditingController();
-
+class _UserManagementPageState extends State<UserManagementPage> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  final _searchController = TextEditingController();
   String _searchQuery = '';
-  String _selectedRole = 'all';
-  String _selectedStatus = 'active';
-  String? _selectedFaculty;
-  String? _selectedProgram;
-  List<Map<String, dynamic>> _faculties = [];
-  List<Map<String, dynamic>> _programs = [];
+  bool _showInactiveUsers = false;
 
   @override
   void initState() {
     super.initState();
-    _loadFaculties();
+    _tabController = TabController(length: 4, vsync: this);
   }
 
-  Future<void> _loadFaculties() async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(widget.organizationId)
-        .collection('faculties')
-        .where('isActive', isEqualTo: true)
-        .get();
-
-    setState(() {
-      _faculties = snapshot.docs
-          .where((doc) => doc.id != '_placeholder')
-          .map((doc) => {
-        'id': doc.id,
-        'name': doc['name'],
-        'code': doc['code'],
-      }).toList();
-    });
-  }
-
-  Future<void> _loadPrograms(String facultyId) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(widget.organizationId)
-        .collection('faculties')
-        .doc(facultyId)
-        .collection('programs')
-        .where('isActive', isEqualTo: true)
-        .get();
-
-    setState(() {
-      _programs = snapshot.docs.map((doc) => {
-        'id': doc.id,
-        'name': doc['name'],
-        'code': doc['code'],
-      }).toList();
-    });
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.grey[100],
-      child: Column(
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      body: Column(
         children: [
           // Header
           Container(
             padding: EdgeInsets.all(24),
             color: Colors.white,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'User Management',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Manage students and lecturers in your organization',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
+                    Text(
+                      'User Management',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
                       ),
                     ),
-                    ElevatedButton.icon(
-                      onPressed: () => _showAddUserDialog(),
-                      icon: Icon(Icons.person_add),
-                      label: Text('Add User'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      ),
+                    Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => setState(() => _showInactiveUsers = !_showInactiveUsers),
+                          icon: Icon(
+                            _showInactiveUsers ? Icons.visibility : Icons.visibility_off,
+                            size: 16,
+                          ),
+                          label: Text(
+                            _showInactiveUsers ? 'Inactive' : 'Active Only',
+                            style: TextStyle(fontSize: 15),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                SizedBox(height: 20),
-                Row(
-                  children: [
-                    // Search bar
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        decoration: InputDecoration(
-                          hintText: 'Search users...',
-                          prefixIcon: Icon(Icons.search),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        ),
-                        onChanged: (value) {
-                          setState(() {
-                            _searchQuery = value.toLowerCase();
-                          });
-                        },
+                SizedBox(height: 16),
+                // Search bar
+                Container(
+                  width: MediaQuery.of(context).size.width > 600 ? 400 : double.infinity,
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search users by name or email...',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
                       ),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
-                    SizedBox(width: 16),
-                    // Role filter
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedRole,
-                        decoration: InputDecoration(
-                          labelText: 'Role',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        ),
-                        items: [
-                          DropdownMenuItem(value: 'all', child: Text('All Roles')),
-                          DropdownMenuItem(value: 'student', child: Text('Students')),
-                          DropdownMenuItem(value: 'lecturer', child: Text('Lecturers')),
-                        ],
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedRole = value!;
-                          });
-                        },
-                      ),
-                    ),
-                    SizedBox(width: 16),
-                    // Status filter
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedStatus,
-                        decoration: InputDecoration(
-                          labelText: 'Status',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        ),
-                        items: [
-                          DropdownMenuItem(value: 'active', child: Text('Active')),
-                          DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
-                          DropdownMenuItem(value: 'all', child: Text('All')),
-                        ],
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedStatus = value!;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
+                    onChanged: (value) {
+                      setState(() => _searchQuery = value.toLowerCase());
+                    },
+                  ),
                 ),
               ],
             ),
           ),
 
-          // Content
+          // Tab Bar
+          Container(
+            color: Colors.white,
+            child: TabBar(
+              controller: _tabController,
+              indicatorColor: Colors.blue,
+              labelColor: Colors.blue,
+              unselectedLabelColor: Colors.grey[600],
+              tabs: [
+                Tab(text: 'All Users'),
+                Tab(text: 'Students'),
+                Tab(text: 'Lecturers'),
+                Tab(text: 'Admins'),
+              ],
+              onTap: (index) {
+                // Tab switching is handled by TabController
+              },
+            ),
+          ),
+
+          // User List
           Expanded(
-            child: _buildUsersList(),
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildUserList('all'),
+                _buildUserList('student'),
+                _buildUserList('lecturer'),
+                _buildUserList('admin'),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildUsersList() {
+  Widget _buildUserList(String role) {
+    Query query = FirebaseFirestore.instance
+        .collection('users')
+        .where('organizationCode', isEqualTo: widget.organizationId);
+
+    if (role != 'all') {
+      query = query.where('role', isEqualTo: role);
+    }
+
+    if (!_showInactiveUsers) {
+      query = query.where('isActive', isEqualTo: true);
+    }
+
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .where('organizationId', isEqualTo: widget.organizationId)
-          .snapshots(),
+      stream: query.snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(child: CircularProgressIndicator());
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return _buildEmptyState();
+          return _buildEmptyState(role);
         }
 
-        var users = snapshot.data!.docs.where((doc) {
+        final users = snapshot.data!.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
-          final role = data['role'] ?? '';
-
-          // Filter by role
-          if (_selectedRole != 'all' && role != _selectedRole) {
-            return false;
-          }
-
-          // Filter by status
-          final isActive = data['isActive'] ?? true;
-          if (_selectedStatus == 'active' && !isActive) return false;
-          if (_selectedStatus == 'inactive' && isActive) return false;
-
-          // Filter by search query
-          if (_searchQuery.isNotEmpty) {
-            final fullName = (data['fullName'] ?? '').toString().toLowerCase();
-            final email = (data['email'] ?? '').toString().toLowerCase();
-            final studentId = (data['studentId'] ?? '').toString().toLowerCase();
-            if (!fullName.contains(_searchQuery) &&
-                !email.contains(_searchQuery) &&
-                !studentId.contains(_searchQuery)) {
-              return false;
-            }
-          }
-
-          return true;
+          final name = data['fullName']?.toString().toLowerCase() ?? '';
+          final email = data['email']?.toString().toLowerCase() ?? '';
+          return name.contains(_searchQuery) || email.contains(_searchQuery);
         }).toList();
 
         if (users.isEmpty) {
-          return _buildEmptyState();
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
+                SizedBox(height: 16),
+                Text(
+                  'No users match your search',
+                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          );
         }
 
-        return Padding(
+        return ListView.builder(
           padding: EdgeInsets.all(24),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.1),
-                  spreadRadius: 1,
-                  blurRadius: 3,
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                // Table header
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(flex: 2, child: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                      Expanded(flex: 2, child: Text('Email', style: TextStyle(fontWeight: FontWeight.bold))),
-                      Expanded(child: Text('Role', style: TextStyle(fontWeight: FontWeight.bold))),
-                      Expanded(child: Text('Student ID', style: TextStyle(fontWeight: FontWeight.bold))),
-                      Expanded(child: Text('Faculty', style: TextStyle(fontWeight: FontWeight.bold))),
-                      Expanded(child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
-                      SizedBox(width: 100, child: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
-                    ],
-                  ),
-                ),
-
-                // Table content
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: users.length,
-                    itemBuilder: (context, index) => _buildUserRow(users[index]),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          itemCount: users.length,
+          itemBuilder: (context, index) {
+            final user = users[index];
+            final data = user.data() as Map<String, dynamic>;
+            return _buildUserCard(user.id, data);
+          },
         );
       },
     );
   }
 
-  Widget _buildUserRow(DocumentSnapshot userDoc) {
-    final data = userDoc.data() as Map<String, dynamic>;
-    final isActive = data['isActive'] ?? true;
-    final role = data['role'] ?? '';
-    final facultyId = data['facultyId'] ?? '';
-
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Colors.grey[200]!),
-        ),
-      ),
-      child: Row(
-        children: [
-          // Name
-          Expanded(
-            flex: 2,
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: role == 'student' ? Colors.blue : Colors.green,
-                  child: Text(
-                    data['fullName']?.substring(0, 1).toUpperCase() ?? '?',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    data['fullName'] ?? 'Unknown',
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Email
-          Expanded(
-            flex: 2,
-            child: Text(
-              data['email'] ?? '',
-              style: TextStyle(fontSize: 14),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-
-          // Role
-          Expanded(
-            child: Container(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: role == 'student' ? Colors.blue[50] : Colors.green[50],
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                role == 'student' ? 'Student' : 'Lecturer',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: role == 'student' ? Colors.blue[700] : Colors.green[700],
-                ),
-              ),
-            ),
-          ),
-
-          // Student ID
-          Expanded(
-            child: Text(
-              data['studentId'] ?? '-',
-              style: TextStyle(fontSize: 14),
-            ),
-          ),
-
-          // Faculty
-          Expanded(
-            child: FutureBuilder<String>(
-              future: _getFacultyName(facultyId),
-              builder: (context, snapshot) {
-                return Text(
-                  snapshot.data ?? '-',
-                  style: TextStyle(fontSize: 14),
-                  overflow: TextOverflow.ellipsis,
-                );
-              },
-            ),
-          ),
-
-          // Status
-          Expanded(
-            child: Switch(
-              value: isActive,
-              onChanged: (value) => _toggleUserStatus(userDoc.id, value),
-              activeColor: Colors.green,
-            ),
-          ),
-
-          // Actions
-          SizedBox(
-            width: 100,
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.edit, size: 20),
-                  onPressed: () => _showEditUserDialog(userDoc.id, data),
-                ),
-                IconButton(
-                  icon: Icon(Icons.delete, size: 20, color: Colors.red),
-                  onPressed: () => _deleteUser(userDoc.id, data['fullName']),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<String> _getFacultyName(String facultyId) async {
-    if (facultyId.isEmpty) return '-';
-
-    final doc = await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(widget.organizationId)
-        .collection('faculties')
-        .doc(facultyId)
-        .get();
-
-    if (doc.exists) {
-      return doc['code'] ?? '-';
-    }
-    return '-';
-  }
-
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(String role) {
+    final roleText = role == 'all' ? 'users' : '${role}s';
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
             Icons.people_outline,
-            size: 80,
+            size: 64,
             color: Colors.grey[400],
           ),
           SizedBox(height: 16),
           Text(
-            'No users found',
+            'No $roleText found',
             style: TextStyle(
               fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[700],
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[600],
             ),
           ),
           SizedBox(height: 8),
           Text(
-            _searchQuery.isNotEmpty
-                ? 'Try adjusting your search criteria'
-                : 'Add your first user to get started',
+            _showInactiveUsers ? 'No $roleText in your organization' : 'No active $roleText',
             style: TextStyle(
-              color: Colors.grey[600],
+              fontSize: 16,
+              color: Colors.grey[500],
             ),
           ),
-          if (_searchQuery.isEmpty)
-            Padding(
-              padding: EdgeInsets.only(top: 24),
-              child: ElevatedButton.icon(
-                onPressed: () => _showAddUserDialog(),
-                icon: Icon(Icons.person_add),
-                label: Text('Add User'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                ),
+          SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: () => _showInviteDialog(context),
+            icon: Icon(Icons.person_add, color: Colors.white),
+            label: Text('Invite User', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
+          ),
         ],
       ),
     );
   }
 
-  void _showAddUserDialog({String? userId, Map<String, dynamic>? existingData}) {
-    String selectedRole = 'student';
+  Widget _buildUserCard(String userId, Map<String, dynamic> data) {
+    final isActive = data['isActive'] ?? true;
+    final role = data['role'] ?? 'unknown';
+    final isCurrentUser = userId == FirebaseAuth.instance.currentUser?.uid;
 
-    if (existingData != null) {
-      _emailController.text = existingData['email'] ?? '';
-      _fullNameController.text = existingData['fullName'] ?? '';
-      _studentIdController.text = existingData['studentId'] ?? '';
-      selectedRole = existingData['role'] ?? 'student';
-      _selectedFaculty = existingData['facultyId'];
-      _selectedProgram = existingData['programId'];
-      if (_selectedFaculty != null && _selectedFaculty!.isNotEmpty) {
-        _loadPrograms(_selectedFaculty!);
-      }
-    } else {
-      _emailController.clear();
-      _fullNameController.clear();
-      _passwordController.clear();
-      _studentIdController.clear();
-      _selectedFaculty = null;
-      _selectedProgram = null;
+    return Card(
+      margin: EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                // User Avatar
+                CircleAvatar(
+                  radius: 30,
+                  backgroundColor: _getRoleColor(role),
+                  child: Text(
+                    data['fullName']?.substring(0, 1).toUpperCase() ?? '?',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                SizedBox(width: 16),
+
+                // User Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          Text(
+                            data['fullName'] ?? 'Unknown User',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          if (isCurrentUser)
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.blue[50],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'You',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.blue[700],
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: _getRoleColor(role).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              role.substring(0, 1).toUpperCase() + role.substring(1),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: _getRoleColor(role),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: isActive ? Colors.green[50] : Colors.red[50],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isActive ? Icons.check_circle : Icons.cancel,
+                                  size: 12,
+                                  color: isActive ? Colors.green[700] : Colors.red[700],
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  isActive ? 'Active' : 'Inactive',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isActive ? Colors.green[700] : Colors.red[700],
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (data['emailVerified'] == false)
+                            Tooltip(
+                              message: 'Email not verified',
+                              child: Icon(
+                                Icons.warning_amber_rounded,
+                                size: 20,
+                                color: Colors.orange,
+                              ),
+                            ),
+                        ],
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        data['email'] ?? 'No email',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (role == 'student' || role == 'lecturer') ...[
+                        SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(Icons.school, size: 14, color: Colors.grey[500]),
+                            SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                '${data['facultyName'] ?? 'Unknown Faculty'}${role == 'student' && data['programName'] != null ? ' • ${data['programName']}' : ''}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey[700],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                // Actions
+                if (!isCurrentUser) ...[
+                  PopupMenuButton<String>(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit, size: 18),
+                            SizedBox(width: 12),
+                            Text('Edit User'),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: isActive ? 'deactivate' : 'activate',
+                        child: Row(
+                          children: [
+                            Icon(
+                              isActive ? Icons.block : Icons.check_circle,
+                              size: 18,
+                              color: isActive ? Colors.orange : Colors.green,
+                            ),
+                            SizedBox(width: 12),
+                            Text(isActive ? 'Deactivate' : 'Activate'),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'reset_password',
+                        child: Row(
+                          children: [
+                            Icon(Icons.lock_reset, size: 18),
+                            SizedBox(width: 12),
+                            Text('Reset Password'),
+                          ],
+                        ),
+                      ),
+                      PopupMenuDivider(),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete, size: 18, color: Colors.red),
+                            SizedBox(width: 12),
+                            Text('Delete User', style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                    ],
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'edit':
+                          _showEditDialog(context, userId, data);
+                          break;
+                        case 'activate':
+                        case 'deactivate':
+                          _toggleUserStatus(userId, !isActive);
+                          break;
+                        case 'reset_password':
+                          _sendPasswordReset(data['email']);
+                          break;
+                        case 'delete':
+                          _showDeleteDialog(context, userId, data['fullName']);
+                          break;
+                      }
+                    },
+                  ),
+                ],
+              ],
+            ),
+
+            // Mobile layout for actions on very small screens
+            if (!isCurrentUser && MediaQuery.of(context).size.width < 400) ...[
+              SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _showEditDialog(context, userId, data),
+                    icon: Icon(Icons.edit, size: 16),
+                    label: Text('Edit'),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _toggleUserStatus(userId, !isActive),
+                    icon: Icon(
+                      isActive ? Icons.block : Icons.check_circle,
+                      size: 16,
+                      color: isActive ? Colors.orange : Colors.green,
+                    ),
+                    label: Text(isActive ? 'Deactivate' : 'Activate'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getRoleColor(String role) {
+    switch (role) {
+      case 'admin':
+        return Colors.red;
+      case 'lecturer':
+        return Colors.blue;
+      case 'student':
+        return Colors.green;
+      default:
+        return Colors.grey;
     }
+  }
 
+  void _showInviteDialog(BuildContext context) {
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(userId == null ? 'Add New User' : 'Edit User'),
-          content: Container(
-            width: 500,
-            child: Form(
-              key: _formKey,
-              child: SingleChildScrollView(
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Invite User'),
+        content: Container(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.info_outline,
+                size: 48,
+                color: Colors.blue,
+              ),
+              SizedBox(height: 16),
+              Text(
+                'To invite new users to your organization:',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              SizedBox(height: 16),
+              Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Role selection
-                    DropdownButtonFormField<String>(
-                      value: selectedRole,
-                      decoration: InputDecoration(
-                        labelText: 'Role',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        DropdownMenuItem(value: 'student', child: Text('Student')),
-                        DropdownMenuItem(value: 'lecturer', child: Text('Lecturer')),
+                    Text('1. Share your organization code:', style: TextStyle(fontSize: 14)),
+                    SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.blue[200]!),
+                          ),
+                          child: Text(
+                            widget.organizationId,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[700],
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        IconButton(
+                          icon: Icon(Icons.copy, color: Colors.blue),
+                          onPressed: () {
+                            // Copy to clipboard functionality
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Organization code copied!')),
+                            );
+                          },
+                        ),
                       ],
-                      onChanged: userId == null ? (value) {
-                        setDialogState(() {
-                          selectedRole = value!;
-                        });
-                      } : null,
                     ),
                     SizedBox(height: 16),
-
-                    // Full Name
-                    TextFormField(
-                      controller: _fullNameController,
-                      decoration: InputDecoration(
-                        labelText: 'Full Name',
-                        hintText: 'Enter full name',
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Please enter full name';
-                        }
-                        return null;
-                      },
-                    ),
-                    SizedBox(height: 16),
-
-                    // Email
-                    TextFormField(
-                      controller: _emailController,
-                      enabled: userId == null,
-                      decoration: InputDecoration(
-                        labelText: 'Email',
-                        hintText: 'Enter email address',
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Please enter email';
-                        }
-                        if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-                          return 'Please enter a valid email';
-                        }
-                        return null;
-                      },
-                    ),
-                    SizedBox(height: 16),
-
-                    // Password (only for new users)
-                    if (userId == null)
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: true,
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          hintText: 'Enter password',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter password';
-                          }
-                          if (value.length < 6) {
-                            return 'Password must be at least 6 characters';
-                          }
-                          return null;
-                        },
-                      ),
-                    if (userId == null) SizedBox(height: 16),
-
-                    // Student ID (only for students)
-                    if (selectedRole == 'student')
-                      TextFormField(
-                        controller: _studentIdController,
-                        decoration: InputDecoration(
-                          labelText: 'Student ID',
-                          hintText: 'Enter student ID',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if (selectedRole == 'student' && (value == null || value.trim().isEmpty)) {
-                            return 'Please enter student ID';
-                          }
-                          return null;
-                        },
-                      ),
-                    if (selectedRole == 'student') SizedBox(height: 16),
-
-                    // Faculty
-                    DropdownButtonFormField<String>(
-                      value: _selectedFaculty,
-                      decoration: InputDecoration(
-                        labelText: 'Faculty',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        DropdownMenuItem(value: null, child: Text('Select Faculty')),
-                        ..._faculties.map((faculty) => DropdownMenuItem<String>(
-                          value: faculty['id'].toString(),
-                          child: Text('${faculty['code']} - ${faculty['name']}'),
-                        )),
-                      ],
-                      onChanged: (value) {
-                        setDialogState(() {
-                          _selectedFaculty = value;
-                          _selectedProgram = null;
-                          if (value != null) {
-                            _loadPrograms(value);
-                          }
-                        });
-                      },
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please select a faculty';
-                        }
-                        return null;
-                      },
-                    ),
-                    SizedBox(height: 16),
-
-                    // Program (only for students)
-                    if (selectedRole == 'student' && _selectedFaculty != null)
-                      DropdownButtonFormField<String>(
-                        value: _selectedProgram,
-                        decoration: InputDecoration(
-                          labelText: 'Program',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: [
-                          DropdownMenuItem(value: null, child: Text('Select Program')),
-                          ..._programs.map((program) => DropdownMenuItem<String>(
-                            value: program['id'].toString(),
-                            child: Text('${program['code']} - ${program['name']}'),
-                          )),
-                        ],
-                        onChanged: (value) {
-                          setDialogState(() {
-                            _selectedProgram = value;
-                          });
-                        },
-                        validator: (value) {
-                          if (selectedRole == 'student' && (value == null || value.isEmpty)) {
-                            return 'Please select a program';
-                          }
-                          return null;
-                        },
-                      ),
+                    Text('2. Users can sign up with this code', style: TextStyle(fontSize: 14)),
+                    SizedBox(height: 8),
+                    Text('3. They will automatically join your organization', style: TextStyle(fontSize: 14)),
                   ],
                 ),
               ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditDialog(BuildContext context, String userId, Map<String, dynamic> userData) {
+    bool isActive = userData['isActive'] ?? true;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text('Edit User'),
+          content: Container(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: TextEditingController(text: userData['fullName']),
+                  decoration: InputDecoration(
+                    labelText: 'Full Name',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  enabled: false,
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: TextEditingController(text: userData['email']),
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  enabled: false,
+                ),
+                SizedBox(height: 16),
+                SwitchListTile(
+                  title: Text('Active Status'),
+                  subtitle: Text('Inactive users cannot access the system'),
+                  value: isActive,
+                  onChanged: (value) => setState(() => isActive = value),
+                  activeColor: Colors.green,
+                ),
+              ],
             ),
           ),
           actions: [
@@ -687,11 +645,39 @@ class _UserManagementPageState extends State<UserManagementPage> {
               child: Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () => _saveUser(userId, selectedRole),
+              onPressed: () async {
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(userId)
+                      .update({
+                    'isActive': isActive,
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('User updated successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error updating user: ${e.toString()}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent,
+                backgroundColor: Colors.blue,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              child: Text(userId == null ? 'Add User' : 'Save Changes'),
+              child: Text('Update', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -699,78 +685,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
-  void _showEditUserDialog(String userId, Map<String, dynamic> data) {
-    _showAddUserDialog(userId: userId, existingData: data);
-  }
-
-  Future<void> _saveUser(String? userId, String role) async {
-    if (!_formKey.currentState!.validate()) return;
-
-    try {
-      final userData = {
-        'fullName': _fullNameController.text.trim(),
-        'role': role,
-        'facultyId': _selectedFaculty ?? '',
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-
-      if (role == 'student') {
-        userData['studentId'] = _studentIdController.text.trim();
-        userData['programId'] = _selectedProgram ?? '';
-      }
-
-      if (userId == null) {
-        // Creating new user
-        userData['email'] = _emailController.text.trim();
-        userData['organizationId'] = widget.organizationId;
-        userData['createdAt'] = FieldValue.serverTimestamp();
-        userData['isActive'] = true;
-
-        // Create auth user
-        final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
-        );
-
-        // Save user data to Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(credential.user!.uid)
-            .set(userData);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('User added successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        // Updating existing user
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .update(userData);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('User updated successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-
-      Navigator.pop(context);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error saving user: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Future<void> _toggleUserStatus(String userId, bool isActive) async {
+  void _toggleUserStatus(String userId, bool isActive) async {
     try {
       await FirebaseFirestore.instance
           .collection('users')
@@ -782,51 +697,71 @@ class _UserManagementPageState extends State<UserManagementPage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('User status updated'),
+          content: Text(isActive ? 'User activated successfully' : 'User deactivated successfully'),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error updating status'),
+          content: Text('Error updating user status: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );
     }
   }
 
-  void _deleteUser(String userId, String userName) {
+  void _sendPasswordReset(String email) async {
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Password reset email sent to $email'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending password reset: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showDeleteDialog(BuildContext context, String userId, String userName) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
         title: Text('Delete User'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Are you sure you want to delete this user?'),
-            SizedBox(height: 8),
-            Text(
-              userName,
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+            Text('Are you sure you want to delete "$userName"?'),
             SizedBox(height: 16),
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange[50],
+                color: Colors.red[50],
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange[200]!),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.warning, color: Colors.orange[700], size: 20),
+                  Icon(Icons.warning, color: Colors.red[700], size: 20),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'This action cannot be undone',
-                      style: TextStyle(color: Colors.orange[700], fontSize: 14),
+                      'This action cannot be undone. The user will lose access to all data.',
+                      style: TextStyle(
+                        color: Colors.red[700],
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ],
@@ -841,13 +776,18 @@ class _UserManagementPageState extends State<UserManagementPage> {
           ),
           ElevatedButton(
             onPressed: () async {
-              Navigator.pop(context);
               try {
+                // Instead of deleting, we'll mark as deleted
                 await FirebaseFirestore.instance
                     .collection('users')
                     .doc(userId)
-                    .delete();
+                    .update({
+                  'isActive': false,
+                  'deletedAt': FieldValue.serverTimestamp(),
+                  'deletedBy': FirebaseAuth.instance.currentUser?.uid,
+                });
 
+                Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('User deleted successfully'),
@@ -857,7 +797,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Error deleting user'),
+                    content: Text('Error deleting user: ${e.toString()}'),
                     backgroundColor: Colors.red,
                   ),
                 );
@@ -865,20 +805,14 @@ class _UserManagementPageState extends State<UserManagementPage> {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: Text('Delete'),
+            child: Text('Delete', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _fullNameController.dispose();
-    _passwordController.dispose();
-    _studentIdController.dispose();
-    super.dispose();
   }
 }

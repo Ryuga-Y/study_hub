@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:study_hub/admin/user_management.dart';
-// Import the management pages
-import '../Authentication/sign_in.dart';
+import '../Authentication/auth_services.dart';
+import '../Authentication/custom_widgets.dart';
+import 'user_management.dart';
 import 'community_management.dart';
 import 'course_management.dart';
 import 'faculty_management.dart';
 import 'program_management.dart';
-
 
 class AdminDashboard extends StatefulWidget {
   @override
@@ -16,25 +14,24 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
+  final AuthService _authService = AuthService();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // Current page tracking
+  // Navigation
   String _currentPage = 'Dashboard';
-  List<String> _breadcrumb = ['Dashboard'];
 
-  // User and organization data
+  // Data
   Map<String, dynamic>? _userData;
   Map<String, dynamic>? _organizationData;
+  bool _isLoading = true;
 
   // Statistics
-  int _totalStudents = 0;
-  int _totalLecturers = 0;
-  int _totalFaculties = 0;
-  int _totalPrograms = 0;
-  int _activeChats = 0;
-
-  // Sidebar state for responsive design
-  bool _isSidebarCollapsed = false;
+  Map<String, int> _stats = {
+    'students': 0,
+    'lecturers': 0,
+    'faculties': 0,
+    'programs': 0,
+  };
 
   @override
   void initState() {
@@ -43,25 +40,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _loadData() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    try {
+      final user = _authService.currentUser;
+      if (user == null) return;
 
-    // Load user data
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+      // Load user data
+      final userData = await _authService.getUserData(user.uid);
+      if (userData == null) return;
 
-    if (userDoc.exists) {
       setState(() {
-        _userData = userDoc.data();
+        _userData = userData;
       });
 
       // Load organization data
-      final orgId = _userData!['organizationId'];
+      final orgCode = userData['organizationCode'];
       final orgDoc = await FirebaseFirestore.instance
           .collection('organizations')
-          .doc(orgId)
+          .doc(orgCode)
           .get();
 
       if (orgDoc.exists) {
@@ -70,77 +65,83 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
 
         // Load statistics
-        await _loadStatistics(orgId);
+        await _loadStatistics(orgCode);
       }
+    } catch (e) {
+      print('Error loading data: $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
-  Future<void> _loadStatistics(String orgId) async {
-    // Count students
-    final studentsQuery = await FirebaseFirestore.instance
-        .collection('users')
-        .where('organizationId', isEqualTo: orgId)
-        .where('role', isEqualTo: 'student')
-        .where('isActive', isEqualTo: true)
-        .count()
-        .get();
+  Future<void> _loadStatistics(String orgCode) async {
+    try {
+      // Get counts using aggregation queries
+      final futures = await Future.wait([
+        FirebaseFirestore.instance
+            .collection('users')
+            .where('organizationCode', isEqualTo: orgCode)
+            .where('role', isEqualTo: 'student')
+            .where('isActive', isEqualTo: true)
+            .count()
+            .get(),
+        FirebaseFirestore.instance
+            .collection('users')
+            .where('organizationCode', isEqualTo: orgCode)
+            .where('role', isEqualTo: 'lecturer')
+            .where('isActive', isEqualTo: true)
+            .count()
+            .get(),
+        FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('faculties')
+            .where('isActive', isEqualTo: true)
+            .count()
+            .get(),
 
-    // Count lecturers
-    final lecturersQuery = await FirebaseFirestore.instance
-        .collection('users')
-        .where('organizationId', isEqualTo: orgId)
-        .where('role', isEqualTo: 'lecturer')
-        .where('isActive', isEqualTo: true)
-        .count()
-        .get();
+      ]);
 
-    // Count faculties
-    final facultiesQuery = await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(orgId)
-        .collection('faculties')
-        .where('isActive', isEqualTo: true)
-        .count()
-        .get();
-
-    // Count programs (this is an approximation, you might need a different approach)
-    int programCount = 0;
-    final faculties = await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(orgId)
-        .collection('faculties')
-        .where('isActive', isEqualTo: true)
-        .get();
-
-    for (var faculty in faculties.docs) {
-      final programs = await FirebaseFirestore.instance
+      // Count programs
+      int programCount = 0;
+      final faculties = await FirebaseFirestore.instance
           .collection('organizations')
-          .doc(orgId)
+          .doc(orgCode)
           .collection('faculties')
-          .doc(faculty.id)
-          .collection('programs')
           .where('isActive', isEqualTo: true)
-          .count()
           .get();
-      programCount += programs.count ?? 0;
-    }
 
-    setState(() {
-      _totalStudents = studentsQuery.count ?? 0;
-      _totalLecturers = lecturersQuery.count ?? 0;
-      _totalFaculties = facultiesQuery.count ?? 0;
-      _totalPrograms = programCount;
-    });
+      for (var faculty in faculties.docs) {
+        final programs = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('faculties')
+            .doc(faculty.id)
+            .collection('programs')
+            .where('isActive', isEqualTo: true)
+            .count()
+            .get();
+        programCount += programs.count ?? 0;
+      }
+
+      setState(() {
+        _stats = {
+          'students': futures[0].count ?? 0,
+          'lecturers': futures[1].count ?? 0,
+          'faculties': futures[2].count ?? 0,
+          'programs': programCount,
+        };
+      });
+    } catch (e) {
+      print('Error loading statistics: $e');
+    }
   }
 
   void _navigateTo(String page) {
     setState(() {
       _currentPage = page;
-      if (page == 'Dashboard') {
-        _breadcrumb = ['Dashboard'];
-      } else {
-        _breadcrumb = ['Dashboard', page];
-      }
     });
 
     // Close drawer on mobile
@@ -149,34 +150,65 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  Future<void> _handleLogout() async {
+    // Show confirmation dialog
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Confirm Logout'),
+        content: Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('Logout', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _authService.signOut();
+      Navigator.pushReplacementNamed(context, '/');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDesktop = MediaQuery.of(context).size.width >= 1200;
-    final isTablet = MediaQuery.of(context).size.width >= 768;
+
+    if (_isLoading) {
+      return Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.redAccent),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.grey[50],
       appBar: _buildAppBar(),
-      drawer: !isDesktop ? _buildDrawer() : null,
+      drawer: !isDesktop ? _buildMobileDrawer() : null,
       body: Row(
         children: [
-          // Sidebar for desktop
           if (isDesktop) _buildSidebar(),
-
-          // Main content
           Expanded(
-            child: Column(
-              children: [
-                // Breadcrumb
-                _buildBreadcrumb(),
-
-                // Content area
-                Expanded(
-                  child: _buildContent(),
-                ),
-              ],
-            ),
+            child: _buildContent(),
           ),
         ],
       ),
@@ -189,12 +221,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       elevation: 1,
       title: Row(
         children: [
-          if (MediaQuery.of(context).size.width >= 1200)
-            Icon(Icons.school, color: Colors.redAccent, size: 28),
-          if (MediaQuery.of(context).size.width >= 1200)
-            SizedBox(width: 12),
+          Icon(Icons.admin_panel_settings, color: Colors.redAccent, size: 28),
+          SizedBox(width: 12),
           Text(
-            _organizationData?['name'] ?? 'Study Hub Admin',
+            _organizationData?['name'] ?? 'Admin Dashboard',
             style: TextStyle(
               color: Colors.black87,
               fontSize: 20,
@@ -211,48 +241,48 @@ class _AdminDashboardState extends State<AdminDashboard> {
           : null,
       automaticallyImplyLeading: false,
       actions: [
-        // Notifications
-        IconButton(
-          icon: Stack(
+        // Organization Code
+        Container(
+          margin: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.redAccent.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
             children: [
-              Icon(Icons.notifications_outlined, color: Colors.black87),
-              Positioned(
-                right: 0,
-                top: 0,
-                child: Container(
-                  padding: EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  constraints: BoxConstraints(
-                    minWidth: 12,
-                    minHeight: 12,
-                  ),
+              Icon(Icons.business, size: 16, color: Colors.redAccent),
+              SizedBox(width: 8),
+              Text(
+                _organizationData?['code'] ?? '',
+                style: TextStyle(
+                  color: Colors.redAccent,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
-          onPressed: () {
-            // Handle notifications
-          },
         ),
 
-        // Profile menu
-        PopupMenuButton(
+        // Profile Menu
+        PopupMenuButton<String>(
           offset: Offset(0, 50),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          icon: CircleAvatar(
-            backgroundColor: Colors.redAccent,
-            child: Text(
-              _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'A',
-              style: TextStyle(color: Colors.white),
+          child: Container(
+            margin: EdgeInsets.symmetric(horizontal: 16),
+            child: CircleAvatar(
+              backgroundColor: Colors.redAccent,
+              child: Text(
+                _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'A',
+                style: TextStyle(color: Colors.white),
+              ),
             ),
           ),
-          itemBuilder: (context) => <PopupMenuEntry<String>>[
-            PopupMenuItem<String>(
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'profile',
               child: Row(
                 children: [
                   Icon(Icons.person_outline, size: 20),
@@ -260,20 +290,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   Text('Profile'),
                 ],
               ),
-              value: 'profile',
-            ),
-            PopupMenuItem<String>(
-              child: Row(
-                children: [
-                  Icon(Icons.settings_outlined, size: 20),
-                  SizedBox(width: 12),
-                  Text('Settings'),
-                ],
-              ),
-              value: 'settings',
             ),
             PopupMenuDivider(),
-            PopupMenuItem<String>(
+            PopupMenuItem(
+              value: 'logout',
               child: Row(
                 children: [
                   Icon(Icons.logout, size: 20, color: Colors.red),
@@ -281,34 +301,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   Text('Logout', style: TextStyle(color: Colors.red)),
                 ],
               ),
-              value: 'logout',
             ),
           ],
           onSelected: (value) {
-            if (value == 'profile') {
+            if (value == 'logout') {
+              _handleLogout();
+            } else if (value == 'profile') {
               _navigateTo('Profile');
-            } else if (value == 'logout') {
-              _showLogoutDialog();
             }
           },
         ),
-        SizedBox(width: 16),
       ],
     );
   }
 
   Widget _buildSidebar() {
-    final isCollapsed = _isSidebarCollapsed;
-
-    return AnimatedContainer(
-      duration: Duration(milliseconds: 200),
-      width: isCollapsed ? 70 : 250,
+    return Container(
+      width: 250,
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withValues(alpha: 0.1),
-            spreadRadius: 1,
             blurRadius: 3,
             offset: Offset(0, 0),
           ),
@@ -316,26 +330,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
       child: Column(
         children: [
-          // Toggle button
-          Container(
-            padding: EdgeInsets.all(8),
-            child: Align(
-              alignment: isCollapsed ? Alignment.center : Alignment.centerRight,
-              child: IconButton(
-                icon: Icon(
-                  isCollapsed ? Icons.menu : Icons.menu_open,
-                  color: Colors.grey[700],
-                ),
-                onPressed: () {
-                  setState(() {
-                    _isSidebarCollapsed = !_isSidebarCollapsed;
-                  });
-                },
-              ),
-            ),
-          ),
-
-          // Menu items
+          SizedBox(height: 20),
           Expanded(
             child: ListView(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -344,132 +339,111 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   icon: Icons.dashboard,
                   title: 'Dashboard',
                   isSelected: _currentPage == 'Dashboard',
-                  isCollapsed: isCollapsed,
                   onTap: () => _navigateTo('Dashboard'),
                 ),
                 _buildMenuItem(
                   icon: Icons.people,
                   title: 'Users',
                   isSelected: _currentPage == 'Users',
-                  isCollapsed: isCollapsed,
                   onTap: () => _navigateTo('Users'),
-                ),
-                _buildMenuItem(
-                  icon: Icons.people_outline,
-                  title: 'Community',
-                  isSelected: _currentPage == 'Community',
-                  isCollapsed: isCollapsed,
-                  onTap: () => _navigateTo('Community'),
-                ),
-                _buildMenuItem(
-                  icon: Icons.chat_bubble,
-                  title: 'Chat',
-                  isSelected: _currentPage == 'Chat',
-                  isCollapsed: isCollapsed,
-                  onTap: () => _navigateTo('Chat'),
-                  badge: _activeChats > 0 ? _activeChats.toString() : null,
                 ),
                 _buildMenuItem(
                   icon: Icons.school,
                   title: 'Faculties',
                   isSelected: _currentPage == 'Faculties',
-                  isCollapsed: isCollapsed,
                   onTap: () => _navigateTo('Faculties'),
                 ),
                 _buildMenuItem(
                   icon: Icons.book,
                   title: 'Programs',
                   isSelected: _currentPage == 'Programs',
-                  isCollapsed: isCollapsed,
                   onTap: () => _navigateTo('Programs'),
                 ),
                 _buildMenuItem(
                   icon: Icons.library_books,
                   title: 'Courses',
                   isSelected: _currentPage == 'Courses',
-                  isCollapsed: isCollapsed,
                   onTap: () => _navigateTo('Courses'),
+                ),
+                _buildMenuItem(
+                  icon: Icons.people_outline,
+                  title: 'Community',
+                  isSelected: _currentPage == 'Community',
+                  onTap: () => _navigateTo('Community'),
                 ),
                 Divider(height: 32),
                 _buildMenuItem(
                   icon: Icons.person,
                   title: 'Profile',
                   isSelected: _currentPage == 'Profile',
-                  isCollapsed: isCollapsed,
                   onTap: () => _navigateTo('Profile'),
                 ),
               ],
             ),
           ),
 
-          // Organization code at bottom
-          if (!isCollapsed)
-            Container(
-              padding: EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                border: Border(
-                  top: BorderSide(color: Colors.grey[300]!),
-                ),
+          // User info at bottom
+          Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(color: Colors.grey[300]!),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Organization Code',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: Colors.redAccent,
+                  child: Text(
+                    _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'A',
+                    style: TextStyle(color: Colors.white),
                   ),
-                  SizedBox(height: 4),
-                  Row(
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.redAccent.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          _organizationData?['code'] ?? '',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.redAccent,
-                            fontSize: 16,
-                          ),
+                      Text(
+                        _userData?['fullName'] ?? 'Admin',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
                         ),
                       ),
-                      SizedBox(width: 8),
-                      IconButton(
-                        icon: Icon(Icons.copy, size: 18),
-                        onPressed: () {
-                          // Copy to clipboard
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Organization code copied!')),
-                          );
-                        },
+                      Text(
+                        'Administrator',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildDrawer() {
+  Widget _buildMobileDrawer() {
     return Drawer(
       child: Container(
         color: Colors.white,
-        child: Column(
+        child: ListView(
+          padding: EdgeInsets.zero,
           children: [
-            // Drawer header
             DrawerHeader(
               decoration: BoxDecoration(
-                color: Colors.redAccent,
+                gradient: LinearGradient(
+                  colors: [Colors.red[700]!, Colors.redAccent],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -505,70 +479,49 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ],
               ),
             ),
-
-            // Menu items
-            Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  _buildDrawerItem(
-                    icon: Icons.dashboard,
-                    title: 'Dashboard',
-                    isSelected: _currentPage == 'Dashboard',
-                    onTap: () => _navigateTo('Dashboard'),
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.people,
-                    title: 'Users',
-                    isSelected: _currentPage == 'Users',
-                    onTap: () => _navigateTo('Users'),
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.people_outline,
-                    title: 'Community',
-                    isSelected: _currentPage == 'Community',
-                    onTap: () => _navigateTo('Community'),
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.chat_bubble,
-                    title: 'Chat',
-                    isSelected: _currentPage == 'Chat',
-                    onTap: () => _navigateTo('Chat'),
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.school,
-                    title: 'Faculties',
-                    isSelected: _currentPage == 'Faculties',
-                    onTap: () => _navigateTo('Faculties'),
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.book,
-                    title: 'Programs',
-                    isSelected: _currentPage == 'Programs',
-                    onTap: () => _navigateTo('Programs'),
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.library_books,
-                    title: 'Courses',
-                    isSelected: _currentPage == 'Courses',
-                    onTap: () => _navigateTo('Courses'),
-                  ),
-                  Divider(),
-                  _buildDrawerItem(
-                    icon: Icons.person,
-                    title: 'Profile',
-                    isSelected: _currentPage == 'Profile',
-                    onTap: () => _navigateTo('Profile'),
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.logout,
-                    title: 'Logout',
-                    isSelected: false,
-                    onTap: _showLogoutDialog,
-                    textColor: Colors.red,
-                  ),
-                ],
-              ),
+            _buildDrawerItem(
+              icon: Icons.dashboard,
+              title: 'Dashboard',
+              isSelected: _currentPage == 'Dashboard',
+              onTap: () => _navigateTo('Dashboard'),
+            ),
+            _buildDrawerItem(
+              icon: Icons.people,
+              title: 'Users',
+              isSelected: _currentPage == 'Users',
+              onTap: () => _navigateTo('Users'),
+            ),
+            _buildDrawerItem(
+              icon: Icons.school,
+              title: 'Faculties',
+              isSelected: _currentPage == 'Faculties',
+              onTap: () => _navigateTo('Faculties'),
+            ),
+            _buildDrawerItem(
+              icon: Icons.book,
+              title: 'Programs',
+              isSelected: _currentPage == 'Programs',
+              onTap: () => _navigateTo('Programs'),
+            ),
+            _buildDrawerItem(
+              icon: Icons.library_books,
+              title: 'Courses',
+              isSelected: _currentPage == 'Courses',
+              onTap: () => _navigateTo('Courses'),
+            ),
+            _buildDrawerItem(
+              icon: Icons.people_outline,
+              title: 'Community',
+              isSelected: _currentPage == 'Community',
+              onTap: () => _navigateTo('Community'),
+            ),
+            Divider(),
+            _buildDrawerItem(
+              icon: Icons.logout,
+              title: 'Logout',
+              isSelected: false,
+              onTap: _handleLogout,
+              textColor: Colors.red,
             ),
           ],
         ),
@@ -580,65 +533,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
     required IconData icon,
     required String title,
     required bool isSelected,
-    required bool isCollapsed,
     required VoidCallback onTap,
-    String? badge,
   }) {
-    return Tooltip(
-      message: isCollapsed ? title : '',
-      child: Container(
-        margin: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.redAccent.withValues(alpha: 0.1) : null,
-          borderRadius: BorderRadius.circular(8),
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: isSelected ? Colors.redAccent.withValues(alpha: 0.1) : null,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: Icon(
+          icon,
+          color: isSelected ? Colors.redAccent : Colors.grey[700],
         ),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: isCollapsed ? 16 : 20,
-              vertical: 12,
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  icon,
-                  color: isSelected ? Colors.redAccent : Colors.grey[700],
-                  size: 24,
-                ),
-                if (!isCollapsed) ...[
-                  SizedBox(width: 16),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        color: isSelected ? Colors.redAccent : Colors.grey[800],
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                  if (badge != null)
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.redAccent,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        badge,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                ],
-              ],
-            ),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: isSelected ? Colors.redAccent : Colors.grey[800],
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           ),
+        ),
+        onTap: onTap,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
         ),
       ),
     );
@@ -669,53 +586,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildBreadcrumb() {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(color: Colors.grey[200]!),
-        ),
-      ),
-      child: Row(
-        children: [
-          for (int i = 0; i < _breadcrumb.length; i++) ...[
-            if (i > 0)
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Icon(Icons.chevron_right, size: 20, color: Colors.grey),
-              ),
-            Text(
-              _breadcrumb[i],
-              style: TextStyle(
-                color: i == _breadcrumb.length - 1 ? Colors.black87 : Colors.grey,
-                fontWeight: i == _breadcrumb.length - 1 ? FontWeight.bold : FontWeight.normal,
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   Widget _buildContent() {
     switch (_currentPage) {
       case 'Dashboard':
         return _buildDashboardContent();
       case 'Users':
-        return UserManagementPage(organizationId: _userData?['organizationId'] ?? '');
-      case 'Community':
-        return CommunityManagementPage(organizationId: _userData?['organizationId'] ?? '');
-      case 'Chat':
-        return _buildChatContent();
+        return UserManagementPage(organizationId: _organizationData?['code'] ?? '');
       case 'Faculties':
-        return FacultyManagementPage(organizationId: _userData?['organizationId'] ?? '');
+        return FacultyManagementPage(organizationId: _organizationData?['code'] ?? '');
       case 'Programs':
-        return ProgramManagementPage(organizationId: _userData?['organizationId'] ?? '');
+        return ProgramManagementPage(organizationId: _organizationData?['code'] ?? '');
       case 'Courses':
-        return CourseManagementPage(organizationId: _userData?['organizationId'] ?? '');
+        return CourseManagementPage(organizationId: _organizationData?['code'] ?? '');
+      case 'Community':
+        return CommunityManagementPage(organizationId: _organizationData?['code'] ?? '');
       case 'Profile':
         return _buildProfileContent();
       default:
@@ -729,65 +613,104 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Welcome message
-          Text(
-            'Welcome back, ${_userData?['fullName']?.split(' ').first ?? 'Admin'}!',
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
+          // Welcome Header
+          Container(
+            padding: EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.red[700]!, Colors.redAccent],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.redAccent.withValues(alpha: 0.3),
+                  blurRadius: 10,
+                  offset: Offset(0, 5),
+                ),
+              ],
             ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'Here\'s what\'s happening in your organization today.',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey[600],
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Welcome back, ${_userData?['fullName']?.split(' ').first ?? 'Admin'}!',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Here\'s what\'s happening in your organization today',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.dashboard,
+                  size: 64,
+                  color: Colors.white.withValues(alpha: 0.3),
+                ),
+              ],
             ),
           ),
           SizedBox(height: 32),
 
-          // Statistics cards in 2x2 grid
-          GridView.count(
-            shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            crossAxisSpacing: 16,
-            mainAxisSpacing: 16,
-            childAspectRatio: MediaQuery.of(context).size.width > 768 ? 2.5 : 1.5,
-            children: [
-              _buildStatCard(
-                title: 'Total Students',
-                value: _totalStudents.toString(),
-                icon: Icons.school,
-                color: Colors.blue,
-                trend: '+12%',
-              ),
-              _buildStatCard(
-                title: 'Total Lecturers',
-                value: _totalLecturers.toString(),
-                icon: Icons.person,
-                color: Colors.green,
-                trend: '+5%',
-              ),
-              _buildStatCard(
-                title: 'Faculties',
-                value: _totalFaculties.toString(),
-                icon: Icons.business,
-                color: Colors.orange,
-              ),
-              _buildStatCard(
-                title: 'Programs',
-                value: _totalPrograms.toString(),
-                icon: Icons.book,
-                color: Colors.purple,
-              ),
-            ],
+          // Statistics Grid
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final crossAxisCount = constraints.maxWidth < 600 ? 1 :
+              constraints.maxWidth < 900 ? 2 : 4;
+
+              return GridView.count(
+                shrinkWrap: true,
+                physics: NeverScrollableScrollPhysics(),
+                crossAxisCount: crossAxisCount,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: constraints.maxWidth < 600 ? 2 : 1.5,
+                children: [
+                  _buildStatCard(
+                    title: 'Total Students',
+                    value: _stats['students'].toString(),
+                    icon: Icons.school,
+                    color: Colors.blue,
+                  ),
+                  _buildStatCard(
+                    title: 'Total Lecturers',
+                    value: _stats['lecturers'].toString(),
+                    icon: Icons.person,
+                    color: Colors.green,
+                  ),
+                  _buildStatCard(
+                    title: 'Faculties',
+                    value: _stats['faculties'].toString(),
+                    icon: Icons.business,
+                    color: Colors.orange,
+                  ),
+                  _buildStatCard(
+                    title: 'Programs',
+                    value: _stats['programs'].toString(),
+                    icon: Icons.book,
+                    color: Colors.purple,
+                  ),
+                ],
+              );
+            },
           ),
           SizedBox(height: 32),
 
-          // Quick actions
+          // Quick Actions
           Text(
             'Quick Actions',
             style: TextStyle(
@@ -803,33 +726,70 @@ class _AdminDashboardState extends State<AdminDashboard> {
             children: [
               _buildQuickAction(
                 icon: Icons.person_add,
-                label: 'Add User',
-                onTap: () {
-                  _navigateTo('Users');
-                },
+                label: MediaQuery.of(context).size.width > 400 ? 'Add User' : 'User',
+                onTap: () => _navigateTo('Users'),
               ),
               _buildQuickAction(
                 icon: Icons.school,
-                label: 'Add Faculty',
-                onTap: () {
-                  _navigateTo('Faculties');
-                },
+                label: MediaQuery.of(context).size.width > 400 ? 'Add Faculty' : 'Faculty',
+                onTap: () => _navigateTo('Faculties'),
               ),
               _buildQuickAction(
                 icon: Icons.book,
-                label: 'Add Program',
-                onTap: () {
-                  _navigateTo('Programs');
-                },
+                label: MediaQuery.of(context).size.width > 400 ? 'Add Program' : 'Program',
+                onTap: () => _navigateTo('Programs'),
               ),
               _buildQuickAction(
                 icon: Icons.library_books,
-                label: 'Add Course',
-                onTap: () {
-                  _navigateTo('Courses');
-                },
+                label: MediaQuery.of(context).size.width > 400 ? 'Add Course' : 'Course',
+                onTap: () => _navigateTo('Courses'),
               ),
             ],
+          ),
+
+          SizedBox(height: 32),
+
+          // Recent Activity (placeholder)
+          Text(
+            'Recent Activity',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          SizedBox(height: 16),
+          Container(
+            padding: EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withValues(alpha: 0.1),
+                  blurRadius: 5,
+                ),
+              ],
+            ),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.history,
+                    size: 48,
+                    color: Colors.grey[400],
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Activity feed will appear here',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -841,7 +801,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     required String value,
     required IconData icon,
     required Color color,
-    String? trend,
   }) {
     return Container(
       padding: EdgeInsets.all(20),
@@ -851,56 +810,42 @@ class _AdminDashboardState extends State<AdminDashboard> {
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withValues(alpha: 0.1),
-            spreadRadius: 1,
-            blurRadius: 3,
+            blurRadius: 5,
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.start, // or .center
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  icon,
-                  color: color,
-                  size: 24,
-                ),
-              ),
-              if (trend != null)
-                Text(
-                  trend,
-                  style: TextStyle(
-                    color: Colors.green,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-            ],
+          Container(
+            padding: EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              color: color,
+              size: 32,
+            ),
           ),
-          SizedBox(height: 8), // Reduced height
+          SizedBox(height: 16),
           Text(
             value,
             style: TextStyle(
-              fontSize: 28, // Reduced font size
+              fontSize: 32,
               fontWeight: FontWeight.bold,
               color: Colors.black87,
             ),
           ),
+          SizedBox(height: 4),
           Text(
             title,
             style: TextStyle(
               fontSize: 14,
               color: Colors.grey[600],
             ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
@@ -912,115 +857,167 @@ class _AdminDashboardState extends State<AdminDashboard> {
     required String label,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.redAccent.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: Colors.redAccent.withValues(alpha: 0.3),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: Colors.redAccent.withValues(alpha: 0.3),
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                color: Colors.redAccent,
+                size: 20,
+              ),
+              SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.redAccent,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              color: Colors.redAccent,
-              size: 20,
-            ),
-            SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.redAccent,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
       ),
-    );
-  }
-
-  // Placeholder for other content pages
-  Widget _buildChatContent() {
-    return Center(
-      child: Text('Chat Management - To be implemented'),
     );
   }
 
   Widget _buildProfileContent() {
-    return Center(
-      child: Text('Profile Settings - To be implemented'),
-    );
-  }
-
-  // Updated logout dialog method with proper navigation handling
-  void _showLogoutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Logout'),
-        content: Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                // Close the dialog first
-                Navigator.pop(context);
-
-                // Show loading indicator
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (context) => Center(
-                    child: CircularProgressIndicator(),
-                  ),
-                );
-
-                // Sign out from Firebase
-                await FirebaseAuth.instance.signOut();
-
-                // Close loading dialog
-                Navigator.pop(context);
-
-                // Use direct navigation instead of named route
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => SignInPage(), // Import your SignInPage widget
-                  ),
-                      (route) => false,
-                );
-
-              } catch (e) {
-                // Close loading dialog if it's open
-                Navigator.pop(context);
-
-                // Show error message
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Logout failed: ${e.toString()}'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Profile Settings',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
             ),
-            child: Text('Logout'),
+          ),
+          SizedBox(height: 24),
+
+          // Profile Card
+          Container(
+            padding: EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withValues(alpha: 0.1),
+                  blurRadius: 5,
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                CircleAvatar(
+                  radius: 50,
+                  backgroundColor: Colors.redAccent,
+                  child: Text(
+                    _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'A',
+                    style: TextStyle(
+                      fontSize: 36,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  _userData?['fullName'] ?? 'Admin User',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  _userData?['email'] ?? '',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                SizedBox(height: 24),
+                Divider(),
+                SizedBox(height: 24),
+                _buildInfoRow('Role', 'Administrator'),
+                SizedBox(height: 16),
+                _buildInfoRow('Organization', _organizationData?['name'] ?? ''),
+                SizedBox(height: 16),
+                _buildInfoRow('Organization Code', _organizationData?['code'] ?? ''),
+                SizedBox(height: 16),
+                _buildInfoRow('Member Since', _formatDate(_userData?['createdAt'])),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 24),
+
+          // Action Buttons
+          CustomButton(
+            text: 'Change Password',
+            onPressed: () {
+              // Implement password change
+            },
+            backgroundColor: Colors.blue,
+            icon: Icons.lock,
+          ),
+
+          SizedBox(height: 16),
+
+          CustomButton(
+            text: 'Logout',
+            onPressed: _handleLogout,
+            backgroundColor: Colors.red,
+            icon: Icons.logout,
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 14,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatDate(dynamic timestamp) {
+    if (timestamp == null) return 'N/A';
+    if (timestamp is Timestamp) {
+      final date = timestamp.toDate();
+      return '${date.day}/${date.month}/${date.year}';
+    }
+    return 'N/A';
   }
 }

@@ -1,12 +1,12 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:study_hub/Authentication/sign_in.dart';
+import 'auth_services.dart';
+import 'custom_widgets.dart';
+import 'validators.dart';
 
 class SignUpPage extends StatefulWidget {
-  final String role; // The role passed from RoleSelectionPage (student or lecturer)
+  final String role;
 
-  const SignUpPage({super.key, required this.role});
+  const SignUpPage({Key? key, required this.role}) : super(key: key);
 
   @override
   _SignUpPageState createState() => _SignUpPageState();
@@ -19,13 +19,12 @@ class _SignUpPageState extends State<SignUpPage> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _organizationCodeController = TextEditingController();
+  final _authService = AuthService();
 
-  String? errorMessage;
   bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
   bool _isCheckingOrgCode = false;
-
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String? _organizationId;
   String? _organizationName;
@@ -34,287 +33,6 @@ class _SignUpPageState extends State<SignUpPage> {
 
   List<Map<String, dynamic>> _faculties = [];
   List<Map<String, dynamic>> _programs = [];
-
-  // Check if organization code exists and get organization details
-  Future<void> _checkOrganizationCode() async {
-    if (_organizationCodeController.text.trim().isEmpty) {
-      setState(() {
-        _organizationId = null;
-        _organizationName = null;
-        _faculties = [];
-        _programs = [];
-        _selectedFacultyId = null;
-        _selectedProgramId = null;
-      });
-      return;
-    }
-
-    setState(() {
-      _isCheckingOrgCode = true;
-    });
-
-    try {
-      String orgCode = _organizationCodeController.text.trim().toUpperCase();
-
-      // Query organizations by code
-      QuerySnapshot orgSnapshot = await _firestore
-          .collection('organizations')
-          .where('code', isEqualTo: orgCode)
-          .where('isActive', isEqualTo: true)
-          .limit(1)
-          .get();
-
-      if (orgSnapshot.docs.isNotEmpty) {
-        DocumentSnapshot orgDoc = orgSnapshot.docs.first;
-
-        setState(() {
-          _organizationId = orgDoc.id;
-          _organizationName = orgDoc['name'];
-          errorMessage = null;
-        });
-
-        // Load faculties for this organization
-        await _loadFaculties();
-      } else {
-        setState(() {
-          _organizationId = null;
-          _organizationName = null;
-          _faculties = [];
-          _programs = [];
-          _selectedFacultyId = null;
-          _selectedProgramId = null;
-          errorMessage = 'Invalid organization code';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        errorMessage = 'Error checking organization code';
-      });
-    } finally {
-      setState(() {
-        _isCheckingOrgCode = false;
-      });
-    }
-  }
-
-  // Load faculties for the organization
-  Future<void> _loadFaculties() async {
-    if (_organizationId == null) return;
-
-    try {
-      QuerySnapshot facultySnapshot = await _firestore
-          .collection('organizations')
-          .doc(_organizationId)
-          .collection('faculties')
-          .where('isActive', isEqualTo: true)
-          .orderBy('name')
-          .get();
-
-      setState(() {
-        _faculties = facultySnapshot.docs.map((doc) => {
-          'id': doc.id,
-          'name': doc['name'],
-          'code': doc['code'],
-        }).toList();
-      });
-    } catch (e) {
-      print('Error loading faculties: $e');
-    }
-  }
-
-  // Load programs for selected faculty
-  Future<void> _loadPrograms(String facultyId) async {
-    if (_organizationId == null || facultyId.isEmpty) return;
-
-    try {
-      QuerySnapshot programSnapshot = await _firestore
-          .collection('organizations')
-          .doc(_organizationId)
-          .collection('faculties')
-          .doc(facultyId)
-          .collection('programs')
-          .where('isActive', isEqualTo: true)
-          .orderBy('name')
-          .get();
-
-      setState(() {
-        _programs = programSnapshot.docs.map((doc) => {
-          'id': doc.id,
-          'name': doc['name'],
-          'code': doc['code'],
-        }).toList();
-      });
-    } catch (e) {
-      print('Error loading programs: $e');
-    }
-  }
-
-  // Sign Up method
-  Future<void> signUp() async {
-    if (_organizationId == null) {
-      setState(() {
-        errorMessage = 'Please enter a valid organization code';
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      errorMessage = null;
-    });
-
-    try {
-      // Create a new user with Firebase Authentication
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      User? user = userCredential.user;
-
-      if (user != null) {
-        // Update display name
-        await user.updateDisplayName(_nameController.text.trim());
-
-        // Get selected faculty details
-        Map<String, dynamic>? selectedFaculty = _faculties.firstWhere(
-              (f) => f['id'] == _selectedFacultyId,
-          orElse: () => {},
-        );
-
-        // Prepare user data
-        Map<String, dynamic> userData = {
-          'fullName': _nameController.text.trim(),
-          'email': _emailController.text.trim(),
-          'role': widget.role,
-          'organizationId': _organizationId,
-          'organizationName': _organizationName,
-          'facultyId': _selectedFacultyId,
-          'facultyName': selectedFaculty['name'] ?? '',
-          'facultyCode': selectedFaculty['code'] ?? '',
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-          'isActive': true,
-        };
-
-        // Add program details for students
-        if (widget.role == 'student' && _selectedProgramId != null) {
-          Map<String, dynamic>? selectedProgram = _programs.firstWhere(
-                (p) => p['id'] == _selectedProgramId,
-            orElse: () => {},
-          );
-
-          userData['programId'] = _selectedProgramId;
-          userData['programName'] = selectedProgram['name'] ?? '';
-          userData['programCode'] = selectedProgram['code'] ?? '';
-        }
-
-        // Add user data to Firestore
-        await _firestore.collection('users').doc(user.uid).set(userData);
-
-        // Create audit log entry
-        await _firestore
-            .collection('organizations')
-            .doc(_organizationId)
-            .collection('audit_logs')
-            .add({
-          'action': '${widget.role}_account_created',
-          'performedBy': user.uid,
-          'timestamp': FieldValue.serverTimestamp(),
-          'details': {
-            'userEmail': _emailController.text.trim(),
-            'userName': _nameController.text.trim(),
-            'role': widget.role,
-            'faculty': selectedFaculty['name'] ?? '',
-          }
-        });
-
-        setState(() {
-          _isLoading = false;
-        });
-
-        // Show success snackbar
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Container(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.check_circle,
-                    color: Colors.white,
-                    size: 24,
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Welcome to $_organizationName! 🎉',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Your ${widget.role} account has been created successfully.',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.white.withValues(alpha: 0.9),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            backgroundColor: Colors.green[600],
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            margin: EdgeInsets.all(20),
-            duration: Duration(seconds: 3),
-          ),
-        );
-
-        await Future.delayed(Duration(seconds: 2));
-
-        // Navigate to sign-in page
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => SignInPage()),
-        );
-      }
-    } on FirebaseAuthException catch (e) {
-      setState(() {
-        _isLoading = false;
-        errorMessage = e.message ?? 'Error during sign-up';
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage!),
-          backgroundColor: Colors.red[600],
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          margin: EdgeInsets.all(20),
-        ),
-      );
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        errorMessage = 'An unexpected error occurred. Please try again.';
-      });
-    }
-  }
 
   @override
   void dispose() {
@@ -326,319 +44,328 @@ class _SignUpPageState extends State<SignUpPage> {
     super.dispose();
   }
 
+  Future<void> _checkOrganizationCode() async {
+    final code = _organizationCodeController.text.trim().toUpperCase();
+    print('Checking organization code: $code');
+    if (code.isEmpty || code.length < 3) {
+      setState(() {
+        _organizationId = null;
+        _organizationName = null;
+        _faculties = [];
+        _programs = [];
+      });
+      return;
+    }
+
+    setState(() => _isCheckingOrgCode = true);
+
+    final orgDetails = await _authService.getOrganizationDetails(code);
+
+    if (orgDetails != null) {
+      setState(() {
+        _organizationId = orgDetails['id'];
+        _organizationName = orgDetails['name'];
+      });
+      await _loadFaculties();
+    } else {
+      setState(() {
+        _organizationId = null;
+        _organizationName = null;
+        _faculties = [];
+        _programs = [];
+      });
+    }
+
+    setState(() => _isCheckingOrgCode = false);
+  }
+
+  Future<void> _loadFaculties() async {
+    if (_organizationId == null) return;
+    final faculties = await _authService.getFaculties(_organizationId!);
+    setState(() => _faculties = faculties);
+  }
+
+  Future<void> _loadPrograms(String facultyId) async {
+    if (_organizationId == null) return;
+    final programs = await _authService.getPrograms(_organizationId!, facultyId);
+    setState(() => _programs = programs);
+  }
+
+  Future<void> _signUp() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    // Get selected faculty details
+    final selectedFaculty = _faculties.firstWhere(
+          (f) => f['id'] == _selectedFacultyId,
+      orElse: () => {},
+    );
+
+    // Get selected program details (for students)
+    String? programId;
+    String? programName;
+
+    if (widget.role == 'student' && _selectedProgramId != null) {
+      final selectedProgram = _programs.firstWhere(
+            (p) => p['id'] == _selectedProgramId,
+        orElse: () => {},
+      );
+      programId = _selectedProgramId;
+      programName = selectedProgram.isNotEmpty ? selectedProgram['name'] : null;
+    }
+
+    final result = await _authService.signUpUser(
+      email: _emailController.text.trim(),
+      password: _passwordController.text.trim(),
+      fullName: _nameController.text.trim(),
+      role: widget.role,
+      organizationCode: _organizationCodeController.text.trim().toUpperCase(), // FIX: Convert to uppercase
+      facultyId: _selectedFacultyId,
+      facultyName: selectedFaculty['name'],
+      programId: programId,
+      programName: programName,
+    );
+
+    setState(() => _isLoading = false);
+
+    if (result.success) {
+      SuccessSnackbar.show(
+        context,
+        'Welcome to $_organizationName! 🎉',
+        subtitle: 'Please check your email to verify your account',
+      );
+
+      await Future.delayed(Duration(seconds: 2));
+      Navigator.pushReplacementNamed(context, '/');
+    } else {
+      ErrorSnackbar.show(context, result.message);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(widget.role == 'student' ? 'Student Sign Up' : 'Lecturer Sign Up'),
+        title: Text('${widget.role == 'student' ? 'Student' : 'Lecturer'} Sign Up'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.black,
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
-        backgroundColor: Colors.white,
-        elevation: 0,
       ),
-      body: Padding(
-        padding: EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(24.0),
+          child: Form(
+            key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Header
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       'Join Study Hub Today',
                       style: TextStyle(
-                        fontSize: 32,
+                        fontSize: 28,
                         fontWeight: FontWeight.bold,
-                        fontFamily: 'Abeezee',
-                        color: Colors.black,
+                        color: Color(0xFF3E4A89),
                       ),
                     ),
                     SizedBox(width: 8),
                     Image.asset(
                       'assets/images/sparkle.png',
-                      height: 35,
-                      width: 35,
+                      height: 30,
+                      width: 30,
                     ),
                   ],
                 ),
-                SizedBox(height: 10),
+                SizedBox(height: 8),
                 Text(
                   widget.role == 'student'
-                      ? 'Create your Student account and unlock a world of study.'
-                      : 'Create your Lecturer account and unlock a world of study',
-                  style: TextStyle(color: Colors.blueGrey, fontSize: 16, fontFamily: 'Abeezee'),
-                ),
-                SizedBox(height: 30),
-
-                // Organization Code Field
-                TextFormField(
-                  controller: _organizationCodeController,
-                  decoration: InputDecoration(
-                    prefixIcon: Icon(Icons.business, color: Colors.blueAccent),
-                    suffixIcon: _isCheckingOrgCode
-                        ? Padding(
-                      padding: EdgeInsets.all(12),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                        : IconButton(
-                      icon: Icon(Icons.check_circle,
-                          color: _organizationId != null ? Colors.green : Colors.grey),
-                      onPressed: _checkOrganizationCode,
-                    ),
-                    labelText: 'Organization Code',
-                    helperText: _organizationName ?? 'Enter your organization code',
-                    helperStyle: TextStyle(
-                      color: _organizationId != null ? Colors.green : null,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.blueAccent),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                      ? 'Create your student account and start learning'
+                      : 'Create your lecturer account and start teaching',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey[600],
                   ),
-                  onChanged: (value) {
-                    if (value.length >= 3) {
-                      _checkOrganizationCode();
-                    }
-                  },
-                  validator: (val) {
-                    if (val == null || val.isEmpty) {
-                      return 'Please enter organization code';
-                    }
+                ),
+                SizedBox(height: 32),
+
+                // Organization code field
+                CustomTextField(
+                  controller: _organizationCodeController,
+                  label: 'Organization Code',
+                  icon: Icons.business,
+                  textCapitalization: TextCapitalization.characters,
+                  helperText: _organizationName,
+                  validator: (value) {
+                    final error = Validators.organizationCode(value);
+                    if (error != null) return error;
                     if (_organizationId == null) {
                       return 'Invalid organization code';
                     }
                     return null;
                   },
+                  onChanged: (value) {
+                    if (value.length >= 3) {
+                      _checkOrganizationCode();
+                    } else {
+                      setState(() {
+                        _organizationId = null;
+                        _organizationName = null;
+                        _faculties = [];
+                        _programs = [];
+                      });
+                    }
+                  },
+                  suffixIcon: _isCheckingOrgCode
+                      ? Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                      : _organizationId != null
+                      ? Icon(Icons.check_circle, color: Colors.green)
+                      : null,
                 ),
-                SizedBox(height: 15),
+                SizedBox(height: 20),
 
-                _buildTextField(_nameController, 'Full Name', Icons.person),
-                SizedBox(height: 15),
+                // Personal information
+                CustomTextField(
+                  controller: _nameController,
+                  label: 'Full Name',
+                  icon: Icons.person,
+                  validator: (value) => Validators.required(value, 'full name'),
+                ),
+                SizedBox(height: 20),
 
-                _buildTextField(_emailController, 'Email', Icons.email),
-                SizedBox(height: 15),
+                CustomTextField(
+                  controller: _emailController,
+                  label: 'Email',
+                  icon: Icons.email,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: Validators.email,
+                ),
+                SizedBox(height: 20),
 
-                _buildTextField(_passwordController, 'Password', Icons.lock, obscureText: true),
-                SizedBox(height: 15),
+                CustomTextField(
+                  controller: _passwordController,
+                  label: 'Password',
+                  icon: Icons.lock,
+                  obscureText: _obscurePassword,
+                  validator: Validators.password,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.grey,
+                    ),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+                SizedBox(height: 20),
 
-                _buildTextField(_confirmPasswordController, 'Confirm Password', Icons.lock, obscureText: true),
-                SizedBox(height: 15),
+                CustomTextField(
+                  controller: _confirmPasswordController,
+                  label: 'Confirm Password',
+                  icon: Icons.lock_outline,
+                  obscureText: _obscureConfirmPassword,
+                  validator: (value) => Validators.confirmPassword(value, _passwordController.text),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.grey,
+                    ),
+                    onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                  ),
+                ),
+                SizedBox(height: 20),
 
                 // Faculty dropdown
                 DropdownButtonFormField<String>(
-                  isExpanded: true,
                   value: _selectedFacultyId,
                   onChanged: _organizationId == null
                       ? null
-                      : (newValue) {
+                      : (value) {
                     setState(() {
-                      _selectedFacultyId = newValue;
+                      _selectedFacultyId = value;
                       _selectedProgramId = null;
                       _programs = [];
                     });
-                    if (newValue != null && widget.role == 'student') {
-                      _loadPrograms(newValue);
+                    if (value != null && widget.role == 'student') {
+                      _loadPrograms(value);
                     }
                   },
                   items: _faculties.map((faculty) {
                     return DropdownMenuItem<String>(
                       value: faculty['id'],
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            faculty['code'] ?? '',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          Text(
-                            faculty['name'] ?? '',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
+                      child: Text('${faculty['code']} - ${faculty['name']}'),
                     );
                   }).toList(),
                   decoration: InputDecoration(
                     labelText: 'Faculty',
-                    prefixIcon: Icon(Icons.school, color: Colors.blueAccent),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.blueAccent),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    prefixIcon: Icon(Icons.school, color: Colors.purple[400]),
+                    border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
                     filled: _organizationId == null,
-                    fillColor: _organizationId == null ? Colors.grey[100] : null,
+                    fillColor: _organizationId == null ? Colors.grey[200] : null,
                   ),
-                  hint: Text(
-                    _organizationId == null
-                        ? 'Enter organization code first'
-                        : 'Select faculty',
-                    style: TextStyle(fontSize: 14),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please select faculty';
-                    }
-                    return null;
-                  },
+                  hint: Text(_organizationId == null ? 'Enter organization code first' : 'Select faculty'),
+                  validator: (value) => Validators.required(value, 'faculty'),
                 ),
-                SizedBox(height: 15),
 
-                // Program dropdown - only for students
+                // Program dropdown (students only)
                 if (widget.role == 'student') ...[
+                  SizedBox(height: 20),
                   DropdownButtonFormField<String>(
-                    isExpanded: true,
                     value: _selectedProgramId,
-                    onChanged: _selectedFacultyId == null
-                        ? null
-                        : (newValue) {
-                      setState(() {
-                        _selectedProgramId = newValue;
-                      });
-                    },
+                    onChanged: _selectedFacultyId == null ? null : (value) => setState(() => _selectedProgramId = value),
                     items: _programs.map((program) {
                       return DropdownMenuItem<String>(
                         value: program['id'],
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              program['code'] ?? '',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            Text(
-                              program['name'] ?? '',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
+                        child: Text('${program['code']} - ${program['name']}'),
                       );
                     }).toList(),
                     decoration: InputDecoration(
                       labelText: 'Program',
-                      prefixIcon: Icon(Icons.book, color: Colors.blueAccent),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.blueAccent),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      prefixIcon: Icon(Icons.book, color: Colors.purple[400]),
+                      border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                       filled: _selectedFacultyId == null,
-                      fillColor: _selectedFacultyId == null ? Colors.grey[100] : null,
+                      fillColor: _selectedFacultyId == null ? Colors.grey[200] : null,
                     ),
-                    hint: Text(
-                      _selectedFacultyId == null
-                          ? 'Select faculty first'
-                          : 'Select program',
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please select program';
-                      }
-                      return null;
-                    },
+                    hint: Text(_selectedFacultyId == null ? 'Select faculty first' : 'Select program'),
+                    validator: (value) => Validators.required(value, 'program'),
                   ),
-                  SizedBox(height: 30),
-                ] else
-                  SizedBox(height: 15),
+                ],
 
-                // Sign Up button
-                ElevatedButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () async {
-                    if (_formKey.currentState!.validate()) {
-                      await signUp();
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple[400],
-                    padding: EdgeInsets.symmetric(vertical: 15),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    minimumSize: Size(double.infinity, 50),
-                    disabledBackgroundColor: Colors.purple[200],
-                  ),
-                  child: _isLoading
-                      ? Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      Text(
-                        'Creating Account...',
-                        style: TextStyle(fontSize: 18, color: Colors.white),
-                      ),
-                    ],
-                  )
-                      : Text(
-                    'Sign Up',
-                    style: TextStyle(fontSize: 18, color: Colors.white),
-                  ),
+                SizedBox(height: 32),
+
+                // Sign up button
+                CustomButton(
+                  text: _isLoading ? 'Creating Account...' : 'Sign Up',
+                  onPressed: _signUp,
+                  isLoading: _isLoading,
                 ),
+
                 SizedBox(height: 20),
 
-                // Already have account
+                // Sign in link
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      'Already have an account? ',
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
+                    Text('Already have an account? ', style: TextStyle(color: Colors.grey[600])),
                     TextButton(
-                      onPressed: () {
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (_) => SignInPage()),
-                        );
-                      },
+                      onPressed: () => Navigator.pushReplacementNamed(context, '/signIn'),
                       child: Text(
                         'Sign In',
                         style: TextStyle(
@@ -654,41 +381,6 @@ class _SignUpPageState extends State<SignUpPage> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon, {bool obscureText = false}) {
-    return TextFormField(
-      controller: controller,
-      decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: Colors.blueAccent),
-        labelText: label,
-        labelStyle: TextStyle(color: Colors.blueGrey),
-        focusedBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: Colors.blueAccent),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: Colors.grey[300]!),
-          borderRadius: BorderRadius.circular(12),
-        ),
-      ),
-      obscureText: obscureText,
-      validator: (val) {
-        if (val == null || val.isEmpty) {
-          return 'Please enter $label';
-        }
-        if (label == 'Email' && !val.contains('@')) {
-          return 'Enter a valid email';
-        }
-        if (label == 'Password' && val.length < 6) {
-          return 'Password must be at least 6 characters';
-        }
-        if (label == 'Confirm Password' && val != _passwordController.text) {
-          return 'Passwords do not match';
-        }
-        return null;
-      },
     );
   }
 }

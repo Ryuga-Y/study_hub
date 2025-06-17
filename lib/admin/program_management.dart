@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ProgramManagementPage extends StatefulWidget {
   final String organizationId;
@@ -11,16 +12,11 @@ class ProgramManagementPage extends StatefulWidget {
 }
 
 class _ProgramManagementPageState extends State<ProgramManagementPage> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _codeController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _durationController = TextEditingController();
-
+  final _searchController = TextEditingController();
   String _searchQuery = '';
-  String _selectedFaculty = 'all';
+  bool _showInactivePrograms = false;
+  String? _selectedFacultyId;
   List<Map<String, dynamic>> _faculties = [];
-  String? _selectedFacultyForNewProgram;
 
   @override
   void initState() {
@@ -29,116 +25,162 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
   }
 
   Future<void> _loadFaculties() async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(widget.organizationId)
-        .collection('faculties')
-        .where('isActive', isEqualTo: true)
-        .get();
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationId)
+          .collection('faculties')
+          .where('isActive', isEqualTo: true)
+          .get();
 
-    setState(() {
-      _faculties = snapshot.docs
-          .where((doc) => doc.id != '_placeholder')
-          .map((doc) => {
-        'id': doc.id,
-        'name': doc['name'],
-        'code': doc['code'],
-      }).toList();
-    });
+      setState(() {
+        _faculties = snapshot.docs.map((doc) => {
+          'id': doc.id,
+          'name': doc.data()['name'],
+          'code': doc.data()['code'],
+        }).toList();
+      });
+    } catch (e) {
+      print('Error loading faculties: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.grey[100],
-      child: Column(
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      body: Column(
         children: [
           // Header
           Container(
             padding: EdgeInsets.all(24),
             color: Colors.white,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Program Management',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Manage academic programs across all faculties',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
+                    Flexible(
+                      child: Text(
+                        'Program Management',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    ElevatedButton.icon(
-                      onPressed: _faculties.isEmpty ? null : () => _showAddProgramDialog(),
-                      icon: Icon(Icons.add),
-                      label: Text('Add Program'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (MediaQuery.of(context).size.width > 600)
+                          TextButton.icon(
+                            onPressed: () => setState(() => _showInactivePrograms = !_showInactivePrograms),
+                            icon: Icon(
+                              _showInactivePrograms ? Icons.visibility : Icons.visibility_off,
+                              size: 16,
+                            ),
+                            label: Text(
+                              _showInactivePrograms ? 'All Programs' : 'Active Only',
+                              style: TextStyle(fontSize: 15),
+                            ),
+                          )
+                        else
+                          IconButton(
+                            onPressed: () => setState(() => _showInactivePrograms = !_showInactivePrograms),
+                            icon: Icon(
+                              _showInactivePrograms ? Icons.visibility : Icons.visibility_off,
+                            ),
+                            tooltip: _showInactivePrograms ? 'All Programs' : 'Active Only',
+                          ),
+                        SizedBox(width: 8),
+                        MediaQuery.of(context).size.width > 400
+                            ? ElevatedButton.icon(
+                          onPressed: () => _showAddProgramDialog(context),
+                          icon: Icon(Icons.add, color: Colors.white, size: 20),
+                          label: Text('Add Program', style: TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        )
+                            : ElevatedButton(
+                          onPressed: () => _showAddProgramDialog(context),
+                          child: Icon(Icons.add, color: Colors.white),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            padding: EdgeInsets.all(8),
+                            minimumSize: Size(40, 40),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                SizedBox(height: 20),
-                Row(
+                SizedBox(height: 16),
+                // Filters Row
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
                   children: [
                     // Search bar
-                    Expanded(
-                      flex: 2,
+                    Container(
+                      width: MediaQuery.of(context).size.width > 800 ? 300 : double.infinity,
                       child: TextField(
+                        controller: _searchController,
                         decoration: InputDecoration(
-                          hintText: 'Search programs...',
+                          hintText: 'Search programs by name or code...',
                           prefixIcon: Icon(Icons.search),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey[300]!),
                           ),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         ),
                         onChanged: (value) {
-                          setState(() {
-                            _searchQuery = value.toLowerCase();
-                          });
+                          setState(() => _searchQuery = value.toLowerCase());
                         },
                       ),
                     ),
-                    SizedBox(width: 16),
-                    // Faculty filter
-                    Expanded(
+                    // Faculty Filter
+                    Container(
+                      width: MediaQuery.of(context).size.width > 800 ? 250 : double.infinity,
                       child: DropdownButtonFormField<String>(
-                        value: _selectedFaculty,
+                        value: _selectedFacultyId,
                         decoration: InputDecoration(
-                          labelText: 'Faculty',
+                          labelText: 'Filter by Faculty',
+                          prefixIcon: Icon(Icons.school),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         ),
                         items: [
-                          DropdownMenuItem(value: 'all', child: Text('All Faculties')),
-                          ..._faculties.map((faculty) => DropdownMenuItem(
-                            value: faculty['id'],
-                            child: Text(faculty['code'] ?? ''),
+                          DropdownMenuItem(
+                            value: null,
+                            child: Text('All Faculties'),
+                          ),
+                          ..._faculties.map((faculty) => DropdownMenuItem<String>(
+                            value: faculty['id'] as String,
+                            child: Text(faculty['name']),
                           )),
                         ],
                         onChanged: (value) {
-                          setState(() {
-                            _selectedFaculty = value!;
-                          });
+                          setState(() => _selectedFacultyId = value);
                         },
                       ),
                     ),
@@ -148,347 +190,121 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
             ),
           ),
 
-          // Content
+          // Program List
           Expanded(
-            child: _faculties.isEmpty
-                ? _buildNoFacultiesState()
-                : _buildProgramsList(),
+            child: _buildProgramList(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildNoFacultiesState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.warning_amber_rounded,
-            size: 80,
-            color: Colors.orange[300],
-          ),
-          SizedBox(height: 16),
-          Text(
-            'No Active Faculties',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[700],
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'Please add faculties before creating programs',
-            style: TextStyle(
-              color: Colors.grey[600],
-            ),
-          ),
-          SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: () {
-              // Navigate to faculties page
-              // This would be handled by the parent dashboard
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-            child: Text('Go to Faculties'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProgramsList() {
-    return Padding(
-      padding: EdgeInsets.all(24),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.1),
-              spreadRadius: 1,
-              blurRadius: 3,
-            ),
-          ],
-        ),
+  Widget _buildProgramList() {
+    if (_faculties.isEmpty) {
+      return Center(
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Table header
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(flex: 2, child: Text('Program Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                  Expanded(child: Text('Code', style: TextStyle(fontWeight: FontWeight.bold))),
-                  Expanded(child: Text('Faculty', style: TextStyle(fontWeight: FontWeight.bold))),
-                  Expanded(child: Text('Duration', style: TextStyle(fontWeight: FontWeight.bold))),
-                  Expanded(child: Text('Students', style: TextStyle(fontWeight: FontWeight.bold))),
-                  Expanded(child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
-                  SizedBox(width: 100, child: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
-                ],
-              ),
+            Icon(Icons.school_outlined, size: 64, color: Colors.grey[400]),
+            SizedBox(height: 16),
+            Text(
+              'No faculties found',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.grey[600]),
             ),
-
-            // Table content
-            Expanded(
-              child: _buildProgramsStreamBuilder(),
+            Text(
+              'Please add faculties before adding programs',
+              style: TextStyle(fontSize: 16, color: Colors.grey[500]),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildProgramsStreamBuilder() {
-    if (_selectedFaculty == 'all') {
-      // Show programs from all faculties
-      return FutureBuilder<List<Map<String, dynamic>>>(
-        future: _getAllPrograms(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator());
-          }
-
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return _buildEmptyProgramsState();
-          }
-
-          final programs = snapshot.data!.where((program) {
-            if (_searchQuery.isEmpty) return true;
-            final name = program['name'].toString().toLowerCase();
-            final code = program['code'].toString().toLowerCase();
-            return name.contains(_searchQuery) || code.contains(_searchQuery);
-          }).toList();
-
-          if (programs.isEmpty) {
-            return _buildEmptyProgramsState();
-          }
-
-          return ListView.builder(
-            itemCount: programs.length,
-            itemBuilder: (context, index) => _buildProgramRow(programs[index]),
-          );
-        },
-      );
-    } else {
-      // Show programs from selected faculty
-      return StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(widget.organizationId)
-            .collection('faculties')
-            .doc(_selectedFaculty)
-            .collection('programs')
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator());
-          }
-
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return _buildEmptyProgramsState();
-          }
-
-          final programs = snapshot.data!.docs.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            if (_searchQuery.isEmpty) return true;
-            final name = (data['name'] ?? '').toString().toLowerCase();
-            final code = (data['code'] ?? '').toString().toLowerCase();
-            return name.contains(_searchQuery) || code.contains(_searchQuery);
-          }).map((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final faculty = _faculties.firstWhere(
-                  (f) => f['id'] == _selectedFaculty,
-              orElse: () => {'name': 'Unknown', 'code': 'N/A'},
-            );
-            return {
-              'id': doc.id,
-              'facultyId': _selectedFaculty,
-              'facultyName': faculty['name'],
-              'facultyCode': faculty['code'],
-              ...data,
-            };
-          }).toList();
-
-          if (programs.isEmpty) {
-            return _buildEmptyProgramsState();
-          }
-
-          return ListView.builder(
-            itemCount: programs.length,
-            itemBuilder: (context, index) => _buildProgramRow(programs[index]),
-          );
-        },
       );
     }
-  }
 
-  Future<List<Map<String, dynamic>>> _getAllPrograms() async {
-    List<Map<String, dynamic>> allPrograms = [];
+    // Build a stream that combines all programs from all faculties
+    final facultiesToQuery = _selectedFacultyId != null
+        ? [_faculties.firstWhere((f) => f['id'] == _selectedFacultyId)]
+        : _faculties;
 
-    for (var faculty in _faculties) {
-      final programsSnapshot = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(widget.organizationId)
-          .collection('faculties')
-          .doc(faculty['id'])
-          .collection('programs')
-          .get();
-
-      for (var doc in programsSnapshot.docs) {
-        final data = doc.data();
-        allPrograms.add({
-          'id': doc.id,
-          'facultyId': faculty['id'],
-          'facultyName': faculty['name'],
-          'facultyCode': faculty['code'],
-          ...data,
-        });
-      }
-    }
-
-    return allPrograms;
-  }
-
-  Widget _buildProgramRow(Map<String, dynamic> program) {
-    final isActive = program['isActive'] ?? true;
-
-    return FutureBuilder<int>(
-      future: _getStudentCount(program['facultyId'], program['id']),
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _createProgramsStream(facultiesToQuery),
       builder: (context, snapshot) {
-        final studentCount = snapshot.data ?? 0;
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
 
-        return Container(
-          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: Colors.grey[200]!),
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return _buildEmptyState();
+        }
+
+        final programs = snapshot.data!.where((program) {
+          final name = program['name']?.toString().toLowerCase() ?? '';
+          final code = program['code']?.toString().toLowerCase() ?? '';
+          return name.contains(_searchQuery) || code.contains(_searchQuery);
+        }).toList();
+
+        if (programs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
+                SizedBox(height: 16),
+                Text(
+                  'No programs match your search',
+                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                ),
+              ],
             ),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      program['name'] ?? 'Unnamed Program',
-                      style: TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                    if (program['description'] != null && program['description'].toString().isNotEmpty)
-                      Text(
-                        program['description'],
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.purple[50],
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    program['code'] ?? 'N/A',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.purple[700],
-                    ),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  program['facultyCode'] ?? 'N/A',
-                  style: TextStyle(fontSize: 14),
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  '${program['duration'] ?? 'N/A'} years',
-                  style: TextStyle(fontSize: 14),
-                ),
-              ),
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(Icons.person, size: 16, color: Colors.grey[600]),
-                    SizedBox(width: 4),
-                    Text(
-                      '$studentCount',
-                      style: TextStyle(fontSize: 14),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Switch(
-                  value: isActive,
-                  onChanged: (value) => _toggleProgramStatus(
-                    program['facultyId'],
-                    program['id'],
-                    value,
-                  ),
-                  activeColor: Colors.green,
-                ),
-              ),
-              SizedBox(
-                width: 100,
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(Icons.edit, size: 20),
-                      onPressed: () => _showEditProgramDialog(program),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.delete, size: 20, color: Colors.red),
-                      onPressed: () => _deleteProgram(
-                        program['facultyId'],
-                        program['id'],
-                        program['name'],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          );
+        }
+
+        return ListView.builder(
+          padding: EdgeInsets.all(24),
+          itemCount: programs.length,
+          itemBuilder: (context, index) {
+            final program = programs[index];
+            return _buildProgramCard(program);
+          },
         );
       },
     );
   }
 
-  Future<int> _getStudentCount(String facultyId, String programId) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .where('organizationId', isEqualTo: widget.organizationId)
-        .where('role', isEqualTo: 'student')
-        .where('facultyId', isEqualTo: facultyId)
-        .where('programId', isEqualTo: programId)
-        .where('isActive', isEqualTo: true)
-        .count()
-        .get();
+  Stream<List<Map<String, dynamic>>> _createProgramsStream(List<Map<String, dynamic>> faculties) {
+    return Stream.fromFuture(() async {
+      List<Map<String, dynamic>> allPrograms = [];
 
-    return snapshot.count ?? 0;
+      for (var faculty in faculties) {
+        Query query = FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationId)
+            .collection('faculties')
+            .doc(faculty['id'])
+            .collection('programs');
+
+        if (!_showInactivePrograms) {
+          query = query.where('isActive', isEqualTo: true);
+        }
+
+        final snapshot = await query.get();
+
+        for (var doc in snapshot.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          allPrograms.add({
+            ...data,
+            'id': doc.id,
+            'facultyId': faculty['id'],
+            'facultyName': faculty['name'],
+            'facultyCode': faculty['code'],
+          });
+        }
+      }
+
+      return allPrograms;
+    }());
   }
 
-  Widget _buildEmptyProgramsState() {
+  Widget _buildEmptyState() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -502,136 +318,555 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
           Text(
             'No programs found',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
               color: Colors.grey[600],
             ),
           ),
-          if (_searchQuery.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text(
-                'Try adjusting your search criteria',
-                style: TextStyle(
-                  color: Colors.grey[500],
-                ),
+          SizedBox(height: 8),
+          Text(
+            _showInactivePrograms ? 'No programs in your organization' : 'No active programs',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey[500],
+            ),
+          ),
+          SizedBox(height: 24),
+          MediaQuery.of(context).size.width > 400
+              ? ElevatedButton.icon(
+            onPressed: () => _showAddProgramDialog(context),
+            icon: Icon(Icons.add, color: Colors.white),
+            label: Text('Add Program', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
+          )
+              : ElevatedButton(
+            onPressed: () => _showAddProgramDialog(context),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add, color: Colors.white),
+                SizedBox(width: 8),
+                Text('Add', style: TextStyle(color: Colors.white)),
+              ],
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  void _showAddProgramDialog({Map<String, dynamic>? existingProgram}) {
-    if (existingProgram != null) {
-      _nameController.text = existingProgram['name'] ?? '';
-      _codeController.text = existingProgram['code'] ?? '';
-      _descriptionController.text = existingProgram['description'] ?? '';
-      _durationController.text = existingProgram['duration']?.toString() ?? '';
-      _selectedFacultyForNewProgram = existingProgram['facultyId'];
-    } else {
-      _nameController.clear();
-      _codeController.clear();
-      _descriptionController.clear();
-      _durationController.text = '4';
-      _selectedFacultyForNewProgram = _faculties.isNotEmpty ? _faculties.first['id'] : null;
+  Widget _buildProgramCard(Map<String, dynamic> program) {
+    final isActive = program['isActive'] ?? true;
+
+    return Card(
+      margin: EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                // Program Icon
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.purple.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.book,
+                    size: 32,
+                    color: Colors.purple,
+                  ),
+                ),
+                SizedBox(width: 16),
+
+                // Program Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          Text(
+                            program['name'] ?? 'Unknown Program',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.purple[50],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              program['code'] ?? 'N/A',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.purple[700],
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: isActive ? Colors.green[50] : Colors.red[50],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isActive ? Icons.check_circle : Icons.cancel,
+                                  size: 12,
+                                  color: isActive ? Colors.green[700] : Colors.red[700],
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  isActive ? 'Active' : 'Inactive',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isActive ? Colors.green[700] : Colors.red[700],
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(Icons.school, size: 14, color: Colors.grey[500]),
+                          SizedBox(width: 4),
+                          Expanded(  // Add Expanded to handle overflow
+                            child: Text(
+                              '${program['facultyName']} (${program['facultyCode']})',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                              ),
+                              overflow: TextOverflow.ellipsis,  // Add ellipsis for long text
+                              maxLines: 1,  // Ensure single line
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (program['degree'] != null || program['duration'] != null) ...[
+                        SizedBox(height: 4),
+                        Row(
+                          children: [
+                            if (program['degree'] != null) ...[
+                              Icon(Icons.school_outlined, size: 14, color: Colors.grey[500]),
+                              SizedBox(width: 4),
+                              Flexible(  // Use Flexible for degree text
+                                child: Text(
+                                  program['degree'],
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey[700],
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              SizedBox(width: 16),
+                            ],
+                            if (program['duration'] != null) ...[
+                              Icon(Icons.timer, size: 14, color: Colors.grey[500]),
+                              SizedBox(width: 4),
+                              Text(
+                                '${program['duration']} years',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                      if (program['description'] != null && program['description'].toString().isNotEmpty) ...[
+                        SizedBox(height: 4),
+                        Text(
+                          program['description'],
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                // Actions
+                PopupMenuButton<String>(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit, size: 18),
+                          SizedBox(width: 12),
+                          Text('Edit Program'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: isActive ? 'deactivate' : 'activate',
+                      child: Row(
+                        children: [
+                          Icon(
+                            isActive ? Icons.block : Icons.check_circle,
+                            size: 18,
+                            color: isActive ? Colors.orange : Colors.green,
+                          ),
+                          SizedBox(width: 12),
+                          Text(isActive ? 'Deactivate' : 'Activate'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuDivider(),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete, size: 18, color: Colors.red),
+                          SizedBox(width: 12),
+                          Text('Delete Program', style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
+                  ],
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'edit':
+                        _showEditProgramDialog(context, program);
+                        break;
+                      case 'activate':
+                      case 'deactivate':
+                        _toggleProgramStatus(program['facultyId'], program['id'], !isActive);
+                        break;
+                      case 'delete':
+                        _showDeleteDialog(context, program);
+                        break;
+                    }
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddProgramDialog(BuildContext context) {
+    if (_faculties.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please add faculties before adding programs'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
     }
+
+    final nameController = TextEditingController();
+    final codeController = TextEditingController();
+    final degreeController = TextEditingController();
+    final durationController = TextEditingController();
+    final descriptionController = TextEditingController();
+    String? selectedFacultyId = _selectedFacultyId;
 
     showDialog(
       context: context,
-      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text('Add New Program'),
+          content: Container(
+            width: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: selectedFacultyId,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'Select Faculty *',
+                      prefixIcon: Icon(Icons.school),
+                      helperText: selectedFacultyId != null
+                          ? _faculties.firstWhere((f) => f['id'] == selectedFacultyId)['name']
+                          : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    items: _faculties.map((faculty) => DropdownMenuItem<String>(
+                      value: faculty['id'] as String,
+                      child: Text(faculty['code'] ?? ''),
+                    )).toList(),
+                    onChanged: (value) => setState(() => selectedFacultyId = value),
+                    validator: (value) => value == null ? 'Please select a faculty' : null,
+                  ),
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: nameController,
+                    decoration: InputDecoration(
+                      labelText: 'Program Name *',
+                      hintText: 'e.g., Computer Science',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: codeController,
+                    decoration: InputDecoration(
+                      labelText: 'Program Code *',
+                      hintText: 'e.g., CS',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                  ),
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: degreeController,
+                    decoration: InputDecoration(
+                      labelText: 'Degree Type',
+                      hintText: 'e.g., Bachelor of Science',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: durationController,
+                    decoration: InputDecoration(
+                      labelText: 'Duration (years)',
+                      hintText: 'e.g., 4',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: descriptionController,
+                    decoration: InputDecoration(
+                      labelText: 'Description',
+                      hintText: 'Brief description of the program',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    maxLines: 3,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (selectedFacultyId == null ||
+                    nameController.text.isEmpty ||
+                    codeController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please fill in all required fields'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('organizations')
+                      .doc(widget.organizationId)
+                      .collection('faculties')
+                      .doc(selectedFacultyId)
+                      .collection('programs')
+                      .add({
+                    'name': nameController.text.trim(),
+                    'code': codeController.text.trim().toUpperCase(),
+                    'degree': degreeController.text.trim(),
+                    'duration': int.tryParse(durationController.text.trim()),
+                    'description': descriptionController.text.trim(),
+                    'isActive': true,
+                    'createdAt': FieldValue.serverTimestamp(),
+                    'createdBy': FirebaseAuth.instance.currentUser?.uid,
+                  });
+
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Program added successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error adding program: ${e.toString()}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('Add Program', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditProgramDialog(BuildContext context, Map<String, dynamic> program) {
+    final nameController = TextEditingController(text: program['name']);
+    final codeController = TextEditingController(text: program['code']);
+    final degreeController = TextEditingController(text: program['degree'] ?? '');
+    final durationController = TextEditingController(text: program['duration']?.toString() ?? '');
+    final descriptionController = TextEditingController(text: program['description'] ?? '');
+
+    showDialog(
+      context: context,
       builder: (context) => AlertDialog(
-        title: Text(existingProgram == null ? 'Add New Program' : 'Edit Program'),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Edit Program'),
         content: Container(
-          width: 500,
-          child: Form(
-            key: _formKey,
+          width: 400,
+          child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                DropdownButtonFormField<String>(
-                  value: _selectedFacultyForNewProgram,
-                  decoration: InputDecoration(
-                    labelText: 'Faculty',
-                    border: OutlineInputBorder(),
+                // Display faculty info (read-only)
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  items: _faculties.map((faculty) => DropdownMenuItem<String>(
-                    value: faculty['id'].toString(),
-                    child: Text('${faculty['code']} - ${faculty['name']}'),
-                  )).toList(),
-                  onChanged: existingProgram == null
-                      ? (value) {
-                    setState(() {
-                      _selectedFacultyForNewProgram = value;
-                    });
-                  }
-                      : null,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please select a faculty';
-                    }
-                    return null;
-                  },
+                  child: Row(
+                    children: [
+                      Icon(Icons.school, size: 20, color: Colors.grey[700]),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${program['facultyName']} (${program['facultyCode']})',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 SizedBox(height: 16),
-                TextFormField(
-                  controller: _nameController,
+                TextField(
+                  controller: nameController,
                   decoration: InputDecoration(
-                    labelText: 'Program Name',
-                    hintText: 'e.g., Bachelor of Computer Science',
-                    border: OutlineInputBorder(),
+                    labelText: 'Program Name *',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter program name';
-                    }
-                    return null;
-                  },
                 ),
                 SizedBox(height: 16),
-                TextFormField(
-                  controller: _codeController,
+                TextField(
+                  controller: codeController,
+                  decoration: InputDecoration(
+                    labelText: 'Program Code *',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                   textCapitalization: TextCapitalization.characters,
-                  decoration: InputDecoration(
-                    labelText: 'Program Code',
-                    hintText: 'e.g., BCS',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter program code';
-                    }
-                    return null;
-                  },
                 ),
                 SizedBox(height: 16),
-                TextFormField(
-                  controller: _durationController,
+                TextField(
+                  controller: degreeController,
+                  decoration: InputDecoration(
+                    labelText: 'Degree Type',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: durationController,
+                  decoration: InputDecoration(
+                    labelText: 'Duration (years)',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                   keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: 'Duration (Years)',
-                    hintText: 'e.g., 4',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter duration';
-                    }
-                    final duration = int.tryParse(value);
-                    if (duration == null || duration < 1 || duration > 10) {
-                      return 'Please enter a valid duration (1-10 years)';
-                    }
-                    return null;
-                  },
                 ),
                 SizedBox(height: 16),
-                TextFormField(
-                  controller: _descriptionController,
-                  maxLines: 3,
+                TextField(
+                  controller: descriptionController,
                   decoration: InputDecoration(
-                    labelText: 'Description (Optional)',
-                    hintText: 'Brief description of the program',
-                    border: OutlineInputBorder(),
+                    labelText: 'Description',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
+                  maxLines: 3,
                 ),
               ],
             ),
@@ -643,83 +878,65 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
             child: Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => _saveProgram(existingProgram),
+            onPressed: () async {
+              if (nameController.text.isEmpty || codeController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Please fill in all required fields'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+
+              try {
+                await FirebaseFirestore.instance
+                    .collection('organizations')
+                    .doc(widget.organizationId)
+                    .collection('faculties')
+                    .doc(program['facultyId'])
+                    .collection('programs')
+                    .doc(program['id'])
+                    .update({
+                  'name': nameController.text.trim(),
+                  'code': codeController.text.trim().toUpperCase(),
+                  'degree': degreeController.text.trim(),
+                  'duration': int.tryParse(durationController.text.trim()),
+                  'description': descriptionController.text.trim(),
+                  'updatedAt': FieldValue.serverTimestamp(),
+                  'updatedBy': FirebaseAuth.instance.currentUser?.uid,
+                });
+
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Program updated successfully'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error updating program: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
+              backgroundColor: Colors.blue,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: Text(existingProgram == null ? 'Add Program' : 'Save Changes'),
+            child: Text('Update Program', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  void _showEditProgramDialog(Map<String, dynamic> program) {
-    _showAddProgramDialog(existingProgram: program);
-  }
-
-  Future<void> _saveProgram(Map<String, dynamic>? existingProgram) async {
-    if (!_formKey.currentState!.validate()) return;
-
-    try {
-      final programData = {
-        'name': _nameController.text.trim(),
-        'code': _codeController.text.trim().toUpperCase(),
-        'description': _descriptionController.text.trim(),
-        'duration': int.parse(_durationController.text.trim()),
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-
-      if (existingProgram == null) {
-        // Adding new program
-        programData['createdAt'] = FieldValue.serverTimestamp();
-        programData['isActive'] = true;
-
-        await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(widget.organizationId)
-            .collection('faculties')
-            .doc(_selectedFacultyForNewProgram!)
-            .collection('programs')
-            .add(programData);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Program added successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        // Updating existing program
-        await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(widget.organizationId)
-            .collection('faculties')
-            .doc(existingProgram['facultyId'])
-            .collection('programs')
-            .doc(existingProgram['id'])
-            .update(programData);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Program updated successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-
-      Navigator.pop(context);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error saving program: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Future<void> _toggleProgramStatus(String facultyId, String programId, bool isActive) async {
+  void _toggleProgramStatus(String facultyId, String programId, bool isActive) async {
     try {
       await FirebaseFirestore.instance
           .collection('organizations')
@@ -731,55 +948,56 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
           .update({
         'isActive': isActive,
         'updatedAt': FieldValue.serverTimestamp(),
+        'updatedBy': FirebaseAuth.instance.currentUser?.uid,
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Program status updated'),
+          content: Text(isActive ? 'Program activated successfully' : 'Program deactivated successfully'),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error updating status'),
+          content: Text('Error updating program status: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );
     }
   }
 
-  void _deleteProgram(String facultyId, String programId, String programName) {
+  void _showDeleteDialog(BuildContext context, Map<String, dynamic> program) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
         title: Text('Delete Program'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Are you sure you want to delete this program?'),
-            SizedBox(height: 8),
-            Text(
-              programName,
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+            Text('Are you sure you want to delete "${program['name']}"?'),
             SizedBox(height: 16),
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange[50],
+                color: Colors.red[50],
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange[200]!),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.warning, color: Colors.orange[700], size: 20),
+                  Icon(Icons.warning, color: Colors.red[700], size: 20),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'This will affect all students enrolled in this program',
-                      style: TextStyle(color: Colors.orange[700], fontSize: 14),
+                      'This action cannot be undone. Students enrolled in this program will be affected.',
+                      style: TextStyle(
+                        color: Colors.red[700],
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ],
@@ -794,17 +1012,17 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
           ),
           ElevatedButton(
             onPressed: () async {
-              Navigator.pop(context);
               try {
                 await FirebaseFirestore.instance
                     .collection('organizations')
                     .doc(widget.organizationId)
                     .collection('faculties')
-                    .doc(facultyId)
+                    .doc(program['facultyId'])
                     .collection('programs')
-                    .doc(programId)
+                    .doc(program['id'])
                     .delete();
 
+                Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('Program deleted successfully'),
@@ -814,7 +1032,7 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Error deleting program'),
+                    content: Text('Error deleting program: ${e.toString()}'),
                     backgroundColor: Colors.red,
                   ),
                 );
@@ -822,20 +1040,14 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: Text('Delete'),
+            child: Text('Delete', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _codeController.dispose();
-    _descriptionController.dispose();
-    _durationController.dispose();
-    super.dispose();
   }
 }
