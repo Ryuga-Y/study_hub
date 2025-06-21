@@ -351,27 +351,49 @@ class AuthService {
   }
 
   // Get programs for faculty
-  Future<List<Map<String, dynamic>>> getPrograms(
-      String organizationId,
-      String facultyId,
-      ) async {
+  Future<List<Map<String, dynamic>>> getPrograms(String organizationId, String facultyId) async {
     try {
-      QuerySnapshot snapshot = await _firestore
+      print('Fetching programs for org: $organizationId, faculty: $facultyId');
+
+      // First, try without orderBy to avoid index issues
+      final QuerySnapshot snapshot = await FirebaseFirestore.instance
           .collection('organizations')
           .doc(organizationId)
           .collection('faculties')
           .doc(facultyId)
           .collection('programs')
-          .where('isActive', isEqualTo: true)
-          .orderBy('name')
-          .get();
+          .get(); // Get all programs first
 
-      return snapshot.docs.map((doc) => {
-        'id': doc.id,
-        'name': doc['name'],
-        'code': doc['code'],
-      }).toList();
+      print('Total programs found: ${snapshot.docs.length}');
+
+      // Filter and sort in memory
+      final programs = snapshot.docs
+          .map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return {
+          'id': doc.id,
+          'name': data['name'] ?? 'Unknown Program',
+          'code': data['code'] ?? '',
+          'degree': data['degree'] ?? '',
+          'isActive': data['isActive'] ?? true, // Default to true if not set
+          ...data,
+        };
+      })
+          .where((program) => program['isActive'] == true) // Filter active programs
+          .toList();
+
+      // Sort by name in memory
+      programs.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+
+      print('Active programs found: ${programs.length}');
+      programs.forEach((program) {
+        print('Program: ${program['code']} - ${program['name']} (Active: ${program['isActive']})');
+      });
+
+      return programs;
     } catch (e) {
+      print('Error fetching programs: $e');
+      print('Stack trace: ${StackTrace.current}');
       return [];
     }
   }

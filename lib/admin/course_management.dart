@@ -20,6 +20,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
   List<Map<String, dynamic>> _faculties = [];
   List<Map<String, dynamic>> _programs = [];
   List<Map<String, dynamic>> _lecturers = [];
+  List<Map<String, dynamic>> _baseCourses = [];
 
   @override
   void initState() {
@@ -30,6 +31,79 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
   Future<void> _loadData() async {
     await _loadFaculties();
     await _loadLecturers();
+    await _loadBaseCourses();
+  }
+
+  Future<void> _loadBaseCourses() async {
+    try {
+      List<Map<String, dynamic>> allCourseTemplates = [];
+
+      // Load all faculties first (without isActive filter for debugging)
+      final facultiesSnapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationId)
+          .collection('faculties')
+          .get();
+
+      // For each faculty, load programs and then course templates
+      for (var facultyDoc in facultiesSnapshot.docs) {
+        final facultyData = facultyDoc.data();
+        final facultyId = facultyDoc.id;
+
+        // Load programs for this faculty (without isActive filter for debugging)
+        final programsSnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationId)
+            .collection('faculties')
+            .doc(facultyId)
+            .collection('programs')
+            .get();
+
+        // For each program, load course templates
+        for (var programDoc in programsSnapshot.docs) {
+          final programData = programDoc.data();
+          final programId = programDoc.id;
+
+          // Load course templates (without any filters for debugging)
+          final templatesSnapshot = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(widget.organizationId)
+              .collection('faculties')
+              .doc(facultyId)
+              .collection('programs')
+              .doc(programId)
+              .collection('courseTemplates')
+              .get();
+
+          // Add course templates with full hierarchy info
+          for (var templateDoc in templatesSnapshot.docs) {
+            final templateData = templateDoc.data();
+
+            // Only include if isActive is true or doesn't exist
+            if (templateData['isActive'] != false) {
+              allCourseTemplates.add({
+                'id': templateDoc.id,
+                'name': templateData['name'],
+                'code': templateData['code'],
+                'defaultDescription': templateData['defaultDescription'],
+                'facultyId': facultyId,
+                'facultyName': facultyData['name'],
+                'facultyCode': facultyData['code'],
+                'programId': programId,
+                'programName': programData['name'],
+                'programCode': programData['code'],
+              });
+            }
+          }
+        }
+      }
+
+      setState(() {
+        _baseCourses = allCourseTemplates;
+      });
+    } catch (e) {
+      print('Error loading course templates: $e');
+    }
   }
 
   Future<void> _loadFaculties() async {
@@ -162,7 +236,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                           icon: Icon(Icons.add, color: Colors.white, size: 20),
                           label: Text('Add Course', style: TextStyle(color: Colors.white)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
+                            backgroundColor: Colors.blue,
                             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -173,7 +247,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                           onPressed: () => _showAddCourseDialog(context),
                           child: Icon(Icons.add, color: Colors.white),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
+                            backgroundColor: Colors.blue,
                             padding: EdgeInsets.all(8),
                             minimumSize: Size(40, 40),
                             shape: RoundedRectangleBorder(
@@ -215,6 +289,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                       width: MediaQuery.of(context).size.width > 800 ? 250 : double.infinity,
                       child: DropdownButtonFormField<String>(
                         value: _selectedFacultyId,
+                        isExpanded: true,  // Add this to expand dropdown items
                         decoration: InputDecoration(
                           labelText: 'Filter by Faculty',
                           prefixIcon: Icon(Icons.school),
@@ -230,7 +305,11 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                           ),
                           ..._faculties.map((faculty) => DropdownMenuItem<String>(
                             value: faculty['id'] as String,
-                            child: Text(faculty['name']),
+                            child: Text(
+                              faculty['name'],
+                              overflow: TextOverflow.ellipsis,  // Add overflow handling
+                              maxLines: 1,
+                            ),
                           )),
                         ],
                         onChanged: (value) {
@@ -251,6 +330,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                         width: MediaQuery.of(context).size.width > 800 ? 250 : double.infinity,
                         child: DropdownButtonFormField<String>(
                           value: _selectedProgramId,
+                          isExpanded: true,  // Add this to expand dropdown items
                           decoration: InputDecoration(
                             labelText: 'Filter by Program',
                             prefixIcon: Icon(Icons.book),
@@ -266,7 +346,11 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                             ),
                             ..._programs.map((program) => DropdownMenuItem<String>(
                               value: program['id'] as String,
-                              child: Text(program['name']),
+                              child: Text(
+                                program['name'],
+                                overflow: TextOverflow.ellipsis,  // Add overflow handling
+                                maxLines: 1,
+                              ),
                             )),
                           ],
                           onChanged: (value) {
@@ -275,6 +359,28 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                         ),
                       ),
                   ],
+                ),
+              ],
+            ),
+          ),
+
+          // Template Courses Section
+          Container(
+            padding: EdgeInsets.all(24),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Course Templates',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _showCourseTemplatesList(context),
+                  child: Text('View All (${_baseCourses.length})'),
                 ),
               ],
             ),
@@ -382,35 +488,11 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
             ),
           ),
           SizedBox(height: 24),
-          MediaQuery.of(context).size.width > 400
-              ? ElevatedButton.icon(
-            onPressed: () => _showAddCourseDialog(context),
-            icon: Icon(Icons.add, color: Colors.white),
-            label: Text('Add Course', style: TextStyle(color: Colors.white)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          )
-              : ElevatedButton(
-            onPressed: () => _showAddCourseDialog(context),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add, color: Colors.white),
-                SizedBox(width: 8),
-                Text('Add', style: TextStyle(color: Colors.white)),
-              ],
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+          Text(
+            'Lecturers can create courses from base courses',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[500],
             ),
           ),
         ],
@@ -481,6 +563,33 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                               ),
                             ),
                           ),
+                          if (data['courseTemplateId'] != null)
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.purple[50],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.link,
+                                    size: 12,
+                                    color: Colors.purple[700],
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Template: ${data['courseTemplateName'] ?? 'Course Template'}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.purple[700],
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           Container(
                             padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                             decoration: BoxDecoration(
@@ -606,16 +715,6 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                       ),
                     ),
                     PopupMenuItem(
-                      value: 'assign',
-                      child: Row(
-                        children: [
-                          Icon(Icons.person_add, size: 18),
-                          SizedBox(width: 12),
-                          Text('Assign Lecturer'),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
                       value: isActive ? 'deactivate' : 'activate',
                       child: Row(
                         children: [
@@ -646,9 +745,6 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                       case 'edit':
                         _showEditCourseDialog(context, courseId, data);
                         break;
-                      case 'assign':
-                        _showAssignLecturerDialog(context, courseId, data);
-                        break;
                       case 'activate':
                       case 'deactivate':
                         _toggleCourseStatus(courseId, !isActive);
@@ -670,10 +766,9 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
   void _showAddCourseDialog(BuildContext context) {
     final nameController = TextEditingController();
     final codeController = TextEditingController();
-    final descriptionController = TextEditingController();
+    final defaultDescriptionController = TextEditingController();
     String? selectedFacultyId;
     String? selectedProgramId;
-    String? selectedLecturerId;
     List<Map<String, dynamic>> tempPrograms = [];
 
     showDialog(
@@ -683,7 +778,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: Text('Add New Course'),
+          title: Text('Add Course Template'),
           content: Container(
             width: 500,
             child: SingleChildScrollView(
@@ -781,41 +876,11 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                     textCapitalization: TextCapitalization.characters,
                   ),
                   SizedBox(height: 16),
-                  // Lecturer Selection
-                  DropdownButtonFormField<String>(
-                    value: selectedLecturerId,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      labelText: 'Assign Lecturer (Optional)',
-                      prefixIcon: Icon(Icons.person),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    items: [
-                      DropdownMenuItem<String>(
-                        value: null,
-                        child: Text('Not Assigned'),
-                      ),
-                      ..._lecturers.where((lecturer) =>
-                      selectedFacultyId == null ||
-                          lecturer['facultyId'] == selectedFacultyId
-                      ).map((lecturer) => DropdownMenuItem<String>(
-                        value: lecturer['id'] as String,
-                        child: Text(
-                          '${lecturer['name']} (${lecturer['facultyName'] ?? 'No Faculty'})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      )),
-                    ],
-                    onChanged: (value) => setState(() => selectedLecturerId = value),
-                  ),
-                  SizedBox(height: 16),
                   TextField(
-                    controller: descriptionController,
+                    controller: defaultDescriptionController,
                     decoration: InputDecoration(
-                      labelText: 'Description',
-                      hintText: 'Brief description of the course',
+                      labelText: 'Default Description',
+                      hintText: 'Default description for this course',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -834,6 +899,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
             ElevatedButton(
               onPressed: () async {
                 if (selectedFacultyId == null ||
+                    selectedProgramId == null ||
                     nameController.text.isEmpty ||
                     codeController.text.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -847,52 +913,50 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
 
                 try {
                   final selectedFaculty = _faculties.firstWhere((f) => f['id'] == selectedFacultyId);
-                  final selectedProgram = tempPrograms.isNotEmpty && selectedProgramId != null
-                      ? tempPrograms.firstWhere((p) => p['id'] == selectedProgramId)
-                      : null;
-                  final selectedLecturer = selectedLecturerId != null
-                      ? _lecturers.firstWhere((l) => l['id'] == selectedLecturerId)
-                      : null;
+                  final selectedProgram = tempPrograms.firstWhere((p) => p['id'] == selectedProgramId);
 
                   await FirebaseFirestore.instance
                       .collection('organizations')
                       .doc(widget.organizationId)
-                      .collection('courses')
+                      .collection('faculties')
+                      .doc(selectedFacultyId)
+                      .collection('programs')
+                      .doc(selectedProgramId)
+                      .collection('courseTemplates')
                       .add({
                     'name': nameController.text.trim(),
                     'code': codeController.text.trim().toUpperCase(),
-                    'description': descriptionController.text.trim(),
+                    'defaultDescription': defaultDescriptionController.text.trim(),
                     'facultyId': selectedFacultyId,
                     'facultyName': selectedFaculty['name'],
                     'facultyCode': selectedFaculty['code'],
                     'programId': selectedProgramId,
-                    'programName': selectedProgram?['name'],
-                    'programCode': selectedProgram?['code'],
-                    'lecturerId': selectedLecturerId,
-                    'lecturerName': selectedLecturer?['name'],
+                    'programName': selectedProgram['name'],
+                    'programCode': selectedProgram['code'],
                     'isActive': true,
                     'createdAt': FieldValue.serverTimestamp(),
                     'createdBy': FirebaseAuth.instance.currentUser?.uid,
                   });
 
                   Navigator.pop(context);
+                  _loadBaseCourses();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Course added successfully'),
+                      content: Text('Course template added successfully'),
                       backgroundColor: Colors.green,
                     ),
                   );
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Error adding course: ${e.toString()}'),
+                      content: Text('Error adding course template: ${e.toString()}'),
                       backgroundColor: Colors.red,
                     ),
                   );
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
+                backgroundColor: Colors.blue,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -903,6 +967,354 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
         ),
       ),
     );
+  }
+
+  void _showCourseTemplatesList(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Container(
+          width: 700,
+          height: 600,
+          padding: EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Course Templates',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+              Expanded(
+                child: _baseCourses.isEmpty
+                    ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.library_books_outlined, size: 64, color: Colors.grey[400]),
+                      SizedBox(height: 16),
+                      Text('No course templates created yet', style: TextStyle(color: Colors.grey[600])),
+                    ],
+                  ),
+                )
+                    : ListView.builder(
+                  itemCount: _baseCourses.length,
+                  itemBuilder: (context, index) {
+                    final courseTemplate = _baseCourses[index];
+                    return Card(
+                      margin: EdgeInsets.only(bottom: 12),
+                      child: ListTile(
+                        leading: Container(
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[50],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(Icons.library_books, color: Colors.blue[700]),
+                        ),
+                        title: Text(
+                          courseTemplate['name'],
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Code: ${courseTemplate['code']}'),
+                            Text(
+                              'Faculty: ${courseTemplate['facultyName']} > Program: ${courseTemplate['programName']}',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            ),
+                            if (courseTemplate['defaultDescription'] != null && courseTemplate['defaultDescription'].isNotEmpty)
+                              Text(
+                                courseTemplate['defaultDescription'],
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12),
+                              ),
+                          ],
+                        ),
+                        isThreeLine: true,
+                        trailing: PopupMenuButton<String>(
+                          itemBuilder: (context) => [
+                            PopupMenuItem(
+                              value: 'edit',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.edit, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Edit'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.delete, size: 18, color: Colors.red),
+                                  SizedBox(width: 8),
+                                  Text('Delete', style: TextStyle(color: Colors.red)),
+                                ],
+                              ),
+                            ),
+                          ],
+                          onSelected: (value) {
+                            Navigator.pop(context);
+                            if (value == 'edit') {
+                              _showEditCourseTemplateDialog(context, courseTemplate);
+                            } else if (value == 'delete') {
+                              _deleteCourseTemplate(courseTemplate);
+                            }
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showEditCourseTemplateDialog(BuildContext context, Map<String, dynamic> courseTemplate) {
+    final nameController = TextEditingController(text: courseTemplate['name']);
+    final codeController = TextEditingController(text: courseTemplate['code']);
+    final defaultDescriptionController = TextEditingController(text: courseTemplate['defaultDescription'] ?? '');
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Edit Course Template'),
+        content: Container(
+          width: 500,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Display faculty and program info (read-only)
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.school, size: 20, color: Colors.grey[700]),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Faculty: ${courseTemplate['facultyName']} (${courseTemplate['facultyCode']})',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[700],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(Icons.book, size: 20, color: Colors.grey[700]),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Program: ${courseTemplate['programName']} (${courseTemplate['programCode']})',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[700],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: InputDecoration(
+                    labelText: 'Course Name *',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: codeController,
+                  decoration: InputDecoration(
+                    labelText: 'Course Code *',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  textCapitalization: TextCapitalization.characters,
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: defaultDescriptionController,
+                  decoration: InputDecoration(
+                    labelText: 'Default Description',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  maxLines: 3,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.isEmpty || codeController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Please fill in all required fields'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+
+              try {
+                await FirebaseFirestore.instance
+                    .collection('organizations')
+                    .doc(widget.organizationId)
+                    .collection('faculties')
+                    .doc(courseTemplate['facultyId'])
+                    .collection('programs')
+                    .doc(courseTemplate['programId'])
+                    .collection('courseTemplates')
+                    .doc(courseTemplate['id'])
+                    .update({
+                  'name': nameController.text.trim(),
+                  'code': codeController.text.trim().toUpperCase(),
+                  'defaultDescription': defaultDescriptionController.text.trim(),
+                  'updatedAt': FieldValue.serverTimestamp(),
+                  'updatedBy': FirebaseAuth.instance.currentUser?.uid,
+                });
+
+                Navigator.pop(context);
+                _loadBaseCourses();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Course template updated successfully'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error updating course template: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('Update Course', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteCourseTemplate(Map<String, dynamic> courseTemplate) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Delete Course Template'),
+        content: Text('Are you sure you want to delete this course template?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationId)
+            .collection('faculties')
+            .doc(courseTemplate['facultyId'])
+            .collection('programs')
+            .doc(courseTemplate['programId'])
+            .collection('courseTemplates')
+            .doc(courseTemplate['id'])
+            .delete();
+
+        _loadBaseCourses();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Course template deleted successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting course template: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _showEditCourseDialog(BuildContext context, String courseId, Map<String, dynamic> data) {
@@ -1063,163 +1475,6 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
             child: Text('Update Course', style: TextStyle(color: Colors.white)),
           ),
         ],
-      ),
-    );
-  }
-
-  void _showAssignLecturerDialog(BuildContext context, String courseId, Map<String, dynamic> data) {
-    String? selectedLecturerId = data['lecturerId'];
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Text('Assign Lecturer'),
-          content: Container(
-            width: 400,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Course info
-                Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.library_books, size: 20, color: Colors.blue[700]),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              data['name'],
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue[700],
-                              ),
-                            ),
-                            Text(
-                              '${data['code']} • ${data['facultyName']}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.blue[600],
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(height: 20),
-                DropdownButtonFormField<String>(
-                  value: selectedLecturerId,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    labelText: 'Select Lecturer',
-                    prefixIcon: Icon(Icons.person),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  items: [
-                    DropdownMenuItem<String>(
-                      value: null,
-                      child: Text('Not Assigned'),
-                    ),
-                    ..._lecturers.where((lecturer) =>
-                    data['facultyId'] == null ||
-                        lecturer['facultyId'] == data['facultyId']
-                    ).map((lecturer) => DropdownMenuItem<String>(
-                      value: lecturer['id'] as String,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            lecturer['name'],
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            lecturer['email'],
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    )),
-                  ],
-                  onChanged: (value) => setState(() => selectedLecturerId = value),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                try {
-                  final selectedLecturer = selectedLecturerId != null
-                      ? _lecturers.firstWhere((l) => l['id'] == selectedLecturerId)
-                      : null;
-
-                  await FirebaseFirestore.instance
-                      .collection('organizations')
-                      .doc(widget.organizationId)
-                      .collection('courses')
-                      .doc(courseId)
-                      .update({
-                    'lecturerId': selectedLecturerId,
-                    'lecturerName': selectedLecturer?['name'],
-                    'updatedAt': FieldValue.serverTimestamp(),
-                    'updatedBy': FirebaseAuth.instance.currentUser?.uid,
-                  });
-
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                          selectedLecturerId == null
-                              ? 'Lecturer unassigned successfully'
-                              : 'Lecturer assigned successfully'
-                      ),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error assigning lecturer: ${e.toString()}'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: Text('Assign', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
       ),
     );
   }

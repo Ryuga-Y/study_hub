@@ -290,6 +290,7 @@ class _SignUpPageState extends State<SignUpPage> {
 
                 // Faculty dropdown
                 DropdownButtonFormField<String>(
+                  isExpanded: true,
                   value: _selectedFacultyId,
                   onChanged: _organizationId == null
                       ? null
@@ -306,7 +307,11 @@ class _SignUpPageState extends State<SignUpPage> {
                   items: _faculties.map((faculty) {
                     return DropdownMenuItem<String>(
                       value: faculty['id'],
-                      child: Text('${faculty['code']} - ${faculty['name']}'),
+                      child: Text(
+                        '${faculty['code']} - ${faculty['name']}',
+                        overflow: TextOverflow.ellipsis, // Add ellipsis for long text
+                        maxLines: 1, // Ensure single line
+                      ),
                     );
                   }).toList(),
                   decoration: InputDecoration(
@@ -322,16 +327,21 @@ class _SignUpPageState extends State<SignUpPage> {
                   validator: (value) => Validators.required(value, 'faculty'),
                 ),
 
-                // Program dropdown (students only)
+// Apply the same fix to the Program dropdown
                 if (widget.role == 'student') ...[
                   SizedBox(height: 20),
                   DropdownButtonFormField<String>(
+                    isExpanded: true, // Add this
                     value: _selectedProgramId,
                     onChanged: _selectedFacultyId == null ? null : (value) => setState(() => _selectedProgramId = value),
                     items: _programs.map((program) {
                       return DropdownMenuItem<String>(
                         value: program['id'],
-                        child: Text('${program['code']} - ${program['name']}'),
+                        child: Text(
+                          '${program['code']} - ${program['name']}',
+                          overflow: TextOverflow.ellipsis, // Add ellipsis
+                          maxLines: 1, // Single line
+                        ),
                       );
                     }).toList(),
                     decoration: InputDecoration(

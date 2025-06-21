@@ -1,36 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:study_hub/Course/create_assignment.dart';
-
+import '../Authentication/auth_services.dart';
+import '../Authentication/custom_widgets.dart';
+import 'create_assignment.dart';
 import 'assignment_details.dart';
 import 'create_material.dart';
 import 'material_details.dart';
 
-
 class CoursePage extends StatefulWidget {
   final String courseId;
+  final Map<String, dynamic> courseData;
 
-  const CoursePage({Key? key, required this.courseId}) : super(key: key);
+  const CoursePage({
+    Key? key,
+    required this.courseId,
+    required this.courseData,
+  }) : super(key: key);
 
   @override
   _CoursePageState createState() => _CoursePageState();
 }
 
 class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
-  FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  FirebaseAuth _auth = FirebaseAuth.instance;
+  final AuthService _authService = AuthService();
+  late TabController _tabController;
 
-  Map<String, dynamic>? courseData;
+  // Data
+  String? _organizationCode;
+  String? _lecturerFacultyId;
   List<Map<String, dynamic>> assignments = [];
   List<Map<String, dynamic>> materials = [];
   List<Map<String, dynamic>> enrolledStudents = [];
+  List<Map<String, dynamic>> facultyStudents = [];
+
   bool isLoading = true;
   String? errorMessage;
   bool showCreateOptions = false;
   bool isLecturer = false;
-  int _currentIndex = 2; // Course tab is selected
-  late TabController _tabController;
+  int _currentIndex = 2; // Course tab
 
   @override
   void initState() {
@@ -39,7 +46,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     _tabController.addListener(() {
       setState(() {}); // Rebuild to update FAB visibility
     });
-    _fetchCourseData();
+    _loadData();
   }
 
   @override
@@ -48,108 +55,105 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  Future<void> _fetchCourseData() async {
+  Future<void> _loadData() async {
     try {
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) return;
-
-      // First, find which lecturer owns this course
-      QuerySnapshot lecturerQuery = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'lecturer')
-          .get();
-
-      String? lecturerUid;
-      for (var doc in lecturerQuery.docs) {
-        var courseDoc = await _firestore
-            .collection('users')
-            .doc(doc.id)
-            .collection('courses')
-            .doc(widget.courseId)
-            .get();
-
-        if (courseDoc.exists) {
-          lecturerUid = doc.id;
-          final courseDocData = courseDoc.data();
-          final lecturerDocData = doc.data() as Map<String, dynamic>?;
-          setState(() {
-            courseData = {
-              if (courseDocData != null) ...courseDocData,
-              'lecturerName': lecturerDocData?['name'] ?? 'Unknown Lecturer',
-              'lecturerUid': lecturerUid,
-            };
-            isLecturer = currentUser.uid == lecturerUid;
-          });
-          break;
-        }
+      final user = _authService.currentUser;
+      if (user == null) {
+        setState(() => errorMessage = 'User not authenticated');
+        return;
       }
 
-      if (lecturerUid != null) {
-        await Future.wait([
-          _fetchAssignments(lecturerUid),
-          _fetchMaterials(lecturerUid),
-          _fetchEnrolledStudents(lecturerUid),
-        ]);
+      // Load user data
+      final userData = await _authService.getUserData(user.uid);
+      if (userData == null) {
+        setState(() => errorMessage = 'User data not found');
+        return;
       }
+
+      setState(() {
+        _organizationCode = userData['organizationCode'];
+        _lecturerFacultyId = userData['facultyId'];
+        isLecturer = userData['role'] == 'lecturer' && widget.courseData['lecturerId'] == user.uid;
+      });
+
+      // Load course content
+      await Future.wait([
+        _fetchAssignments(),
+        _fetchMaterials(),
+        _fetchEnrolledStudents(),
+        if (isLecturer) _fetchFacultyStudents(),
+      ]);
 
       setState(() {
         isLoading = false;
       });
     } catch (e) {
       setState(() {
-        errorMessage = 'Error loading course data: $e';
+        errorMessage = 'Error loading data: $e';
         isLoading = false;
       });
     }
   }
 
-  Future<void> _fetchAssignments(String lecturerUid) async {
-    var assignmentQuery = await _firestore
-        .collection('users')
-        .doc(lecturerUid)
-        .collection('courses')
-        .doc(widget.courseId)
-        .collection('assignments')
-        .orderBy('createdAt', descending: true)
-        .get();
+  Future<void> _fetchAssignments() async {
+    if (_organizationCode == null) return;
 
-    setState(() {
-      assignments = assignmentQuery.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>?;
-        return {
-          'id': doc.id,
-          if (data != null) ...data,
-        };
-      }).toList();
-    });
-  }
-
-  Future<void> _fetchMaterials(String lecturerUid) async {
-    var materialQuery = await _firestore
-        .collection('users')
-        .doc(lecturerUid)
-        .collection('courses')
-        .doc(widget.courseId)
-        .collection('materials')
-        .orderBy('createdAt', descending: true)
-        .get();
-
-    setState(() {
-      materials = materialQuery.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>?;
-        return {
-          'id': doc.id,
-          if (data != null) ...data,
-        };
-      }).toList();
-    });
-  }
-
-  Future<void> _fetchEnrolledStudents(String lecturerUid) async {
     try {
-      var enrollmentQuery = await _firestore
-          .collection('users')
-          .doc(lecturerUid)
+      var assignmentQuery = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(_organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      setState(() {
+        assignments = assignmentQuery.docs.map((doc) {
+          return {
+            'id': doc.id,
+            ...doc.data(),
+          };
+        }).toList();
+      });
+    } catch (e) {
+      print('Error fetching assignments: $e');
+    }
+  }
+
+  Future<void> _fetchMaterials() async {
+    if (_organizationCode == null) return;
+
+    try {
+      var materialQuery = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(_organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('materials')
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      setState(() {
+        materials = materialQuery.docs.map((doc) {
+          return {
+            'id': doc.id,
+            ...doc.data(),
+          };
+        }).toList();
+      });
+    } catch (e) {
+      print('Error fetching materials: $e');
+    }
+  }
+
+  Future<void> _fetchEnrolledStudents() async {
+    if (_organizationCode == null) return;
+
+    try {
+      var enrollmentQuery = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(_organizationCode)
           .collection('courses')
           .doc(widget.courseId)
           .collection('enrollments')
@@ -158,7 +162,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       List<Map<String, dynamic>> students = [];
       for (var doc in enrollmentQuery.docs) {
         String studentId = doc.data()['studentId'];
-        var studentDoc = await _firestore
+        var studentDoc = await FirebaseFirestore.instance
             .collection('users')
             .doc(studentId)
             .get();
@@ -166,8 +170,9 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         if (studentDoc.exists) {
           students.add({
             'id': studentId,
-            'name': studentDoc.data()?['name'] ?? 'Unknown Student',
+            'fullName': studentDoc.data()?['fullName'] ?? 'Unknown Student',
             'email': studentDoc.data()?['email'] ?? 'No email',
+            'facultyName': studentDoc.data()?['facultyName'] ?? studentDoc.data()?['faculty'] ?? '',
             'enrolledAt': doc.data()['enrolledAt'],
           });
         }
@@ -178,6 +183,33 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       });
     } catch (e) {
       print('Error fetching enrolled students: $e');
+    }
+  }
+
+  Future<void> _fetchFacultyStudents() async {
+    if (_organizationCode == null || _lecturerFacultyId == null) return;
+
+    try {
+      var studentsQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('organizationCode', isEqualTo: _organizationCode)
+          .where('role', isEqualTo: 'student')
+          .where('facultyId', isEqualTo: _lecturerFacultyId)
+          .where('isActive', isEqualTo: true)
+          .get();
+
+      setState(() {
+        facultyStudents = studentsQuery.docs.map((doc) {
+          return {
+            'id': doc.id,
+            'fullName': doc.data()['fullName'] ?? 'Unknown Student',
+            'email': doc.data()['email'] ?? 'No email',
+            'studentId': doc.data()['studentId'] ?? '',
+          };
+        }).toList();
+      });
+    } catch (e) {
+      print('Error fetching faculty students: $e');
     }
   }
 
@@ -197,13 +229,13 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       MaterialPageRoute(
         builder: (context) => CreateAssignmentPage(
           courseId: widget.courseId,
-          courseData: courseData!,
+          courseData: widget.courseData,
         ),
       ),
     );
 
     if (result == true) {
-      _fetchAssignments(courseData!['lecturerUid']);
+      _fetchAssignments();
     }
   }
 
@@ -217,13 +249,13 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       MaterialPageRoute(
         builder: (context) => CreateMaterialPage(
           courseId: widget.courseId,
-          courseData: courseData!,
+          courseData: widget.courseData,
         ),
       ),
     );
 
     if (result == true) {
-      _fetchMaterials(courseData!['lecturerUid']);
+      _fetchMaterials();
     }
   }
 
@@ -234,7 +266,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         builder: (context) => AssignmentDetailPage(
           assignment: assignment,
           courseId: widget.courseId,
-          courseData: courseData!,
+          courseData: widget.courseData,
           isLecturer: isLecturer,
         ),
       ),
@@ -248,7 +280,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         builder: (context) => MaterialDetailPage(
           material: material,
           courseId: widget.courseId,
-          courseData: courseData!,
+          courseData: widget.courseData,
           isLecturer: isLecturer,
         ),
       ),
@@ -256,118 +288,305 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
   }
 
   void _showEnrollStudentDialog() {
-    final emailController = TextEditingController();
-
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Enroll Student'),
-        content: TextField(
-          controller: emailController,
-          decoration: InputDecoration(
-            labelText: 'Student Email',
-            border: OutlineInputBorder(),
-            hintText: 'Enter student email address',
-          ),
-          keyboardType: TextInputType.emailAddress,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
+        child: Container(
+          width: 600,
+          height: 600,
+          padding: EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Enroll Students',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+
+              // Tab selector
+              DefaultTabController(
+                length: 2,
+                child: Expanded(
+                  child: Column(
+                    children: [
+                      TabBar(
+                        indicatorColor: Colors.purple[400],
+                        labelColor: Colors.purple[600],
+                        unselectedLabelColor: Colors.grey[600],
+                        tabs: [
+                          Tab(text: 'Faculty Students'),
+                          Tab(text: 'Manual Entry'),
+                        ],
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            // Faculty Students Tab
+                            _buildFacultyStudentsTab(),
+                            // Manual Entry Tab
+                            _buildManualEntryTab(),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () async {
-              String email = emailController.text.trim();
-              if (email.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Please enter student email')),
-                );
-                return;
-              }
+        ),
+      ),
+    ).then((_) {
+      // Reload enrolled students after dialog closes
+      _fetchEnrolledStudents();
+    });
+  }
 
-              try {
-                // Find student by email
-                var studentQuery = await _firestore
-                    .collection('users')
-                    .where('email', isEqualTo: email)
-                    .where('role', isEqualTo: 'student')
-                    .get();
+  Widget _buildFacultyStudentsTab() {
+    // Filter out already enrolled students
+    final enrolledStudentIds = enrolledStudents.map((s) => s['id']).toSet();
+    final availableStudents = facultyStudents.where((student) =>
+    !enrolledStudentIds.contains(student['id'])
+    ).toList();
 
-                if (studentQuery.docs.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Student not found with this email')),
-                  );
-                  return;
-                }
+    if (availableStudents.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.people_outline, size: 64, color: Colors.grey[400]),
+            SizedBox(height: 16),
+            Text(
+              'No available students from your faculty',
+              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+            ),
+            Text(
+              'All students might already be enrolled',
+              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+            ),
+          ],
+        ),
+      );
+    }
 
-                String studentId = studentQuery.docs.first.id;
-
-                // Check if already enrolled
-                var existingEnrollment = await _firestore
-                    .collection('users')
-                    .doc(courseData!['lecturerUid'])
-                    .collection('courses')
-                    .doc(widget.courseId)
-                    .collection('enrollments')
-                    .where('studentId', isEqualTo: studentId)
-                    .get();
-
-                if (existingEnrollment.docs.isNotEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Student is already enrolled in this course')),
-                  );
-                  Navigator.pop(context);
-                  return;
-                }
-
-                // Enroll student
-                await _firestore
-                    .collection('users')
-                    .doc(courseData!['lecturerUid'])
-                    .collection('courses')
-                    .doc(widget.courseId)
-                    .collection('enrollments')
-                    .add({
-                  'studentId': studentId,
-                  'enrolledAt': FieldValue.serverTimestamp(),
-                  'enrolledBy': _auth.currentUser!.uid,
-                });
-
-                // Also add course to student's enrolled courses
-                await _firestore
-                    .collection('users')
-                    .doc(studentId)
-                    .collection('enrolledCourses')
-                    .doc(widget.courseId)
-                    .set({
-                  'courseId': widget.courseId,
-                  'lecturerUid': courseData!['lecturerUid'],
-                  'enrolledAt': FieldValue.serverTimestamp(),
-                });
-
-                Navigator.pop(context);
-                _fetchEnrolledStudents(courseData!['lecturerUid']);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Student enrolled successfully')),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error enrolling student: $e')),
-                );
-              }
+    return Column(
+      children: [
+        Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            'Select students from your faculty to enroll',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: availableStudents.length,
+            itemBuilder: (context, index) {
+              final student = availableStudents[index];
+              return Card(
+                margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.purple[100],
+                    child: Text(
+                      student['fullName'].substring(0, 1).toUpperCase(),
+                      style: TextStyle(
+                        color: Colors.purple[600],
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  title: Text(student['fullName']),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(student['email']),
+                      if (student['studentId'].toString().isNotEmpty)
+                        Text(
+                          'ID: ${student['studentId']}',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                    ],
+                  ),
+                  trailing: ElevatedButton(
+                    onPressed: () => _enrollStudent(student['id'], student['fullName']),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text('Enroll', style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+              );
             },
-            child: Text('Enroll'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildManualEntryTab() {
+    final emailController = TextEditingController();
+
+    return Padding(
+      padding: EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Text(
+            'Enter student email address to enroll',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+          SizedBox(height: 24),
+          TextField(
+            controller: emailController,
+            decoration: InputDecoration(
+              labelText: 'Student Email',
+              hintText: 'student@example.com',
+              prefixIcon: Icon(Icons.email, color: Colors.purple[400]),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            keyboardType: TextInputType.emailAddress,
+          ),
+          SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () async {
+                String email = emailController.text.trim();
+                if (email.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Please enter student email')),
+                  );
+                  return;
+                }
+
+                try {
+                  // Find student by email
+                  var studentQuery = await FirebaseFirestore.instance
+                      .collection('users')
+                      .where('email', isEqualTo: email)
+                      .where('role', isEqualTo: 'student')
+                      .where('organizationCode', isEqualTo: _organizationCode)
+                      .get();
+
+                  if (studentQuery.docs.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Student not found in your organization')),
+                    );
+                    return;
+                  }
+
+                  String studentId = studentQuery.docs.first.id;
+                  String studentName = studentQuery.docs.first.data()['fullName'] ?? 'Unknown';
+
+                  await _enrollStudent(studentId, studentName);
+                  emailController.clear();
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: ${e.toString()}')),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple[400],
+                padding: EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('Enroll Student', style: TextStyle(color: Colors.white)),
+            ),
           ),
         ],
       ),
     );
   }
 
+  Future<void> _enrollStudent(String studentId, String studentName) async {
+    try {
+      // Check if already enrolled
+      var existingEnrollment = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(_organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('enrollments')
+          .where('studentId', isEqualTo: studentId)
+          .get();
+
+      if (existingEnrollment.docs.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$studentName is already enrolled in this course')),
+        );
+        return;
+      }
+
+      // Enroll student
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(_organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('enrollments')
+          .add({
+        'studentId': studentId,
+        'enrolledAt': FieldValue.serverTimestamp(),
+        'enrolledBy': _authService.currentUser!.uid,
+      });
+
+      // Update enrolled count
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(_organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .update({
+        'enrolledCount': FieldValue.increment(1),
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$studentName enrolled successfully'),
+          backgroundColor: Colors.green[600],
+        ),
+      );
+
+      // Refresh enrolled students
+      _fetchEnrolledStudents();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error enrolling student: ${e.toString()}')),
+      );
+    }
+  }
+
   void _removeStudent(String studentId, String studentName) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
         title: Text('Remove Student'),
         content: Text('Are you sure you want to remove $studentName from this course?'),
         actions: [
@@ -379,9 +598,9 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             onPressed: () async {
               try {
                 // Remove from course enrollments
-                var enrollmentQuery = await _firestore
-                    .collection('users')
-                    .doc(courseData!['lecturerUid'])
+                var enrollmentQuery = await FirebaseFirestore.instance
+                    .collection('organizations')
+                    .doc(_organizationCode)
                     .collection('courses')
                     .doc(widget.courseId)
                     .collection('enrollments')
@@ -392,18 +611,23 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                   await doc.reference.delete();
                 }
 
-                // Remove from student's enrolled courses
-                await _firestore
-                    .collection('users')
-                    .doc(studentId)
-                    .collection('enrolledCourses')
+                // Update enrolled count
+                await FirebaseFirestore.instance
+                    .collection('organizations')
+                    .doc(_organizationCode)
+                    .collection('courses')
                     .doc(widget.courseId)
-                    .delete();
+                    .update({
+                  'enrolledCount': FieldValue.increment(-1),
+                });
 
                 Navigator.pop(context);
-                _fetchEnrolledStudents(courseData!['lecturerUid']);
+                _fetchEnrolledStudents();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Student removed successfully')),
+                  SnackBar(
+                    content: Text('Student removed successfully'),
+                    backgroundColor: Colors.orange,
+                  ),
                 );
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -411,11 +635,271 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 );
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: Text('Remove'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('Remove', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return Scaffold(
+        backgroundColor: Colors.grey[50],
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
+          ),
+        ),
+      );
+    }
+
+    if (errorMessage != null) {
+      return Scaffold(
+        backgroundColor: Colors.grey[50],
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, size: 64, color: Colors.red),
+              SizedBox(height: 16),
+              Text(
+                'Error',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text(
+                errorMessage!,
+                style: TextStyle(color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: 24),
+              CustomButton(
+                text: 'Retry',
+                onPressed: () {
+                  setState(() {
+                    isLoading = true;
+                    errorMessage = null;
+                  });
+                  _loadData();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: _buildAppBar(),
+      body: Column(
+        children: [
+          // Course Header
+          Container(
+            width: double.infinity,
+            margin: EdgeInsets.all(16),
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.purple[600]!, Colors.purple[400]!],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.purple.withValues(alpha: 0.3),
+                  blurRadius: 10,
+                  offset: Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        widget.courseData['code'] ?? '',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    if (widget.courseData['courseTemplateId'] != null) ...[
+                      SizedBox(width: 8),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.link, size: 14, color: Colors.white),
+                            SizedBox(width: 4),
+                            Text(
+                              'Course Template',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    Spacer(),
+                    if (isLecturer && _tabController.index == 0)
+                      _buildCreateButton(),
+                  ],
+                ),
+                SizedBox(height: 12),
+                Text(
+                  widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course Title',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  widget.courseData['description'] ?? 'No description available',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.white.withOpacity(0.9),
+                  ),
+                ),
+                SizedBox(height: 16),
+                Row(
+                  children: [
+                    Icon(Icons.person, color: Colors.white.withOpacity(0.9), size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      widget.courseData['lecturerName'] ?? 'Unknown Lecturer',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.white.withOpacity(0.9),
+                      ),
+                    ),
+                    SizedBox(width: 24),
+                    Icon(Icons.people, color: Colors.white.withOpacity(0.9), size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      '${enrolledStudents.length} students',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.white.withOpacity(0.9),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Tab Bar
+          Container(
+            margin: EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  blurRadius: 5,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: TabBar(
+              controller: _tabController,
+              indicatorColor: Colors.purple[400],
+              indicatorWeight: 3,
+              labelColor: Colors.purple[600],
+              unselectedLabelColor: Colors.grey[600],
+              labelStyle: TextStyle(fontWeight: FontWeight.bold),
+              tabs: [
+                Tab(text: 'Content'),
+                Tab(text: 'Students'),
+                Tab(text: 'Overview'),
+              ],
+            ),
+          ),
+
+          // Tab Content
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildContentTab(),
+                _buildStudentsTab(),
+                _buildOverviewTab(),
+              ],
+            ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: _buildBottomNavigationBar(),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      title: Row(
+        children: [
+          Image.asset(
+            'assets/images/logo.png',
+            height: 32,
+            errorBuilder: (context, error, stackTrace) => Icon(
+              Icons.school,
+              color: Colors.purple[400],
+              size: 32,
+            ),
+          ),
+          SizedBox(width: 12),
+          Text(
+            'Study Hub',
+            style: TextStyle(
+              color: Colors.black87,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+      leading: IconButton(
+        icon: Icon(Icons.arrow_back, color: Colors.black87),
+        onPressed: () => Navigator.pop(context),
+      ),
+      actions: [
+        IconButton(
+          icon: Icon(Icons.notifications_outlined, color: Colors.black87),
+          onPressed: () {
+            // TODO: Implement notifications
+          },
+        ),
+      ],
     );
   }
 
@@ -432,7 +916,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
+                  color: Colors.black.withOpacity(0.1),
                   blurRadius: 8,
                   offset: Offset(0, 2),
                 ),
@@ -451,7 +935,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.assignment, color: Colors.blue),
+                          Icon(Icons.assignment, color: Colors.purple[400]),
                           SizedBox(width: 12),
                           Text('Assignment', style: TextStyle(fontSize: 16)),
                         ],
@@ -470,7 +954,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.description, color: Colors.blue),
+                          Icon(Icons.description, color: Colors.purple[400]),
                           SizedBox(width: 12),
                           Text('Material', style: TextStyle(fontSize: 16)),
                         ],
@@ -490,11 +974,11 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             child: Container(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.blue,
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.blue.withValues(alpha: 0.3),
+                    color: Colors.purple.withOpacity(0.2),
                     blurRadius: 4,
                     offset: Offset(0, 2),
                   ),
@@ -503,24 +987,16 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 20,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1.5),
-                    ),
-                    child: Icon(
-                      Icons.add,
-                      color: Colors.white,
-                      size: 16,
-                    ),
+                  Icon(
+                    showCreateOptions ? Icons.close : Icons.add,
+                    color: Colors.purple[600],
+                    size: 20,
                   ),
                   SizedBox(width: 8),
                   Text(
                     'Create',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: Colors.purple[600],
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
                     ),
@@ -534,222 +1010,182 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildContentItem({
+  Widget _buildContentTab() {
+    return RefreshIndicator(
+      onRefresh: () async {
+        await Future.wait([
+          _fetchAssignments(),
+          _fetchMaterials(),
+        ]);
+      },
+      child: SingleChildScrollView(
+        physics: AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            // Assignments Section
+            if (assignments.isNotEmpty) ...[
+              _buildSectionHeader('Assignments', Icons.assignment),
+              ...assignments.map((assignment) => _buildContentCard(
+                title: assignment['title'] ?? 'Assignment',
+                subtitle: assignment['description'] ?? 'No description',
+                date: _formatDate(assignment['createdAt']),
+                icon: Icons.assignment,
+                color: Colors.orange,
+                onTap: () => _navigateToAssignmentDetail(assignment),
+                onDelete: isLecturer ? () => _deleteAssignment(assignment) : null,
+              )),
+              SizedBox(height: 24),
+            ],
+
+            // Materials Section
+            if (materials.isNotEmpty) ...[
+              _buildSectionHeader('Materials', Icons.description),
+              ...materials.map((material) => _buildContentCard(
+                title: material['title'] ?? 'Material',
+                subtitle: material['description'] ?? 'No description',
+                date: _formatDate(material['createdAt']),
+                icon: Icons.description,
+                color: Colors.green,
+                onTap: () => _navigateToMaterialDetail(material),
+                onDelete: isLecturer ? () => _deleteMaterial(material) : null,
+              )),
+            ],
+
+            // Empty state
+            if (assignments.isEmpty && materials.isEmpty)
+              Container(
+                padding: EdgeInsets.all(40),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.folder_open,
+                      size: 64,
+                      color: Colors.grey[400],
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      isLecturer
+                          ? 'No content yet.\nTap the Create button to add assignments or materials.'
+                          : 'No content available yet.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            SizedBox(height: 100), // Space for floating button
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.purple[400], size: 24),
+          SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[800],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContentCard({
     required String title,
     required String subtitle,
     required String date,
     required IconData icon,
+    required Color color,
     required VoidCallback onTap,
     VoidCallback? onDelete,
   }) {
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Color(0xFFE8E8F0),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        leading: Icon(icon, color: Colors.blue, size: 28),
-        title: Text(
-          title,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 16,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 5,
+            offset: Offset(0, 2),
           ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              subtitle,
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 14,
-              ),
-            ),
-            SizedBox(height: 4),
-            Text(
-              date,
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-        trailing: isLecturer && onDelete != null
-            ? IconButton(
-          icon: Icon(Icons.delete, color: Colors.red),
-          onPressed: onDelete,
-        )
-            : null,
-        onTap: onTap,
-        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      ),
-    );
-  }
-
-  Widget _buildStudentItem(Map<String, dynamic> student) {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Color(0xFFE8E8F0),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.blue,
-          child: Text(
-            student['name'].toString().substring(0, 1).toUpperCase(),
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-        ),
-        title: Text(
-          student['name']?.toString() ?? 'Unknown Student',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 16,
-          ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              student['email']?.toString() ?? 'No email',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 14,
-              ),
-            ),
-            SizedBox(height: 4),
-            Text(
-              'Enrolled: ${_formatDate(student['enrolledAt'])}',
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-        trailing: isLecturer
-            ? IconButton(
-          icon: Icon(Icons.remove_circle, color: Colors.red),
-          onPressed: () => _removeStudent(
-              student['id'],
-              student['name']?.toString() ?? 'Unknown Student'
-          ),
-        )
-            : null,
-        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      ),
-    );
-  }
-
-  String _formatDate(dynamic timestamp) {
-    if (timestamp == null) return '';
-
-    DateTime date;
-    if (timestamp is Timestamp) {
-      date = timestamp.toDate();
-    } else if (timestamp is DateTime) {
-      date = timestamp;
-    } else {
-      return '';
-    }
-
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-  }
-
-  Widget _buildContentTab() {
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          // Assignments
-          ...assignments.map((assignment) => _buildContentItem(
-            title: assignment['title']?.toString() ?? 'Assignment',
-            subtitle: assignment['description']?.toString() ?? 'No description',
-            date: _formatDate(assignment['createdAt']),
-            icon: Icons.assignment,
-            onTap: () => _navigateToAssignmentDetail(assignment),
-            onDelete: isLecturer ? () async {
-              try {
-                await _firestore
-                    .collection('users')
-                    .doc(courseData!['lecturerUid'])
-                    .collection('courses')
-                    .doc(widget.courseId)
-                    .collection('assignments')
-                    .doc(assignment['id'])
-                    .delete();
-                _fetchAssignments(courseData!['lecturerUid']);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Assignment deleted')),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error deleting assignment: $e')),
-                );
-              }
-            } : null,
-          )),
-
-          // Materials
-          ...materials.map((material) => _buildContentItem(
-            title: material['title']?.toString() ?? 'Material',
-            subtitle: material['description']?.toString() ?? 'No description',
-            date: _formatDate(material['createdAt']),
-            icon: Icons.description,
-            onTap: () => _navigateToMaterialDetail(material),
-            onDelete: isLecturer ? () async {
-              try {
-                await _firestore
-                    .collection('users')
-                    .doc(courseData!['lecturerUid'])
-                    .collection('courses')
-                    .doc(widget.courseId)
-                    .collection('materials')
-                    .doc(material['id'])
-                    .delete();
-                _fetchMaterials(courseData!['lecturerUid']);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Material deleted')),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error deleting material: $e')),
-                );
-              }
-            } : null,
-          )),
-
-          // Empty state
-          if (assignments.isEmpty && materials.isEmpty)
-            Container(
-              padding: EdgeInsets.all(40),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.folder_open,
-                    size: 64,
-                    color: Colors.grey[400],
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    isLecturer
-                        ? 'No assignments or materials yet.\nTap + to create content.'
-                        : 'No assignments or materials available yet.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          SizedBox(height: 100), // Space for floating button
         ],
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Icon(icon, color: color, size: 28),
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      date,
+                      style: TextStyle(
+                        color: Colors.grey[500],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isLecturer && onDelete != null)
+                IconButton(
+                  icon: Icon(Icons.delete_outline, color: Colors.red[400]),
+                  onPressed: onDelete,
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -760,14 +1196,10 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         if (isLecturer)
           Padding(
             padding: EdgeInsets.all(16),
-            child: ElevatedButton.icon(
+            child: CustomButton(
+              text: 'Enroll Students',
               onPressed: _showEnrollStudentDialog,
-              icon: Icon(Icons.person_add),
-              label: Text('Enroll Student'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-              ),
+              icon: Icons.person_add,
             ),
           ),
         Expanded(
@@ -784,7 +1216,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 SizedBox(height: 16),
                 Text(
                   isLecturer
-                      ? 'No students enrolled yet.\nTap "Enroll Student" to add students.'
+                      ? 'No students enrolled yet.\nTap "Enroll Students" to add students.'
                       : 'No students enrolled in this course yet.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -795,258 +1227,91 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
               ],
             ),
           )
-              : ListView.builder(
-            itemCount: enrolledStudents.length,
-            itemBuilder: (context, index) {
-              return _buildStudentItem(enrolledStudents[index]);
-            },
+              : RefreshIndicator(
+            onRefresh: _fetchEnrolledStudents,
+            child: ListView.builder(
+              padding: EdgeInsets.all(16),
+              itemCount: enrolledStudents.length,
+              itemBuilder: (context, index) {
+                return _buildStudentCard(enrolledStudents[index]);
+              },
+            ),
           ),
         ),
       ],
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (isLoading) {
-      return Scaffold(
-        appBar: AppBar(
-          backgroundColor: Colors.white,
-          title: Text(
-            'StudyHub',
-            style: TextStyle(
-              fontFamily: 'Abeezee',
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Colors.blue,
-            ),
-          ),
-          leading: IconButton(
-            icon: Icon(Icons.menu, color: Colors.blue),
-            onPressed: () {
-              Scaffold.of(context).openDrawer();
-            },
-          ),
-          actions: [
-            Stack(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.notifications_outlined, color: Colors.blue),
-                  onPressed: () {},
-                ),
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Container(
-                    padding: EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    constraints: BoxConstraints(
-                      minWidth: 12,
-                      minHeight: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          elevation: 0,
-        ),
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (errorMessage != null) {
-      return Scaffold(
-        appBar: AppBar(
-          backgroundColor: Colors.white,
-          title: Text('StudyHub'),
-        ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(errorMessage!),
-              ElevatedButton(
-                onPressed: _fetchCourseData,
-                child: Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        title: Text(
-          'StudyHub',
-          style: TextStyle(
-            fontFamily: 'Abeezee',
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.blue,
-          ),
-        ),
-        leading: IconButton(
-          icon: Icon(Icons.menu, color: Colors.blue),
-          onPressed: () {
-            Scaffold.of(context).openDrawer();
-          },
-        ),
-        actions: [
-          Stack(
-            children: [
-              IconButton(
-                icon: Icon(Icons.notifications_outlined, color: Colors.blue),
-                onPressed: () {},
-              ),
-              Positioned(
-                right: 8,
-                top: 8,
-                child: Container(
-                  padding: EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  constraints: BoxConstraints(
-                    minWidth: 12,
-                    minHeight: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-        elevation: 0,
-      ),
-      body: Container(
+  Widget _buildStudentCard(Map<String, dynamic> student) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
         color: Colors.white,
-        child: Column(
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ListTile(
+        contentPadding: EdgeInsets.all(16),
+        leading: CircleAvatar(
+          backgroundColor: Colors.purple[100],
+          child: Text(
+            student['fullName'].toString().substring(0, 1).toUpperCase(),
+            style: TextStyle(
+              color: Colors.purple[600],
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        title: Text(
+          student['fullName'] ?? 'Unknown Student',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Course Header with Create Button
-            // Course Header with Create Button
-            Container(
-              width: double.infinity,
-              margin: EdgeInsets.all(16),
-              padding: EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Color(0xFFE8E8F0),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    courseData?['title']?.toString() ?? 'Course Title',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF6B7DB3),
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    courseData?['description']?.toString() ?? 'Course description not available',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    courseData?['lecturerName']?.toString() ?? 'Lecturer name not available',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Color(0xFF6B7DB3),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  // Row containing students enrolled text and Create Button
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '${enrolledStudents.length} students enrolled',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                      if (isLecturer && _tabController.index == 0)
-                        _buildCreateButton(),
-                    ],
-                  ),
-                ],
+            Text(
+              student['email'] ?? 'No email',
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 14,
               ),
             ),
-            // Tab Bar
-            TabBar(
-              controller: _tabController,
-              indicatorColor: Colors.blue,
-              labelColor: Colors.blue,
-              unselectedLabelColor: Colors.grey,
-              tabs: [
-                Tab(text: 'Content'),
-                Tab(text: 'Students'),
-                Tab(text: 'Overview'),
-              ],
-            ),
-
-            // Tab Content
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildContentTab(),
-                  _buildStudentsTab(),
-                  _buildOverviewTab(),
-                ],
+            if (student['facultyName'] != null && student['facultyName'].toString().isNotEmpty)
+              Text(
+                'Faculty: ${student['facultyName']}',
+                style: TextStyle(
+                  color: Colors.grey[500],
+                  fontSize: 12,
+                ),
+              ),
+            SizedBox(height: 4),
+            Text(
+              'Enrolled: ${_formatDate(student['enrolledAt'])}',
+              style: TextStyle(
+                color: Colors.grey[500],
+                fontSize: 12,
               ),
             ),
           ],
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-          // Handle navigation based on index
-        },
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
-        backgroundColor: Colors.grey[200],
-        type: BottomNavigationBarType.fixed,
-        items: [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.people),
-            label: 'Community',
+        trailing: isLecturer
+            ? IconButton(
+          icon: Icon(Icons.remove_circle_outline, color: Colors.red[400]),
+          onPressed: () => _removeStudent(
+            student['id'],
+            student['fullName'] ?? 'Unknown Student',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat),
-            label: 'Chat',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.menu_book),
-            label: 'Course',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.assignment),
-            label: 'Evaluation',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
+        )
+            : null,
       ),
     );
   }
@@ -1104,30 +1369,74 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
 
           SizedBox(height: 24),
 
+          // Course Details
+          Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  blurRadius: 5,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Course Details',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 16),
+                _buildDetailRow('Code', widget.courseData['code'] ?? 'N/A'),
+                if (widget.courseData['courseTemplateId'] != null)
+                  _buildDetailRow('Course Template', widget.courseData['courseTemplateName'] ?? 'N/A'),
+                if (widget.courseData['baseCourseId'] != null)
+                  _buildDetailRow('Base Course', widget.courseData['baseCourseName'] ?? 'N/A'),
+                _buildDetailRow('Faculty', widget.courseData['facultyName'] ?? 'N/A'),
+                _buildDetailRow('Lecturer', widget.courseData['lecturerName'] ?? 'N/A'),
+                _buildDetailRow('Created', _formatDate(widget.courseData['createdAt'])),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 24),
+
           // Recent Activity
           Text(
             'Recent Activity',
             style: TextStyle(
-              fontSize: 20,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Colors.black87,
             ),
           ),
           SizedBox(height: 16),
 
-          // Combine and sort recent items
           ...(_getRecentActivity().map((item) => Container(
             margin: EdgeInsets.only(bottom: 8),
             padding: EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Color(0xFFE8E8F0),
+              color: Colors.white,
               borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  blurRadius: 5,
+                  offset: Offset(0, 2),
+                ),
+              ],
             ),
             child: Row(
               children: [
                 Icon(
                   item['type'] == 'assignment' ? Icons.assignment : Icons.description,
-                  color: Colors.blue,
+                  color: Colors.purple[400],
                   size: 20,
                 ),
                 SizedBox(width: 12),
@@ -1187,9 +1496,9 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Column(
         children: [
@@ -1212,6 +1521,91 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 14,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomNavigationBar() {
+    return BottomNavigationBar(
+      currentIndex: _currentIndex,
+      onTap: (index) {
+        setState(() {
+          _currentIndex = index;
+        });
+        // Handle navigation
+        switch (index) {
+          case 0:
+          // TODO: Navigate to courses
+            Navigator.pop(context);
+            break;
+          case 1:
+          // TODO: Navigate to community
+            break;
+          case 2:
+          // Already on course page
+            break;
+          case 3:
+          // TODO: Navigate to calendar
+            break;
+          case 4:
+          // TODO: Navigate to profile
+            break;
+        }
+      },
+      selectedItemColor: Colors.purple[400],
+      unselectedItemColor: Colors.grey[600],
+      type: BottomNavigationBarType.fixed,
+      items: [
+        BottomNavigationBarItem(
+          icon: Icon(Icons.library_books),
+          label: 'Courses',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.people),
+          label: 'Community',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.chat_bubble_outline),
+          label: 'Chat',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.calendar_today),
+          label: 'Calendar',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.person_outline),
+          label: 'Profile',
+        ),
+      ],
     );
   }
 
@@ -1254,5 +1648,128 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
 
     // Return only the most recent 5 items
     return recentItems.take(5).toList();
+  }
+
+  String _formatDate(dynamic timestamp) {
+    if (timestamp == null) return 'N/A';
+
+    DateTime date;
+    if (timestamp is Timestamp) {
+      date = timestamp.toDate();
+    } else if (timestamp is DateTime) {
+      date = timestamp;
+    } else {
+      return 'N/A';
+    }
+
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  }
+
+  Future<void> _deleteAssignment(Map<String, dynamic> assignment) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Delete Assignment'),
+        content: Text('Are you sure you want to delete this assignment?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(assignment['id'])
+            .delete();
+
+        _fetchAssignments();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Assignment deleted'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting assignment: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteMaterial(Map<String, dynamic> material) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Delete Material'),
+        content: Text('Are you sure you want to delete this material?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('materials')
+            .doc(material['id'])
+            .delete();
+
+        _fetchMaterials();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Material deleted'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting material: $e')),
+        );
+      }
+    }
   }
 }

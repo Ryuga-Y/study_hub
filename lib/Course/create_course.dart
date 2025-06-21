@@ -1,629 +1,647 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../Authentication/auth_services.dart';
+import '../Authentication/custom_widgets.dart';
 
 class CreateCoursePage extends StatefulWidget {
-  final String lecturerUid;
-
-  const CreateCoursePage({Key? key, required this.lecturerUid}) : super(key: key);
-
   @override
   _CreateCoursePageState createState() => _CreateCoursePageState();
 }
 
 class _CreateCoursePageState extends State<CreateCoursePage> {
+  final AuthService _authService = AuthService();
   final _formKey = GlobalKey<FormState>();
+
+  // Controllers
   final _descriptionController = TextEditingController();
-  final _manualEmailController = TextEditingController();
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  String? _selectedCourseId;
-  String? _selectedCourseTitle;
-  String? _lecturerFaculty;
-  String? _lecturerName;
-
-  List<Map<String, dynamic>> _facultyStudents = [];
-  List<String> _selectedStudentIds = [];
-  List<String> _manuallyAddedEmails = [];
-
+  // Data
+  Map<String, dynamic>? _userData;
+  String? _organizationCode;
+  String? _selectedBaseCourseId;
+  List<Map<String, dynamic>> _baseCourses = [];
   bool _isLoading = false;
   String? _errorMessage;
-
-  // Course codes and titles for each faculty
-  final Map<String, List<Map<String, String>>> facultyCourses = {
-    'FAFB': [
-      {'code': 'FAFB1001', 'title': 'Principles of Accounting'},
-      {'code': 'FAFB1002', 'title': 'Financial Management'},
-      {'code': 'FAFB1003', 'title': 'Business Statistics'},
-      {'code': 'FAFB2001', 'title': 'Corporate Finance'},
-      {'code': 'FAFB2002', 'title': 'Marketing Management'},
-      {'code': 'FAFB2003', 'title': 'Business Ethics'},
-      {'code': 'FAFB3001', 'title': 'Strategic Management'},
-      {'code': 'FAFB3002', 'title': 'Investment Analysis'},
-      {'code': 'FAFB3003', 'title': 'Entrepreneurship'},
-      {'code': 'FAFB4001', 'title': 'International Business'},
-    ],
-    'FOAS': [
-      {'code': 'FOAS1001', 'title': 'General Chemistry'},
-      {'code': 'FOAS1002', 'title': 'Cell Biology'},
-      {'code': 'FOAS1003', 'title': 'Physics Fundamentals'},
-      {'code': 'FOAS2001', 'title': 'Organic Chemistry'},
-      {'code': 'FOAS2002', 'title': 'Genetics'},
-      {'code': 'FOAS2003', 'title': 'Quantum Physics'},
-      {'code': 'FOAS3001', 'title': 'Biochemistry'},
-      {'code': 'FOAS3002', 'title': 'Molecular Biology'},
-      {'code': 'FOAS3003', 'title': 'Environmental Science'},
-      {'code': 'FOAS4001', 'title': 'Research Methods in Science'},
-    ],
-    'FOCS': [
-      {'code': 'FOCS1001', 'title': 'Programming Fundamentals'},
-      {'code': 'FOCS1002', 'title': 'Data Structures'},
-      {'code': 'FOCS1003', 'title': 'Database Systems'},
-      {'code': 'FOCS2001', 'title': 'Web Development'},
-      {'code': 'FOCS2002', 'title': 'Operating Systems'},
-      {'code': 'FOCS2003', 'title': 'Software Engineering'},
-      {'code': 'FOCS3001', 'title': 'Artificial Intelligence'},
-      {'code': 'FOCS3002', 'title': 'Mobile App Development'},
-      {'code': 'FOCS3003', 'title': 'Computer Networks'},
-      {'code': 'FOCS4001', 'title': 'Machine Learning'},
-    ],
-    'FOBE': [
-      {'code': 'FOBE1001', 'title': 'Architectural Design I'},
-      {'code': 'FOBE1002', 'title': 'Building Technology'},
-      {'code': 'FOBE1003', 'title': 'Construction Materials'},
-      {'code': 'FOBE2001', 'title': 'Structural Analysis'},
-      {'code': 'FOBE2002', 'title': 'Urban Planning'},
-      {'code': 'FOBE2003', 'title': 'Building Services'},
-      {'code': 'FOBE3001', 'title': 'Sustainable Architecture'},
-      {'code': 'FOBE3002', 'title': 'Project Management'},
-      {'code': 'FOBE3003', 'title': 'Construction Law'},
-      {'code': 'FOBE4001', 'title': 'Advanced Building Design'},
-    ],
-    'FOET': [
-      {'code': 'FOET1001', 'title': 'Engineering Mathematics'},
-      {'code': 'FOET1002', 'title': 'Circuit Theory'},
-      {'code': 'FOET1003', 'title': 'Thermodynamics'},
-      {'code': 'FOET2001', 'title': 'Electronics'},
-      {'code': 'FOET2002', 'title': 'Mechanics of Materials'},
-      {'code': 'FOET2003', 'title': 'Fluid Mechanics'},
-      {'code': 'FOET3001', 'title': 'Control Systems'},
-      {'code': 'FOET3002', 'title': 'Power Systems'},
-      {'code': 'FOET3003', 'title': 'Manufacturing Processes'},
-      {'code': 'FOET4001', 'title': 'Engineering Design Project'},
-    ],
-    'FCCI': [
-      {'code': 'FCCI1001', 'title': 'Introduction to Communication'},
-      {'code': 'FCCI1002', 'title': 'Design Principles'},
-      {'code': 'FCCI1003', 'title': 'Digital Media Production'},
-      {'code': 'FCCI2001', 'title': 'Advertising and PR'},
-      {'code': 'FCCI2002', 'title': 'Typography and Layout'},
-      {'code': 'FCCI2003', 'title': 'Video Production'},
-      {'code': 'FCCI3001', 'title': 'Brand Development'},
-      {'code': 'FCCI3002', 'title': 'Interactive Design'},
-      {'code': 'FCCI3003', 'title': 'Media Ethics'},
-      {'code': 'FCCI4001', 'title': 'Creative Campaign Development'},
-    ],
-    'FSSH': [
-      {'code': 'FSSH1001', 'title': 'Introduction to Psychology'},
-      {'code': 'FSSH1002', 'title': 'English Literature'},
-      {'code': 'FSSH1003', 'title': 'Public Speaking'},
-      {'code': 'FSSH2001', 'title': 'Cognitive Psychology'},
-      {'code': 'FSSH2002', 'title': 'Linguistics'},
-      {'code': 'FSSH2003', 'title': 'Media and Society'},
-      {'code': 'FSSH3001', 'title': 'Research Methods'},
-      {'code': 'FSSH3002', 'title': 'Organizational Communication'},
-      {'code': 'FSSH3003', 'title': 'Social Psychology'},
-      {'code': 'FSSH4001', 'title': 'Applied Psychology'},
-    ],
-  };
 
   @override
   void initState() {
     super.initState();
-    _fetchLecturerData();
+    _loadUserData();
   }
 
-  Future<void> _fetchLecturerData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+  Future<void> _loadUserData() async {
     try {
-      // Fetch lecturer data
-      DocumentSnapshot lecturerDoc = await _firestore
-          .collection('users')
-          .doc(widget.lecturerUid)
-          .get();
-
-      if (lecturerDoc.exists) {
-        setState(() {
-          _lecturerFaculty = lecturerDoc['faculty'];
-          _lecturerName = lecturerDoc['name'];
-        });
-
-        // Fetch students from the same faculty
-        if (_lecturerFaculty != null) {
-          QuerySnapshot studentQuery = await _firestore
-              .collection('users')
-              .where('role', isEqualTo: 'student')
-              .where('faculty', isEqualTo: _lecturerFaculty)
-              .get();
-
-          setState(() {
-            _facultyStudents = studentQuery.docs.map((doc) {
-              return {
-                'uid': doc.id,
-                'name': doc['name'],
-                'email': doc['email'],
-                'program': doc['program'] ?? 'N/A',
-              };
-            }).toList();
-          });
-        }
+      final user = _authService.currentUser;
+      if (user == null) {
+        setState(() => _errorMessage = 'User not authenticated');
+        return;
       }
+
+      final userData = await _authService.getUserData(user.uid);
+      if (userData == null) {
+        setState(() => _errorMessage = 'User data not found');
+        return;
+      }
+
+      setState(() {
+        _userData = userData;
+        _organizationCode = userData['organizationCode'];
+      });
+
+      await _loadBaseCourses();
     } catch (e) {
       setState(() {
-        _errorMessage = 'Error fetching data: $e';
+        _errorMessage = 'Error loading user data: $e';
       });
     }
-
-    setState(() {
-      _isLoading = false;
-    });
   }
 
-  List<Map<String, String>> getCoursesForFaculty() {
-    if (_lecturerFaculty == null) return [];
-    return facultyCourses[_lecturerFaculty] ?? [];
-  }
+  Future<void> _loadBaseCourses() async {
+    if (_organizationCode == null || _userData == null) return;
 
-  void _addManualEmail() {
-    final email = _manualEmailController.text.trim();
-    if (email.isNotEmpty && email.contains('@')) {
-      setState(() {
-        if (!_manuallyAddedEmails.contains(email)) {
-          _manuallyAddedEmails.add(email);
-          _manualEmailController.clear();
+    try {
+      List<Map<String, dynamic>> courseTemplates = [];
+
+      // Get the lecturer's faculty
+      final lecturerFacultyId = _userData!['facultyId'];
+
+      if (lecturerFacultyId != null) {
+        // Load programs for lecturer's faculty
+        final programsSnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('faculties')
+            .doc(lecturerFacultyId)
+            .collection('programs')
+            .where('isActive', isEqualTo: true)
+            .get();
+
+        // For each program, load course templates
+        for (var programDoc in programsSnapshot.docs) {
+          final programData = programDoc.data();
+          final programId = programDoc.id;
+
+          final templatesSnapshot = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(_organizationCode)
+              .collection('faculties')
+              .doc(lecturerFacultyId)
+              .collection('programs')
+              .doc(programId)
+              .collection('courseTemplates')
+              .where('isActive', isEqualTo: true)
+              .orderBy('name')
+              .get();
+
+          // Add course templates
+          for (var templateDoc in templatesSnapshot.docs) {
+            courseTemplates.add({
+              'id': templateDoc.id,
+              'name': templateDoc.data()['name'],
+              'code': templateDoc.data()['code'],
+              'defaultDescription': templateDoc.data()['defaultDescription'],
+              'facultyId': lecturerFacultyId,
+              'programId': programId,
+              'programName': programData['name'],
+            });
+          }
         }
+      }
+
+      setState(() {
+        _baseCourses = courseTemplates;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading course templates: $e';
       });
     }
   }
 
   Future<void> _createCourse() async {
-    if (_formKey.currentState!.validate() && _selectedCourseId != null) {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
+    if (!_formKey.currentState!.validate()) return;
 
-      try {
-        // Create course document
-        Map<String, dynamic> courseData = {
-          'courseId': _selectedCourseId,
-          'title': _selectedCourseTitle,
-          'description': _descriptionController.text.trim(),
-          'lecturerUid': widget.lecturerUid,
-          'lecturerName': _lecturerName,
-          'faculty': _lecturerFaculty,
-          'createdAt': FieldValue.serverTimestamp(),
-          'enrolledStudents': [],
-        };
+    if (_selectedBaseCourseId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please select a course template'),
+          backgroundColor: Colors.red[600],
+        ),
+      );
+      return;
+    }
 
-        // Add course to lecturer's courses collection
-        DocumentReference courseRef = await _firestore
-            .collection('users')
-            .doc(widget.lecturerUid)
-            .collection('courses')
-            .add(courseData);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
-        // Also add to global courses collection for easier querying
-        await _firestore
-            .collection('courses')
-            .doc(courseRef.id)
-            .set({
-          ...courseData,
-          'docId': courseRef.id,
-        });
-
-        // Enroll selected students
-        List<String> allEnrolledStudentIds = [];
-
-        // Add selected students from faculty
-        allEnrolledStudentIds.addAll(_selectedStudentIds);
-
-        // Add manually entered students (by email)
-        for (String email in _manuallyAddedEmails) {
-          QuerySnapshot userQuery = await _firestore
-              .collection('users')
-              .where('email', isEqualTo: email)
-              .where('role', isEqualTo: 'student')
-              .limit(1)
-              .get();
-
-          if (userQuery.docs.isNotEmpty) {
-            allEnrolledStudentIds.add(userQuery.docs.first.id);
-          }
-        }
-
-        // Update course with enrolled students
-        if (allEnrolledStudentIds.isNotEmpty) {
-          await courseRef.update({
-            'enrolledStudents': allEnrolledStudentIds,
-          });
-
-          await _firestore
-              .collection('courses')
-              .doc(courseRef.id)
-              .update({
-            'enrolledStudents': allEnrolledStudentIds,
-          });
-
-          // Add course to each student's enrolled courses
-          for (String studentId in allEnrolledStudentIds) {
-            await _firestore
-                .collection('users')
-                .doc(studentId)
-                .collection('enrolledCourses')
-                .doc(courseRef.id)
-                .set({
-              'courseId': _selectedCourseId,
-              'courseDocId': courseRef.id,
-              'title': _selectedCourseTitle,
-              'lecturerName': _lecturerName,
-              'enrolledAt': FieldValue.serverTimestamp(),
-            });
-          }
-        }
-
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Course created successfully!',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: Colors.green[600],
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            margin: EdgeInsets.all(20),
-          ),
-        );
-
-        // Navigate back
-        Navigator.pop(context);
-      } catch (e) {
-        setState(() {
-          _errorMessage = 'Error creating course: $e';
-          _isLoading = false;
-        });
+    try {
+      final user = _authService.currentUser;
+      if (user == null || _organizationCode == null) {
+        throw Exception('User not authenticated or organization not found');
       }
+
+      // Get selected course template details
+      final selectedCourseTemplate = _baseCourses.firstWhere(
+            (course) => course['id'] == _selectedBaseCourseId,
+      );
+
+      // Create course data
+      final courseData = {
+        'courseTemplateId': _selectedBaseCourseId,
+        'courseTemplateName': selectedCourseTemplate['name'],
+        'code': selectedCourseTemplate['code'],
+        'name': selectedCourseTemplate['name'], // Use course template name
+        'title': selectedCourseTemplate['name'], // Keep for backward compatibility
+        'description': _descriptionController.text.trim().isNotEmpty
+            ? _descriptionController.text.trim()
+            : selectedCourseTemplate['defaultDescription'] ?? '',
+        'facultyId': _userData?['facultyId'],
+        'facultyName': _userData?['facultyName'] ?? _userData?['faculty'] ?? '',
+        'programId': selectedCourseTemplate['programId'],
+        'programName': selectedCourseTemplate['programName'],
+        'lecturerId': user.uid,
+        'lecturerName': _userData?['fullName'] ?? 'Unknown',
+        'enrolledCount': 0,
+        'isActive': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      // Add course to organization's courses collection
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(_organizationCode)
+          .collection('courses')
+          .add(courseData);
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Course created successfully!'),
+          backgroundColor: Colors.green[600],
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      );
+
+      // Navigate back with success result
+      Navigator.pop(context, true);
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error creating course: $e';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
   @override
   void dispose() {
     _descriptionController.dispose();
-    _manualEmailController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final courses = getCoursesForFaculty();
-
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: Text('Create New Course'),
-        backgroundColor: Colors.blueAccent,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          'Create New Course',
+          style: TextStyle(
+            color: Colors.black87,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.black87),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
-      body: _isLoading && _facultyStudents.isEmpty
-          ? Center(child: CircularProgressIndicator())
-          : Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Error message
-              if (_errorMessage != null)
-                Container(
-                  padding: EdgeInsets.all(12),
-                  margin: EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red[200]!),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline, color: Colors.red[700]),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: TextStyle(color: Colors.red[700]),
-                        ),
-                      ),
-                    ],
-                  ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_userData == null && _errorMessage == null) {
+      return Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
+        ),
+      );
+    }
+
+    return Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Error message
+            if (_errorMessage != null)
+              Container(
+                padding: EdgeInsets.all(12),
+                margin: EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red[200]!),
                 ),
-
-              // Course selection card
-              Card(
-                elevation: 2,
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Course Information',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red[700]),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        style: TextStyle(color: Colors.red[700]),
                       ),
-                      SizedBox(height: 16),
-
-                      // Course dropdown
-                      DropdownButtonFormField<String>(
-                        value: _selectedCourseId,
-                        itemHeight: 60, // Increased height to accommodate both lines
-                        isExpanded: true,
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedCourseId = value;
-                            _selectedCourseTitle = courses
-                                .firstWhere((course) => course['code'] == value)['title'];
-                          });
-                        },
-                        selectedItemBuilder: (BuildContext context) {
-                          return courses.map((course) {
-                            return Container(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                '${course['code']} - ${course['title']}',
-                                style: TextStyle(fontSize: 14),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            );
-                          }).toList();
-                        },
-                        items: courses.map((course) {
-                          return DropdownMenuItem<String>(
-                            value: course['code'],
-                            child: Container(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    course['code']!,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  SizedBox(height: 2),
-                                  Text(
-                                    course['title']!,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey[600],
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                        decoration: InputDecoration(
-                          labelText: 'Select Course',
-                          prefixIcon: Icon(Icons.book, color: Colors.blueAccent),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null) {
-                            return 'Please select a course';
-                          }
-                          return null;
-                        },
-                      ),
-                      SizedBox(height: 16),
-
-                      // Course description
-                      TextFormField(
-                        controller: _descriptionController,
-                        maxLines: 4,
-                        decoration: InputDecoration(
-                          labelText: 'Course Description',
-                          prefixIcon: Icon(Icons.description, color: Colors.blueAccent),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          alignLabelWithHint: true,
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter course description';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-              SizedBox(height: 16),
 
-              // Student enrollment card
-              Card(
-                elevation: 2,
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Student Enrollment',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
+            // Course Information Card
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Course Information',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.purple[600],
+                    ),
+                  ),
+                  SizedBox(height: 20),
+
+                  // Course Template Selection
+                  if (_baseCourses.isEmpty)
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange[200]!),
                       ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Select students from your faculty or add by email',
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                      SizedBox(height: 16),
-
-                      // Faculty students list
-                      if (_facultyStudents.isNotEmpty) ...[
-                        Text(
-                          'Students in $_lecturerFaculty',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Container(
-                          height: 200,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey[300]!),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: ListView.builder(
-                            itemCount: _facultyStudents.length,
-                            itemBuilder: (context, index) {
-                              final student = _facultyStudents[index];
-                              final isSelected = _selectedStudentIds.contains(student['uid']);
-
-                              return CheckboxListTile(
-                                value: isSelected,
-                                onChanged: (bool? value) {
-                                  setState(() {
-                                    if (value == true) {
-                                      _selectedStudentIds.add(student['uid']);
-                                    } else {
-                                      _selectedStudentIds.remove(student['uid']);
-                                    }
-                                  });
-                                },
-                                title: Text(student['name']),
-                                subtitle: Text('${student['email']} • ${student['program']}'),
-                                dense: true,
-                              );
-                            },
-                          ),
-                        ),
-                        SizedBox(height: 16),
-                      ],
-
-                      // Manual email entry
-                      Text(
-                        'Add Students by Email',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      Row(
+                      child: Row(
                         children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _manualEmailController,
-                              decoration: InputDecoration(
-                                hintText: 'Enter student email',
-                                prefixIcon: Icon(Icons.email, color: Colors.blueAccent),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            ),
-                          ),
+                          Icon(Icons.warning, color: Colors.orange[700]),
                           SizedBox(width: 8),
-                          ElevatedButton(
-                            onPressed: _addManualEmail,
-                            child: Icon(Icons.add),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blueAccent,
-                              shape: CircleBorder(),
-                              padding: EdgeInsets.all(16),
+                          Expanded(
+                            child: Text(
+                              'No course templates available for your faculty. Contact your administrator to create course templates.',
+                              style: TextStyle(color: Colors.orange[700]),
                             ),
                           ),
                         ],
                       ),
-
-                      // Display manually added emails
-                      if (_manuallyAddedEmails.isNotEmpty) ...[
-                        SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          children: _manuallyAddedEmails.map((email) {
-                            return Chip(
-                              label: Text(email),
-                              deleteIcon: Icon(Icons.close, size: 18),
-                              onDeleted: () {
-                                setState(() {
-                                  _manuallyAddedEmails.remove(email);
-                                });
-                              },
+                    )
+                  else ...[
+                    DropdownButtonFormField<String>(
+                      value: _selectedBaseCourseId,
+                      isExpanded: true,  // IMPORTANT: This prevents overflow
+                      menuMaxHeight: 300,  // Limit dropdown height
+                      decoration: InputDecoration(
+                        labelText: 'Select Course Template *',
+                        hintText: 'Choose a course template',
+                        prefixIcon: Icon(Icons.library_books, color: Colors.purple[400]),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.purple[400]!, width: 2),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                      ),
+                      // Custom builder for selected item display
+                      selectedItemBuilder: (BuildContext context) {
+                        return _baseCourses.map<Widget>((courseTemplate) {
+                          return Container(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '${courseTemplate['code']} - ${courseTemplate['name']}',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          );
+                        }).toList();
+                      },
+                      // Dropdown menu items
+                      items: _baseCourses.map((courseTemplate) => DropdownMenuItem<String>(
+                        value: courseTemplate['id'] as String,
+                        child: Container(
+                          padding: EdgeInsets.symmetric(vertical: 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.purple[100],
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      courseTemplate['code'],
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.purple[800],
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      courseTemplate['name'],
+                                      style: TextStyle(fontWeight: FontWeight.w500),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Program: ${courseTemplate['programName']}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      )).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedBaseCourseId = value;
+                          // Pre-fill description if available
+                          if (value != null) {
+                            final selectedCourse = _baseCourses.firstWhere(
+                                  (course) => course['id'] == value,
                             );
-                          }).toList(),
+                            if (selectedCourse['defaultDescription'] != null &&
+                                selectedCourse['defaultDescription'].isNotEmpty &&
+                                _descriptionController.text.isEmpty) {
+                              _descriptionController.text = selectedCourse['defaultDescription'];
+                            }
+                          }
+                        });
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please select a course template';
+                        }
+                        return null;
+                      },
+                    ),
+
+                    // Show selected course details below dropdown
+                    if (_selectedBaseCourseId != null) ...[
+                      SizedBox(height: 12),
+                      Container(
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue[200]!),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.check_circle, size: 20, color: Colors.blue[700]),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Selected Course Template',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.blue[800],
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  SizedBox(height: 4),
+                                  Builder(builder: (context) {
+                                    final selected = _baseCourses.firstWhere(
+                                          (c) => c['id'] == _selectedBaseCourseId,
+                                    );
+                                    return Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${selected['code']} - ${selected['name']}',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: Colors.blue[700],
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Program: ${selected['programName']}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.blue[600],
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  }),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                  SizedBox(height: 16),
+
+                  // Course Description
+                  TextFormField(
+                    controller: _descriptionController,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: 'Course Description *',
+                      hintText: 'Enter a description for this course section',
+                      prefixIcon: Padding(
+                        padding: EdgeInsets.only(bottom: 60),
+                        child: Icon(Icons.description, color: Colors.purple[400]),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.purple[400]!, width: 2),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                      alignLabelWithHint: true,
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter course description';
+                      }
+                      return null;
+                    },
+                  ),
+
+                  // Faculty Information (Read-only)
+                  if (_userData != null) ...[
+                    SizedBox(height: 16),
+                    Container(
+                      padding: EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.school, size: 20, color: Colors.grey[700]),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Faculty',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                                Text(
+                                  _userData!['facultyName'] ?? _userData!['faculty'] ?? 'Not specified',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            SizedBox(height: 24),
+
+            // Additional Information Card
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.purple[50],
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.purple[200]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: Colors.purple[600],
+                    size: 24,
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Note',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple[800],
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'After creating this course, you can enroll students from your faculty or manually add them by email.',
+                          style: TextStyle(
+                            color: Colors.purple[700],
+                            fontSize: 14,
+                          ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
-              SizedBox(height: 24),
+            ),
+            SizedBox(height: 32),
 
-              // Create button
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _createCourse,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+            // Create Button
+            SizedBox(
+              width: double.infinity,
+              child: CustomButton(
+                text: _isLoading ? 'Creating...' : 'Create Course',
+                onPressed: _isLoading || _baseCourses.isEmpty ? () {} : _createCourse,
+                isLoading: _isLoading,
+              ),
+            ),
+            SizedBox(height: 16),
+
+            // Cancel Button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: _isLoading ? null : () => Navigator.pop(context),
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  side: BorderSide(color: Colors.purple[400]!),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: _isLoading
-                      ? CircularProgressIndicator(color: Colors.white)
-                      : Text(
-                    'Create Course',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.white,
-                    ),
+                ),
+                child: Text(
+                  'Cancel',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.purple[600],
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,8 +1,7 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:study_hub/Authentication/sign_in.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../Authentication/auth_services.dart';
+import '../Authentication/custom_widgets.dart';
 import 'course_page.dart';
 import 'create_course.dart';
 
@@ -12,325 +11,670 @@ class LecturerHomePage extends StatefulWidget {
 }
 
 class _LecturerHomePageState extends State<LecturerHomePage> {
-  FirebaseAuth _auth = FirebaseAuth.instance;
-  FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final AuthService _authService = AuthService();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  String? lecturerUid;
-  String? lecturerName;
-  String? lecturerEmail;
-  List<Map<String, dynamic>> courses =
-  []; // List to store courses created by the lecturer
-  String? errorMessage;
-  int _currentIndex = 2; // Track the current tab index
+  // Data
+  Map<String, dynamic>? _userData;
+  Map<String, dynamic>? _organizationData;
+  List<Map<String, dynamic>> _courses = [];
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  // Navigation
+  int _currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _fetchLecturerData();
+    _loadData();
   }
 
-  // Fetch lecturer data (including courses they have created)
-  Future<void> _fetchLecturerData() async {
-    User? user = _auth.currentUser;
-    if (user != null) {
+  Future<void> _loadData() async {
+    try {
+      final user = _authService.currentUser;
+      if (user == null) {
+        setState(() => _errorMessage = 'User not authenticated');
+        return;
+      }
+
+      // Load user data
+      final userData = await _authService.getUserData(user.uid);
+      if (userData == null) {
+        setState(() => _errorMessage = 'User data not found');
+        return;
+      }
+
       setState(() {
-        lecturerUid = user.uid;
+        _userData = userData;
       });
 
-      // Fetch lecturer name from Firestore
-      try {
-        DocumentSnapshot lecturerData =
-        await _firestore
-            .collection('users')
-            .doc(lecturerUid)
-            .get();
+      // Load organization data
+      final orgCode = userData['organizationCode'];
+      if (orgCode == null) {
+        setState(() => _errorMessage = 'Organization code not found');
+        return;
+      }
 
-        if (lecturerData.exists) {
-          setState(() {
-            lecturerName = lecturerData['name']; // Get the lecturer's name
-            lecturerEmail = lecturerData['email']; // Get the lecturer's email
-          });
-        }
+      final orgDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .get();
 
-        // Fetch courses created by this lecturer from Firestore
-        var courseData = await _firestore
-            .collection('users')
-            .doc(lecturerUid)
-            .collection('courses')
-            .get(); // Get all courses created by the lecturer
-
+      if (orgDoc.exists) {
         setState(() {
-          courses = courseData.docs.map((doc) {
-            return {
-              'courseId': doc.id, // Use document ID as courseId
-              'title': doc['title'],
-              'description': doc['description'],
-              'lecturerName': lecturerName, // Include the lecturer's name
-            };
-          }).toList();
-        });
-      } catch (e) {
-        setState(() {
-          errorMessage = 'Error fetching data: $e';
+          _organizationData = orgDoc.data();
         });
       }
+
+      // Load courses created by this lecturer
+      await _loadCourses(orgCode, user.uid);
+    } catch (e) {
+      print('Error loading data: $e');
+      setState(() {
+        _errorMessage = 'Error loading data: $e';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
-  // Navigate to the course creation page
-  void _createCourse() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CreateCoursePage(lecturerUid: lecturerUid!),
-      ),
-    ).then((_) {
-      _fetchLecturerData(); // Reload courses after creating a new one
-    });
+  Future<void> _loadCourses(String orgCode, String lecturerId) async {
+    try {
+      // Simple query without isActive check and orderBy to avoid index issues
+      final coursesSnapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .where('lecturerId', isEqualTo: lecturerId)
+          .get();
+
+      List<Map<String, dynamic>> coursesList = coursesSnapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return {
+          'id': doc.id,
+          ...data,
+        };
+      }).toList();
+
+      // Filter out inactive courses if the field exists
+      coursesList = coursesList.where((course) {
+        final isActive = course['isActive'];
+        // If isActive doesn't exist or is true, include the course
+        return isActive == null || isActive == true;
+      }).toList();
+
+      // Manual sorting by createdAt (descending)
+      coursesList.sort((a, b) {
+        final aTime = a['createdAt'] as Timestamp?;
+        final bTime = b['createdAt'] as Timestamp?;
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime.compareTo(aTime); // Descending order
+      });
+
+      setState(() {
+        _courses = coursesList;
+      });
+    } catch (e) {
+      print('Error loading courses: $e');
+      setState(() {
+        _errorMessage = 'Error loading courses: $e';
+      });
+    }
   }
 
-  // Navigate to the course details page
-  void _navigateToCoursePage(String courseId) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CoursePage(courseId: courseId),
+  Future<void> _handleLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Confirm Logout'),
+        content: Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('Logout', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
-  }
 
-  // Log out the user
-  void _logOut() async {
-    await _auth.signOut();
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SignInPage(),
-      ), // Replace with your login page
-    );
+    if (confirm == true) {
+      await _authService.signOut();
+      Navigator.pushReplacementNamed(context, '/');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    double screenWidth = MediaQuery.of(context).size.width;
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        title: Text(
-          'StudyHub - Lecturer',
-          style: TextStyle(
-            fontFamily: 'Abeezee',
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
+    if (_isLoading) {
+      return Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
           ),
         ),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.notifications, color: Colors.white),
-            onPressed: () {
-              // Handle notifications button action
-            },
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, size: 64, color: Colors.red),
+              SizedBox(height: 16),
+              Text(
+                'Error',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text(
+                _errorMessage!,
+                style: TextStyle(color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: 24),
+              CustomButton(
+                text: 'Retry',
+                onPressed: () {
+                  setState(() {
+                    _isLoading = true;
+                    _errorMessage = null;
+                  });
+                  _loadData();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      key: _scaffoldKey,
+      backgroundColor: Colors.grey[50],
+      appBar: _buildAppBar(),
+      drawer: _buildDrawer(),
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        child: _buildBody(),
+      ),
+      bottomNavigationBar: _buildBottomNavigationBar(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          final result = await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => CreateCoursePage(),
+            ),
+          );
+
+          if (result == true) {
+            // Reload courses if a new course was created
+            _loadData();
+          }
+        },
+        backgroundColor: Colors.purple[400],
+        child: Icon(Icons.add),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      title: Row(
+        children: [
+          Image.asset(
+            'assets/images/logo.png',
+            height: 32,
+            errorBuilder: (context, error, stackTrace) => Icon(
+              Icons.school,
+              color: Colors.purple[400],
+              size: 32,
+            ),
+          ),
+          SizedBox(width: 12),
+          Text(
+            'Study Hub',
+            style: TextStyle(
+              color: Colors.black87,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
-      drawer: Drawer(
-        child: Container(
-          color: Color(0xFFE5E9F2),
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              DrawerHeader(
-                decoration: BoxDecoration(
-                  color: Colors.blueAccent,
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(40),
-                    bottomRight: Radius.circular(40),
-                  ),
+      leading: IconButton(
+        icon: Icon(Icons.menu, color: Colors.black87),
+        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+      ),
+      actions: [
+        IconButton(
+          icon: Icon(Icons.notifications_outlined, color: Colors.black87),
+          onPressed: () {
+            // TODO: Implement notifications
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDrawer() {
+    return Drawer(
+      child: Container(
+        color: Colors.white,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.purple[600]!, Colors.purple[400]!],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircleAvatar(
-                      radius: screenWidth < 600 ? 40 : 50,
-                      backgroundImage: AssetImage(
-                        'assets/images/profile_pic.png',
-                      ),
-                    ),
-                    SizedBox(height: 10),
-                    Text(
-                      lecturerName ?? 'Name not available',
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 35,
+                    backgroundColor: Colors.white,
+                    child: Text(
+                      _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'L',
                       style: TextStyle(
-                        color: Colors.white,
-                        fontSize: screenWidth < 600 ? 16 : 20,
+                        color: Colors.purple[600],
+                        fontSize: 28,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    Text(
-                      lecturerEmail ?? 'Email not available',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: screenWidth < 600 ? 12 : 14,
-                      ),
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    _userData?['fullName'] ?? 'Lecturer',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
                     ),
-                  ],
-                ),
+                  ),
+                  Text(
+                    _userData?['email'] ?? '',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/editProfile');
-                      },
-                      child: Text('Edit Profile'),
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.blueAccent,
-                        backgroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: screenWidth < 600 ? 20 : 30,
-                          vertical: 10,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: 10),
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/calendar');
-                      },
-                      child: Text('Calendar'),
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.blueAccent,
-                        backgroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: screenWidth < 600 ? 20 : 30,
-                          vertical: 10,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                    ),
-                    Divider(),
-                    SizedBox(height: 10),
-                    ElevatedButton(
-                      onPressed: _logOut,
-                      child: Text('Log Out'),
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.redAccent,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: screenWidth < 600 ? 20 : 30,
-                          vertical: 10,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+            ListTile(
+              leading: Icon(Icons.person_outline),
+              title: Text('Profile'),
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Navigate to profile page
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.calendar_today),
+              title: Text('Calendar'),
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Navigate to calendar page
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.settings),
+              title: Text('Settings'),
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Navigate to settings page
+              },
+            ),
+            Divider(),
+            ListTile(
+              leading: Icon(Icons.business),
+              title: Text('Organization'),
+              subtitle: Text(_organizationData?['name'] ?? ''),
+            ),
+            ListTile(
+              leading: Icon(Icons.code),
+              title: Text('Organization Code'),
+              subtitle: Text(_organizationData?['code'] ?? ''),
+            ),
+            Divider(),
+            ListTile(
+              leading: Icon(Icons.logout, color: Colors.red),
+              title: Text('Logout', style: TextStyle(color: Colors.red)),
+              onTap: _handleLogout,
+            ),
+          ],
         ),
       ),
-      body: SafeArea(
-        child: Container(
-          color: Colors.white,
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    );
+  }
+
+  Widget _buildBody() {
+    return SingleChildScrollView(
+      physics: AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Welcome Section
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.purple[600]!, Colors.purple[400]!],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.purple.withOpacity(0.3),
+                  blurRadius: 10,
+                  offset: Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Welcome back, ${_userData?['fullName']?.split(' ').first ?? 'Lecturer'}!',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'You have ${_courses.length} active course${_courses.length == 1 ? '' : 's'}',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.white.withOpacity(0.9),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 24),
+
+          // Courses Section
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Courses You Handle',
+                'Your Courses',
                 style: TextStyle(
-                  fontSize: screenWidth < 600 ? 20 : 24,
+                  fontSize: 20,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              SizedBox(height: 20),
-              if (errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16.0),
+              TextButton(
+                onPressed: () {
+                  // TODO: Navigate to all courses
+                },
+                child: Text(
+                  'View All',
+                  style: TextStyle(color: Colors.purple[400]),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 16),
+
+          // Courses List
+          if (_courses.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(40),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.library_books_outlined,
+                    size: 64,
+                    color: Colors.grey[400],
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'No courses yet',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Create your first course to get started',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  SizedBox(height: 24),
+                  CustomButton(
+                    text: 'Create Course',
+                    onPressed: () async {
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => CreateCoursePage(),
+                        ),
+                      );
+
+                      if (result == true) {
+                        // Reload courses if a new course was created
+                        _loadData();
+                      }
+                    },
+                    icon: Icons.add,
+                  ),
+                ],
+              ),
+            )
+          else
+            ...List.generate(
+              _courses.length,
+                  (index) => _buildCourseCard(_courses[index]),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCourseCard(Map<String, dynamic> course) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => CoursePage(
+                courseId: course['id'],
+                courseData: course,
+              ),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: Colors.purple[100],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
                   child: Text(
-                    errorMessage!,
-                    style: TextStyle(color: Colors.red),
+                    course['code'] ?? course['title']?.substring(0, 2).toUpperCase() ?? 'CS',
+                    style: TextStyle(
+                      color: Colors.purple[600],
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
                   ),
                 ),
+              ),
+              SizedBox(width: 16),
               Expanded(
-                child: courses.isNotEmpty
-                    ? ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: courses.length,
-                  itemBuilder: (context, index) {
-                    return Card(
-                      margin: EdgeInsets.symmetric(vertical: 8),
-                      child: ListTile(
-                        title: Text(courses[index]['title']),
-                        subtitle: Text(
-                            '${courses[index]['description']} \nLecturer: ${courses[index]['lecturerName']}'),
-                        onTap: () => _navigateToCoursePage(courses[index]['courseId']),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      course['title'] ?? 'Untitled Course',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
                       ),
-                    );
-                  },
-                )
-                    : Center(
-                  child: Text(
-                    'You have not created any courses yet.',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
-                  ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      course['description'] ?? 'No description',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(Icons.people_outline, size: 16, color: Colors.grey[600]),
+                        SizedBox(width: 4),
+                        Text(
+                          '${course['enrolledCount'] ?? 0} students',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                        SizedBox(width: 16),
+                        Icon(Icons.school_outlined, size: 16, color: Colors.grey[600]),
+                        SizedBox(width: 4),
+                        Text(
+                          course['facultyName'] ?? 'Faculty',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: Colors.grey[400],
               ),
             ],
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _createCourse,
-        backgroundColor: Colors.blueAccent,
-        child: Icon(Icons.add),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        selectedItemColor: Colors.blueAccent,
-        unselectedItemColor: Colors.black,
-        backgroundColor: Colors.grey[300],
-        type: BottomNavigationBarType.fixed,
-        items: [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.people),
-            label: 'Community',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat),
-            label: 'Chat',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.book),
-            label: 'Course',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.flag),
-            label: 'Goal',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
-      ),
+    );
+  }
+
+  Widget _buildBottomNavigationBar() {
+    return BottomNavigationBar(
+      currentIndex: _currentIndex,
+      onTap: (index) {
+        setState(() {
+          _currentIndex = index;
+        });
+
+        // Handle navigation
+        switch (index) {
+          case 0:
+          // Already on courses page
+            break;
+          case 1:
+          // TODO: Navigate to community
+            break;
+          case 2:
+          // TODO: Navigate to chat
+            break;
+          case 3:
+          // TODO: Navigate to calendar
+            break;
+          case 4:
+          // TODO: Navigate to profile
+            break;
+        }
+      },
+      selectedItemColor: Colors.purple[400],
+      unselectedItemColor: Colors.grey[600],
+      type: BottomNavigationBarType.fixed,
+      items: [
+        BottomNavigationBarItem(
+          icon: Icon(Icons.library_books),
+          label: 'Courses',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.people),
+          label: 'Community',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.chat_bubble_outline),
+          label: 'Chat',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.calendar_today),
+          label: 'Calendar',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.person_outline),
+          label: 'Profile',
+        ),
+      ],
     );
   }
 }

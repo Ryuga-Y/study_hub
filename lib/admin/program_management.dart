@@ -161,6 +161,7 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                       width: MediaQuery.of(context).size.width > 800 ? 250 : double.infinity,
                       child: DropdownButtonFormField<String>(
                         value: _selectedFacultyId,
+                        isExpanded: true,  // Add this to expand dropdown items
                         decoration: InputDecoration(
                           labelText: 'Filter by Faculty',
                           prefixIcon: Icon(Icons.school),
@@ -176,7 +177,11 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                           ),
                           ..._faculties.map((faculty) => DropdownMenuItem<String>(
                             value: faculty['id'] as String,
-                            child: Text(faculty['name']),
+                            child: Text(
+                              faculty['name'],
+                              overflow: TextOverflow.ellipsis,  // Add overflow handling
+                              maxLines: 1,
+                            ),
                           )),
                         ],
                         onChanged: (value) {
@@ -477,49 +482,23 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                           ),
                         ],
                       ),
-                      if (program['degree'] != null || program['duration'] != null) ...[
+                      if (program['degree'] != null) ...[
                         SizedBox(height: 4),
                         Row(
                           children: [
-                            if (program['degree'] != null) ...[
-                              Icon(Icons.school_outlined, size: 14, color: Colors.grey[500]),
-                              SizedBox(width: 4),
-                              Flexible(  // Use Flexible for degree text
-                                child: Text(
-                                  program['degree'],
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.grey[700],
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              SizedBox(width: 16),
-                            ],
-                            if (program['duration'] != null) ...[
-                              Icon(Icons.timer, size: 14, color: Colors.grey[500]),
-                              SizedBox(width: 4),
-                              Text(
-                                '${program['duration']} years',
+                            Icon(Icons.school_outlined, size: 14, color: Colors.grey[500]),
+                            SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                program['degree'],
                                 style: TextStyle(
                                   fontSize: 13,
                                   color: Colors.grey[700],
                                 ),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            ],
+                            ),
                           ],
-                        ),
-                      ],
-                      if (program['description'] != null && program['description'].toString().isNotEmpty) ...[
-                        SizedBox(height: 4),
-                        Text(
-                          program['description'],
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ],
@@ -604,10 +583,11 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
 
     final nameController = TextEditingController();
     final codeController = TextEditingController();
-    final degreeController = TextEditingController();
-    final durationController = TextEditingController();
-    final descriptionController = TextEditingController();
     String? selectedFacultyId = _selectedFacultyId;
+    String? selectedDegree;
+
+    // Degree type options
+    final degreeTypes = ['Foundation', 'Diploma', 'Bachelor Degree'];
 
     showDialog(
       context: context,
@@ -667,39 +647,22 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                     textCapitalization: TextCapitalization.characters,
                   ),
                   SizedBox(height: 16),
-                  TextField(
-                    controller: degreeController,
+                  DropdownButtonFormField<String>(
+                    value: selectedDegree,
+                    isExpanded: true,
                     decoration: InputDecoration(
-                      labelText: 'Degree Type',
-                      hintText: 'e.g., Bachelor of Science',
+                      labelText: 'Degree Type *',
+                      prefixIcon: Icon(Icons.school_outlined),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                  ),
-                  SizedBox(height: 16),
-                  TextField(
-                    controller: durationController,
-                    decoration: InputDecoration(
-                      labelText: 'Duration (years)',
-                      hintText: 'e.g., 4',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
-                  SizedBox(height: 16),
-                  TextField(
-                    controller: descriptionController,
-                    decoration: InputDecoration(
-                      labelText: 'Description',
-                      hintText: 'Brief description of the program',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    maxLines: 3,
+                    items: degreeTypes.map((degree) => DropdownMenuItem<String>(
+                      value: degree,
+                      child: Text(degree),
+                    )).toList(),
+                    onChanged: (value) => setState(() => selectedDegree = value),
+                    validator: (value) => value == null ? 'Please select a degree type' : null,
                   ),
                 ],
               ),
@@ -714,7 +677,8 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
               onPressed: () async {
                 if (selectedFacultyId == null ||
                     nameController.text.isEmpty ||
-                    codeController.text.isEmpty) {
+                    codeController.text.isEmpty ||
+                    selectedDegree == null) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Please fill in all required fields'),
@@ -734,9 +698,7 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                       .add({
                     'name': nameController.text.trim(),
                     'code': codeController.text.trim().toUpperCase(),
-                    'degree': degreeController.text.trim(),
-                    'duration': int.tryParse(durationController.text.trim()),
-                    'description': descriptionController.text.trim(),
+                    'degree': selectedDegree,
                     'isActive': true,
                     'createdAt': FieldValue.serverTimestamp(),
                     'createdBy': FirebaseAuth.instance.currentUser?.uid,
@@ -775,163 +737,152 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
   void _showEditProgramDialog(BuildContext context, Map<String, dynamic> program) {
     final nameController = TextEditingController(text: program['name']);
     final codeController = TextEditingController(text: program['code']);
-    final degreeController = TextEditingController(text: program['degree'] ?? '');
-    final durationController = TextEditingController(text: program['duration']?.toString() ?? '');
-    final descriptionController = TextEditingController(text: program['description'] ?? '');
+    String? selectedDegree = program['degree'];
+
+    // Degree type options
+    final degreeTypes = ['Foundation', 'Diploma', 'Bachelor Degree'];
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Text('Edit Program'),
-        content: Container(
-          width: 400,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Display faculty info (read-only)
-                Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.school, size: 20, color: Colors.grey[700]),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${program['facultyName']} (${program['facultyCode']})',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[700],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text('Edit Program'),
+          content: Container(
+            width: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Display faculty info (read-only)
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.school, size: 20, color: Colors.grey[700]),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${program['facultyName']} (${program['facultyCode']})',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[700],
+                            ),
                           ),
                         ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: nameController,
+                    decoration: InputDecoration(
+                      labelText: 'Program Name *',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                    ],
-                  ),
-                ),
-                SizedBox(height: 16),
-                TextField(
-                  controller: nameController,
-                  decoration: InputDecoration(
-                    labelText: 'Program Name *',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                ),
-                SizedBox(height: 16),
-                TextField(
-                  controller: codeController,
-                  decoration: InputDecoration(
-                    labelText: 'Program Code *',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: codeController,
+                    decoration: InputDecoration(
+                      labelText: 'Program Code *',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
+                    textCapitalization: TextCapitalization.characters,
                   ),
-                  textCapitalization: TextCapitalization.characters,
-                ),
-                SizedBox(height: 16),
-                TextField(
-                  controller: degreeController,
-                  decoration: InputDecoration(
-                    labelText: 'Degree Type',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                  SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: selectedDegree,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'Degree Type *',
+                      prefixIcon: Icon(Icons.school_outlined),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
+                    items: degreeTypes.map((degree) => DropdownMenuItem<String>(
+                      value: degree,
+                      child: Text(degree),
+                    )).toList(),
+                    onChanged: (value) => setState(() => selectedDegree = value),
+                    validator: (value) => value == null ? 'Please select a degree type' : null,
                   ),
-                ),
-                SizedBox(height: 16),
-                TextField(
-                  controller: durationController,
-                  decoration: InputDecoration(
-                    labelText: 'Duration (years)',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
-                SizedBox(height: 16),
-                TextField(
-                  controller: descriptionController,
-                  decoration: InputDecoration(
-                    labelText: 'Description',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  maxLines: 3,
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (nameController.text.isEmpty || codeController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Please fill in all required fields'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-                return;
-              }
-
-              try {
-                await FirebaseFirestore.instance
-                    .collection('organizations')
-                    .doc(widget.organizationId)
-                    .collection('faculties')
-                    .doc(program['facultyId'])
-                    .collection('programs')
-                    .doc(program['id'])
-                    .update({
-                  'name': nameController.text.trim(),
-                  'code': codeController.text.trim().toUpperCase(),
-                  'degree': degreeController.text.trim(),
-                  'duration': int.tryParse(durationController.text.trim()),
-                  'description': descriptionController.text.trim(),
-                  'updatedAt': FieldValue.serverTimestamp(),
-                  'updatedBy': FirebaseAuth.instance.currentUser?.uid,
-                });
-
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Program updated successfully'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error updating program: ${e.toString()}'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+                ],
               ),
             ),
-            child: Text('Update Program', style: TextStyle(color: Colors.white)),
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.isEmpty ||
+                    codeController.text.isEmpty ||
+                    selectedDegree == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please fill in all required fields'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('organizations')
+                      .doc(widget.organizationId)
+                      .collection('faculties')
+                      .doc(program['facultyId'])
+                      .collection('programs')
+                      .doc(program['id'])
+                      .update({
+                    'name': nameController.text.trim(),
+                    'code': codeController.text.trim().toUpperCase(),
+                    'degree': selectedDegree,
+                    'updatedAt': FieldValue.serverTimestamp(),
+                    'updatedBy': FirebaseAuth.instance.currentUser?.uid,
+                  });
+
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Program updated successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error updating program: ${e.toString()}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('Update Program', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
       ),
     );
   }
