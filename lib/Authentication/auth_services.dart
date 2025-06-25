@@ -143,17 +143,63 @@ class AuthService {
           'role': 'admin',
           'organizationCode': orgCode,
           'organizationName': orgDoc['name'],
-          'isActive': true,
+          'isActive': false, // Set to false for joining admins - requires activation
+          'requiresActivation': true, // Flag to identify pending admins
           'emailVerified': false,
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
 
-        // Update organization's admin list
-        await _firestore.collection('organizations').doc(orgCode).update({
-          'admins': FieldValue.arrayUnion([user.uid]),
+        // Create audit log first (this is allowed for everyone)
+        await _createAuditLog(
+          organizationCode: orgCode,
+          action: 'admin_joined_pending_activation',
+          userId: user.uid,
+          details: {
+            'adminEmail': email,
+            'adminName': fullName,
+            'status': 'pending_activation',
+          },
+        );
+
+        // Update organization's pending admins list
+        // Using a batch to ensure consistency
+        WriteBatch batch = _firestore.batch();
+
+        batch.update(_firestore.collection('organizations').doc(orgCode), {
+          'pendingAdmins': FieldValue.arrayUnion([user.uid]),
           'updatedAt': FieldValue.serverTimestamp(),
         });
+
+        try {
+          await batch.commit();
+        } catch (e) {
+          // If batch fails, the admin is still created and can be manually activated
+          print('Warning: Could not update pendingAdmins list: $e');
+          // Continue execution - the admin account is created successfully
+        }
+
+        // Notify creator admin about pending admin
+        Map<String, dynamic> orgData = orgDoc.data() as Map<String, dynamic>;
+        String creatorId = orgData['createdBy'] ?? '';
+        if (creatorId.isNotEmpty) {
+          try {
+            await _createNotification(
+              userId: creatorId,
+              title: 'New Admin Pending Activation',
+              message: '$fullName has joined your organization and requires activation.',
+              type: 'admin_pending',
+              data: {
+                'pendingAdminId': user.uid,
+                'pendingAdminName': fullName,
+                'pendingAdminEmail': email,
+              },
+            );
+          } catch (e) {
+            print('Warning: Could not create notification: $e');
+            // Continue execution - the admin account is created successfully
+          }
+        }
       } else {
         // Create new organization
         DocumentSnapshot existingOrg = await _firestore
@@ -169,7 +215,7 @@ class AuthService {
         // Use batch write for consistency
         WriteBatch batch = _firestore.batch();
 
-        // Create user document
+        // Create user document - creator is always active
         batch.set(_firestore.collection('users').doc(user.uid), {
           'uid': user.uid,
           'email': email,
@@ -178,6 +224,7 @@ class AuthService {
           'organizationCode': orgCode,
           'organizationName': organizationName,
           'isActive': true,
+          'isOrganizationCreator': true, // Mark as organization creator
           'emailVerified': false,
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
@@ -189,19 +236,26 @@ class AuthService {
           'code': orgCode,
           'createdBy': user.uid,
           'admins': [user.uid],
+          'pendingAdmins': [], // Initialize empty pending admins list
           'isActive': true,
           'createdAt': FieldValue.serverTimestamp(),
           'settings': {
             'allowStudentRegistration': true,
             'allowLecturerRegistration': true,
             'requireEmailVerification': true,
+            'requireAdminActivation': true, // New setting for admin activation
           }
         });
 
         await batch.commit();
       }
 
-      return AuthResult(success: true, message: 'Admin account created successfully');
+      return AuthResult(
+          success: true,
+          message: isJoiningExisting
+              ? 'Admin account created. Awaiting activation from organization creator.'
+              : 'Organization created successfully!'
+      );
     } on FirebaseAuthException catch (e) {
       return AuthResult(success: false, message: _getErrorMessage(e.code));
     } catch (e) {
@@ -236,6 +290,12 @@ class AuthService {
       // Check if account is active
       if (!(userData['isActive'] ?? true)) {
         await _auth.signOut();
+
+        // Check if it's a pending admin
+        if (userData['role'] == 'admin' && (userData['requiresActivation'] ?? false)) {
+          throw Exception('Your admin account is pending activation. Please wait for the organization creator to activate your account.');
+        }
+
         throw Exception('Account has been deactivated');
       }
 
@@ -256,6 +316,181 @@ class AuthService {
       return AuthResult(success: false, message: _getErrorMessage(e.code));
     } catch (e) {
       return AuthResult(success: false, message: e.toString());
+    }
+  }
+
+  // Activate admin (for organization creators)
+  Future<AuthResult> activateAdmin(String adminId, String organizationCode) async {
+    try {
+      // Verify caller is organization creator
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) throw Exception('Not authenticated');
+
+      DocumentSnapshot orgDoc = await _firestore
+          .collection('organizations')
+          .doc(organizationCode)
+          .get();
+
+      if (!orgDoc.exists) throw Exception('Organization not found');
+
+      Map<String, dynamic> orgData = orgDoc.data() as Map<String, dynamic>;
+      if (orgData['createdBy'] != currentUser.uid) {
+        throw Exception('Only organization creator can activate admins');
+      }
+
+      // Update admin status
+      await _firestore.collection('users').doc(adminId).update({
+        'isActive': true,
+        'requiresActivation': false,
+        'activatedBy': currentUser.uid,
+        'activatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update organization lists
+      await _firestore.collection('organizations').doc(organizationCode).update({
+        'admins': FieldValue.arrayUnion([adminId]),
+        'pendingAdmins': FieldValue.arrayRemove([adminId]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Create audit log
+      await _createAuditLog(
+        organizationCode: organizationCode,
+        action: 'admin_activated',
+        userId: currentUser.uid,
+        details: {
+          'activatedAdminId': adminId,
+          'activatedBy': currentUser.uid,
+        },
+      );
+
+      // Notify the activated admin
+      await _createNotification(
+        userId: adminId,
+        title: 'Account Activated',
+        message: 'Your admin account has been activated. You can now sign in.',
+        type: 'account_activated',
+      );
+
+      return AuthResult(success: true, message: 'Admin activated successfully');
+    } catch (e) {
+      return AuthResult(success: false, message: e.toString());
+    }
+  }
+
+  // Deactivate admin (for organization creators)
+  Future<AuthResult> deactivateAdmin(String adminId, String organizationCode) async {
+    try {
+      // Verify caller is organization creator
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) throw Exception('Not authenticated');
+
+      DocumentSnapshot orgDoc = await _firestore
+          .collection('organizations')
+          .doc(organizationCode)
+          .get();
+
+      if (!orgDoc.exists) throw Exception('Organization not found');
+
+      Map<String, dynamic> orgData = orgDoc.data() as Map<String, dynamic>;
+      if (orgData['createdBy'] != currentUser.uid) {
+        throw Exception('Only organization creator can deactivate admins');
+      }
+
+      // Prevent deactivating self
+      if (adminId == currentUser.uid) {
+        throw Exception('Cannot deactivate your own account');
+      }
+
+      // Update admin status
+      await _firestore.collection('users').doc(adminId).update({
+        'isActive': false,
+        'deactivatedBy': currentUser.uid,
+        'deactivatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Create audit log
+      await _createAuditLog(
+        organizationCode: organizationCode,
+        action: 'admin_deactivated',
+        userId: currentUser.uid,
+        details: {
+          'deactivatedAdminId': adminId,
+          'deactivatedBy': currentUser.uid,
+        },
+      );
+
+      return AuthResult(success: true, message: 'Admin deactivated successfully');
+    } catch (e) {
+      return AuthResult(success: false, message: e.toString());
+    }
+  }
+
+  // Get pending admins for organization
+  Future<List<Map<String, dynamic>>> getPendingAdmins(String organizationCode) async {
+    try {
+      DocumentSnapshot orgDoc = await _firestore
+          .collection('organizations')
+          .doc(organizationCode)
+          .get();
+
+      if (!orgDoc.exists) return [];
+
+      Map<String, dynamic> data = orgDoc.data() as Map<String, dynamic>;
+      List<dynamic> pendingAdminIds = data['pendingAdmins'] ?? [];
+
+      if (pendingAdminIds.isEmpty) return [];
+
+      // Get user details for pending admins
+      List<Map<String, dynamic>> pendingAdmins = [];
+      for (String adminId in pendingAdminIds) {
+        DocumentSnapshot userDoc = await _firestore
+            .collection('users')
+            .doc(adminId)
+            .get();
+
+        if (userDoc.exists) {
+          Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
+          pendingAdmins.add({
+            'uid': adminId,
+            'email': userData['email'],
+            'fullName': userData['fullName'],
+            'createdAt': userData['createdAt'],
+          });
+        }
+      }
+
+      return pendingAdmins;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Create notification
+  Future<void> _createNotification({
+    required String userId,
+    required String title,
+    required String message,
+    required String type,
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('notifications')
+          .add({
+        'title': title,
+        'message': message,
+        'type': type,
+        'data': data ?? {},
+        'read': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error creating notification: $e');
     }
   }
 

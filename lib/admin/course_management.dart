@@ -19,7 +19,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
   String? _selectedProgramId;
   List<Map<String, dynamic>> _faculties = [];
   List<Map<String, dynamic>> _programs = [];
-  List<Map<String, dynamic>> _lecturers = [];
+  // Removed _lecturers as it's not used
   List<Map<String, dynamic>> _baseCourses = [];
 
   @override
@@ -30,7 +30,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
 
   Future<void> _loadData() async {
     await _loadFaculties();
-    await _loadLecturers();
+    // Removed _loadLecturers() call as it's not used
     await _loadBaseCourses();
   }
 
@@ -150,28 +150,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
     }
   }
 
-  Future<void> _loadLecturers() async {
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .where('organizationCode', isEqualTo: widget.organizationId)
-          .where('role', isEqualTo: 'lecturer')
-          .where('isActive', isEqualTo: true)
-          .get();
-
-      setState(() {
-        _lecturers = snapshot.docs.map((doc) => {
-          'id': doc.id,
-          'name': doc.data()['fullName'],
-          'email': doc.data()['email'],
-          'facultyId': doc.data()['facultyId'],
-          'facultyName': doc.data()['facultyName'],
-        }).toList();
-      });
-    } catch (e) {
-      print('Error loading lecturers: $e');
-    }
-  }
+  // Removed _loadLecturers() method as it's not used
 
   @override
   void dispose() {
@@ -245,7 +224,6 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                         )
                             : ElevatedButton(
                           onPressed: () => _showAddCourseDialog(context),
-                          child: Icon(Icons.add, color: Colors.white),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue,
                             padding: EdgeInsets.all(8),
@@ -254,6 +232,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                           ),
+                          child: Icon(Icons.add, color: Colors.white),
                         ),
                       ],
                     ),
@@ -563,33 +542,6 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                               ),
                             ),
                           ),
-                          if (data['courseTemplateId'] != null)
-                            Container(
-                              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: Colors.purple[50],
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.link,
-                                    size: 12,
-                                    color: Colors.purple[700],
-                                  ),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'Template: ${data['courseTemplateName'] ?? 'Course Template'}',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.purple[700],
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
                           Container(
                             padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                             decoration: BoxDecoration(
@@ -898,11 +850,15 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
             ),
             ElevatedButton(
               onPressed: () async {
+                // Store context references before async operations
+                final navigator = Navigator.of(context);
+                final scaffoldMessenger = ScaffoldMessenger.of(context);
+
                 if (selectedFacultyId == null ||
                     selectedProgramId == null ||
                     nameController.text.isEmpty ||
                     codeController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  scaffoldMessenger.showSnackBar(
                     SnackBar(
                       content: Text('Please fill in all required fields'),
                       backgroundColor: Colors.red,
@@ -938,16 +894,16 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                     'createdBy': FirebaseAuth.instance.currentUser?.uid,
                   });
 
-                  Navigator.pop(context);
+                  navigator.pop();
                   _loadBaseCourses();
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  scaffoldMessenger.showSnackBar(
                     SnackBar(
                       content: Text('Course template added successfully'),
                       backgroundColor: Colors.green,
                     ),
                   );
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  scaffoldMessenger.showSnackBar(
                     SnackBar(
                       content: Text('Error adding course template: ${e.toString()}'),
                       backgroundColor: Colors.red,
@@ -1200,8 +1156,12 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
           ),
           ElevatedButton(
             onPressed: () async {
+              // Store context references before async operations
+              final navigator = Navigator.of(context);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+
               if (nameController.text.isEmpty || codeController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Please fill in all required fields'),
                     backgroundColor: Colors.red,
@@ -1228,16 +1188,16 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                   'updatedBy': FirebaseAuth.instance.currentUser?.uid,
                 });
 
-                Navigator.pop(context);
+                navigator.pop();
                 _loadBaseCourses();
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Course template updated successfully'),
                     backgroundColor: Colors.green,
                   ),
                 );
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Error updating course template: ${e.toString()}'),
                     backgroundColor: Colors.red,
@@ -1259,6 +1219,9 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
   }
 
   void _deleteCourseTemplate(Map<String, dynamic> courseTemplate) async {
+    // Store context reference before async operation
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1300,19 +1263,24 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
             .delete();
 
         _loadBaseCourses();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Course template deleted successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
+
+        if (mounted) {
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: Text('Course template deleted successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error deleting course template: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (mounted) {
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: Text('Error deleting course template: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -1426,8 +1394,12 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
           ),
           ElevatedButton(
             onPressed: () async {
+              // Store context references before async operations
+              final navigator = Navigator.of(context);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+
               if (nameController.text.isEmpty || codeController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Please fill in all required fields'),
                     backgroundColor: Colors.red,
@@ -1450,15 +1422,15 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                   'updatedBy': FirebaseAuth.instance.currentUser?.uid,
                 });
 
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
+                navigator.pop();
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Course updated successfully'),
                     backgroundColor: Colors.green,
                   ),
                 );
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Error updating course: ${e.toString()}'),
                     backgroundColor: Colors.red,
@@ -1480,6 +1452,9 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
   }
 
   void _toggleCourseStatus(String courseId, bool isActive) async {
+    // Store context reference before async operation
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     try {
       await FirebaseFirestore.instance
           .collection('organizations')
@@ -1492,19 +1467,23 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
         'updatedBy': FirebaseAuth.instance.currentUser?.uid,
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isActive ? 'Course activated successfully' : 'Course deactivated successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(isActive ? 'Course activated successfully' : 'Course deactivated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error updating course status: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Error updating course status: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -1553,6 +1532,10 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
           ),
           ElevatedButton(
             onPressed: () async {
+              // Store context references before async operations
+              final navigator = Navigator.of(context);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+
               try {
                 await FirebaseFirestore.instance
                     .collection('organizations')
@@ -1561,15 +1544,15 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                     .doc(courseId)
                     .delete();
 
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
+                navigator.pop();
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Course deleted successfully'),
                     backgroundColor: Colors.green,
                   ),
                 );
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Error deleting course: ${e.toString()}'),
                     backgroundColor: Colors.red,

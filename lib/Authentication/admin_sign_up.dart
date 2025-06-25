@@ -65,16 +65,88 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
     setState(() => _isLoading = false);
 
     if (result.success) {
-      SuccessSnackbar.show(
-        context,
-        _isJoiningExisting
-            ? 'Successfully joined organization!'
-            : 'Organization created successfully!',
-        subtitle: 'Please check your email to verify your account',
-      );
-
-      await Future.delayed(Duration(seconds: 2));
-      Navigator.pushReplacementNamed(context, '/');
+      // Show dialog for joining existing organization
+      if (_isJoiningExisting) {
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                Icon(Icons.hourglass_empty, color: Colors.orange, size: 28),
+                SizedBox(width: 12),
+                Text('Account Created'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Your admin account has been created successfully!',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 12),
+                Text(
+                  'However, your account is currently pending activation by the organization creator.',
+                  style: TextStyle(color: Colors.grey[700]),
+                ),
+                SizedBox(height: 12),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Please contact your organization creator to activate your account.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.orange[800],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.pushReplacementNamed(context, '/');
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text('Understood'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        // For organization creators, show success message
+        SuccessSnackbar.show(
+          context,
+          'Organization created successfully!',
+          subtitle: 'Please check your email to verify your account',
+        );
+        await Future.delayed(Duration(seconds: 2));
+        Navigator.pushReplacementNamed(context, '/');
+      }
     } else {
       ErrorSnackbar.show(context, result.message);
     }

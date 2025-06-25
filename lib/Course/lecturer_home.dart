@@ -321,7 +321,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   Text(
                     _userData?['email'] ?? '',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                       fontSize: 14,
                     ),
                   ),
@@ -395,7 +395,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.purple.withOpacity(0.3),
+                  color: Colors.purple.withValues(alpha: 0.3),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
@@ -417,7 +417,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   'You have ${_courses.length} active course${_courses.length == 1 ? '' : 's'}',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                   ),
                 ),
               ],
@@ -521,7 +521,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 5,
             offset: Offset(0, 2),
           ),
@@ -599,11 +599,15 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                         SizedBox(width: 16),
                         Icon(Icons.school_outlined, size: 16, color: Colors.grey[600]),
                         SizedBox(width: 4),
-                        Text(
-                          course['facultyName'] ?? 'Faculty',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 12,
+                        Expanded(
+                          child: Text(
+                            course['facultyName'] ?? 'Faculty',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                       ],

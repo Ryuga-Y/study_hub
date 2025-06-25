@@ -45,7 +45,72 @@ class _SignInPageState extends State<SignInPage> {
       // Navigation is handled by AuthWrapper
       Navigator.pushReplacementNamed(context, '/');
     } else {
-      ErrorSnackbar.show(context, result.message);
+      // Check if it's a pending admin activation error
+      if (result.message.contains('pending activation')) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                Icon(Icons.hourglass_empty, color: Colors.orange, size: 28),
+                SizedBox(width: 12),
+                Text('Account Pending'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Your admin account is pending activation.',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 12),
+                Text(
+                  'The organization creator needs to activate your account before you can sign in.',
+                  style: TextStyle(color: Colors.grey[700]),
+                ),
+                SizedBox(height: 12),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Please contact your organization creator to activate your account.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.orange[800],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('OK', style: TextStyle(color: Colors.orange[700])),
+              ),
+            ],
+          ),
+        );
+      } else {
+        ErrorSnackbar.show(context, result.message);
+      }
     }
   }
 

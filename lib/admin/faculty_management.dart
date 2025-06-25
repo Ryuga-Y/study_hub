@@ -90,7 +90,6 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                         )
                             : ElevatedButton(
                           onPressed: () => _showAddFacultyDialog(context),
-                          child: Icon(Icons.add, color: Colors.white),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
                             padding: EdgeInsets.all(8),
@@ -99,6 +98,7 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                           ),
+                          child: Icon(Icons.add, color: Colors.white),
                         ),
                       ],
                     ),
@@ -237,6 +237,13 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
           )
               : ElevatedButton(
             onPressed: () => _showAddFacultyDialog(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -244,13 +251,6 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                 SizedBox(width: 8),
                 Text('Add', style: TextStyle(color: Colors.white)),
               ],
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
             ),
           ),
         ],
@@ -386,7 +386,6 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                                   color: Colors.grey[700],
                                 ),
                               ),
-
                             ],
                           );
                         },
@@ -552,8 +551,12 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
           ),
           ElevatedButton(
             onPressed: () async {
+              // Store context references before async operations
+              final navigator = Navigator.of(context);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+
               if (nameController.text.isEmpty || codeController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Please fill in all required fields'),
                     backgroundColor: Colors.red,
@@ -576,15 +579,15 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                   'createdBy': FirebaseAuth.instance.currentUser?.uid,
                 });
 
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
+                navigator.pop();
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Faculty added successfully'),
                     backgroundColor: Colors.green,
                   ),
                 );
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Error adding faculty: ${e.toString()}'),
                     backgroundColor: Colors.red,
@@ -665,8 +668,12 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
           ),
           ElevatedButton(
             onPressed: () async {
+              // Store context references before async operations
+              final navigator = Navigator.of(context);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+
               if (nameController.text.isEmpty || codeController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Please fill in all required fields'),
                     backgroundColor: Colors.red,
@@ -689,15 +696,15 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                   'updatedBy': FirebaseAuth.instance.currentUser?.uid,
                 });
 
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
+                navigator.pop();
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Faculty updated successfully'),
                     backgroundColor: Colors.green,
                   ),
                 );
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                scaffoldMessenger.showSnackBar(
                   SnackBar(
                     content: Text('Error updating faculty: ${e.toString()}'),
                     backgroundColor: Colors.red,
@@ -719,6 +726,9 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
   }
 
   void _toggleFacultyStatus(String facultyId, bool isActive) async {
+    // Store context reference before async operation
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     try {
       await FirebaseFirestore.instance
           .collection('organizations')
@@ -731,19 +741,23 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
         'updatedBy': FirebaseAuth.instance.currentUser?.uid,
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isActive ? 'Faculty activated successfully' : 'Faculty deactivated successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(isActive ? 'Faculty activated successfully' : 'Faculty deactivated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error updating faculty status: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Error updating faculty status: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -792,6 +806,10 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
           ),
           ElevatedButton(
             onPressed: () async {
+              // Store context references before async operations
+              final navigator = Navigator.of(context);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+
               try {
                 // First check if there are any programs
                 final programsSnapshot = await FirebaseFirestore.instance
@@ -817,20 +835,26 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                     .doc(facultyId)
                     .delete();
 
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Faculty deleted successfully'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
+                navigator.pop();
+
+                // Check if widget is still mounted before showing snackbar
+                if (mounted) {
+                  scaffoldMessenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Faculty deleted successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error deleting faculty: ${e.toString()}'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                if (mounted) {
+                  scaffoldMessenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Error deleting faculty: ${e.toString()}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               }
             },
             style: ElevatedButton.styleFrom(

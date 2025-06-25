@@ -1,7 +1,8 @@
-// user_management.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart';
+import '../Authentication/auth_services.dart';
 
 class UserManagementPage extends StatefulWidget {
   final String organizationId;
@@ -15,13 +16,30 @@ class UserManagementPage extends StatefulWidget {
 class _UserManagementPageState extends State<UserManagementPage> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _searchController = TextEditingController();
+  final _authService = AuthService();
   String _searchQuery = '';
   bool _showInactiveUsers = false;
+  bool _isOrganizationCreator = false;
+  String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _loadCurrentUserData();
+  }
+
+  Future<void> _loadCurrentUserData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final userData = await _authService.getUserData(user.uid);
+      if (userData != null) {
+        setState(() {
+          _currentUserId = user.uid;
+          _isOrganizationCreator = userData['isOrganizationCreator'] ?? false;
+        });
+      }
+    }
   }
 
   @override
@@ -85,6 +103,14 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(color: Colors.grey[300]!),
                       ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.blue, width: 2),
+                      ),
                       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
                     onChanged: (value) {
@@ -124,7 +150,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                 _buildUserList('all'),
                 _buildUserList('student'),
                 _buildUserList('lecturer'),
-                _buildUserList('admin'),
+                _buildAdminList(), // Special handling for admins
               ],
             ),
           ),
@@ -133,7 +159,151 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
     );
   }
 
-  Widget _buildUserList(String role) {
+  Widget _buildAdminList() {
+    return Column(
+      children: [
+        // Pending Admins Quick Actions Section (only for organization creators)
+        if (_isOrganizationCreator) ...[
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('users')
+                .where('organizationCode', isEqualTo: widget.organizationId)
+                .where('role', isEqualTo: 'admin')
+                .where('requiresActivation', isEqualTo: true)
+                .where('isActive', isEqualTo: false)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return SizedBox.shrink();
+              }
+
+              final pendingAdmins = snapshot.data!.docs.map((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                return {
+                  'uid': doc.id,
+                  'email': data['email'],
+                  'fullName': data['fullName'],
+                  'createdAt': data['createdAt'],
+                };
+              }).toList();
+
+              return Container(
+                color: Colors.orange[50],
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.hourglass_empty, color: Colors.orange[700], size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Quick Actions - Pending Admin Requests',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange[800],
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.orange,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${pendingAdmins.length}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 12),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: pendingAdmins.map((admin) => Container(
+                          width: 300,
+                          margin: EdgeInsets.only(right: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.orange[300]!),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.orange.withValues(alpha: 0.1),
+                                blurRadius: 4,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Padding(
+                            padding: EdgeInsets.all(12),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: Colors.orange[100],
+                                  child: Icon(Icons.person, color: Colors.orange[700]),
+                                  radius: 20,
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        admin['fullName'],
+                                        style: TextStyle(fontWeight: FontWeight.bold),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        admin['email'],
+                                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                ElevatedButton(
+                                  onPressed: () => _activateAdmin(admin['uid']),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                  ),
+                                  child: Text('Activate', style: TextStyle(fontSize: 12, color: Colors.white)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+
+        // All Admins List (including pending ones)
+        Expanded(
+          child: _buildUserList('admin', showPendingAdmins: true),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUserList(String role, {bool showPendingAdmins = false}) {
     Query query = FirebaseFirestore.instance
         .collection('users')
         .where('organizationCode', isEqualTo: widget.organizationId);
@@ -142,7 +312,9 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
       query = query.where('role', isEqualTo: role);
     }
 
-    if (!_showInactiveUsers) {
+    // For admin list, we want to show all admins regardless of status when showPendingAdmins is true
+    // For other roles, respect the active filter
+    if (!_showInactiveUsers && !showPendingAdmins) {
       query = query.where('isActive', isEqualTo: true);
     }
 
@@ -161,7 +333,17 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
           final data = doc.data() as Map<String, dynamic>;
           final name = data['fullName']?.toString().toLowerCase() ?? '';
           final email = data['email']?.toString().toLowerCase() ?? '';
-          return name.contains(_searchQuery) || email.contains(_searchQuery);
+
+          // Apply search filter
+          bool matchesSearch = name.contains(_searchQuery) || email.contains(_searchQuery);
+
+          // For non-admin roles or when not showing pending admins,
+          // filter out inactive users unless specifically showing inactive
+          if (!showPendingAdmins && !_showInactiveUsers) {
+            return matchesSearch && (data['isActive'] ?? true);
+          }
+
+          return matchesSearch;
         }).toList();
 
         if (users.isEmpty) {
@@ -242,13 +424,33 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
   Widget _buildUserCard(String userId, Map<String, dynamic> data) {
     final isActive = data['isActive'] ?? true;
     final role = data['role'] ?? 'unknown';
-    final isCurrentUser = userId == FirebaseAuth.instance.currentUser?.uid;
+    final isCurrentUser = userId == _currentUserId;
+    final isCreator = data['isOrganizationCreator'] ?? false;
+    // Check both requiresActivation and isActive to determine pending status
+    final isPendingActivation = (data['requiresActivation'] ?? false) && !isActive;
 
-    return Card(
+    return Container(
       margin: EdgeInsets.only(bottom: 16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
+      decoration: BoxDecoration(
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isPendingActivation
+              ? Colors.orange[300]!
+              : isCreator
+              ? Colors.blue[200]!
+              : Colors.grey[200]!,
+          width: isPendingActivation || isCreator ? 2 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isPendingActivation
+                ? Colors.orange.withValues(alpha: 0.1)
+                : Colors.black.withValues(alpha: 0.05),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: Padding(
         padding: EdgeInsets.all(20),
@@ -259,8 +461,16 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                 // User Avatar
                 CircleAvatar(
                   radius: 30,
-                  backgroundColor: _getRoleColor(role),
-                  child: Text(
+                  backgroundColor: isPendingActivation
+                      ? Colors.orange
+                      : isCreator
+                      ? Colors.blue
+                      : _getRoleColor(role),
+                  child: isPendingActivation
+                      ? Icon(Icons.hourglass_empty, color: Colors.white, size: 28)
+                      : isCreator
+                      ? Icon(Icons.star, color: Colors.white, size: 28)
+                      : Text(
                     data['fullName']?.substring(0, 1).toUpperCase() ?? '?',
                     style: TextStyle(
                       fontSize: 24,
@@ -293,16 +503,56 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                             Container(
                               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.blue[50],
+                                color: Colors.purple[50],
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
                                 'You',
                                 style: TextStyle(
                                   fontSize: 11,
+                                  color: Colors.purple[700],
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          if (isCreator)
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.blue[50],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'Organization Creator',
+                                style: TextStyle(
+                                  fontSize: 11,
                                   color: Colors.blue[700],
                                   fontWeight: FontWeight.w600,
                                 ),
+                              ),
+                            ),
+                          if (isPendingActivation)
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.orange[300]!),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.hourglass_empty, size: 12, color: Colors.orange[700]),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Pending Activation',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.orange[700],
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           Container(
@@ -320,32 +570,33 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                               ),
                             ),
                           ),
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: isActive ? Colors.green[50] : Colors.red[50],
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  isActive ? Icons.check_circle : Icons.cancel,
-                                  size: 12,
-                                  color: isActive ? Colors.green[700] : Colors.red[700],
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  isActive ? 'Active' : 'Inactive',
-                                  style: TextStyle(
-                                    fontSize: 11,
+                          if (!isPendingActivation)
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: isActive ? Colors.green[50] : Colors.red[50],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    isActive ? Icons.check_circle : Icons.cancel,
+                                    size: 12,
                                     color: isActive ? Colors.green[700] : Colors.red[700],
-                                    fontWeight: FontWeight.w600,
                                   ),
-                                ),
-                              ],
+                                  SizedBox(width: 4),
+                                  Text(
+                                    isActive ? 'Active' : 'Inactive',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isActive ? Colors.green[700] : Colors.red[700],
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
                           if (data['emailVerified'] == false)
                             Tooltip(
                               message: 'Email not verified',
@@ -390,7 +641,23 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                 ),
 
                 // Actions
-                if (!isCurrentUser) ...[
+                if (!isCurrentUser && !isCreator) ...[
+                  if (isPendingActivation && _isOrganizationCreator) ...[
+                    // Quick activate button for pending admins
+                    ElevatedButton.icon(
+                      onPressed: () => _activateAdmin(userId),
+                      icon: Icon(Icons.check_circle, size: 16, color: Colors.white),
+                      label: Text('Activate', style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                  ],
                   PopupMenuButton<String>(
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -406,20 +673,37 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                           ],
                         ),
                       ),
-                      PopupMenuItem(
-                        value: isActive ? 'deactivate' : 'activate',
-                        child: Row(
-                          children: [
-                            Icon(
-                              isActive ? Icons.block : Icons.check_circle,
-                              size: 18,
-                              color: isActive ? Colors.orange : Colors.green,
-                            ),
-                            SizedBox(width: 12),
-                            Text(isActive ? 'Deactivate' : 'Activate'),
-                          ],
+                      if (role == 'admin' && _isOrganizationCreator && !isPendingActivation) ...[
+                        PopupMenuItem(
+                          value: isActive ? 'deactivate' : 'activate',
+                          child: Row(
+                            children: [
+                              Icon(
+                                isActive ? Icons.block : Icons.check_circle,
+                                size: 18,
+                                color: isActive ? Colors.orange : Colors.green,
+                              ),
+                              SizedBox(width: 12),
+                              Text(isActive ? 'Deactivate' : 'Activate'),
+                            ],
+                          ),
                         ),
-                      ),
+                      ] else if (role != 'admin') ...[
+                        PopupMenuItem(
+                          value: isActive ? 'deactivate' : 'activate',
+                          child: Row(
+                            children: [
+                              Icon(
+                                isActive ? Icons.block : Icons.check_circle,
+                                size: 18,
+                                color: isActive ? Colors.orange : Colors.green,
+                              ),
+                              SizedBox(width: 12),
+                              Text(isActive ? 'Deactivate' : 'Activate'),
+                            ],
+                          ),
+                        ),
+                      ],
                       PopupMenuItem(
                         value: 'reset_password',
                         child: Row(
@@ -449,7 +733,11 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                           break;
                         case 'activate':
                         case 'deactivate':
-                          _toggleUserStatus(userId, !isActive);
+                          if (role == 'admin' && _isOrganizationCreator) {
+                            _toggleAdminStatus(userId, !isActive);
+                          } else {
+                            _toggleUserStatus(userId, !isActive);
+                          }
                           break;
                         case 'reset_password':
                           _sendPasswordReset(data['email']);
@@ -465,7 +753,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
             ),
 
             // Mobile layout for actions on very small screens
-            if (!isCurrentUser && MediaQuery.of(context).size.width < 400) ...[
+            if (!isCurrentUser && !isCreator && MediaQuery.of(context).size.width < 400) ...[
               SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -475,15 +763,16 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                     icon: Icon(Icons.edit, size: 16),
                     label: Text('Edit'),
                   ),
-                  TextButton.icon(
-                    onPressed: () => _toggleUserStatus(userId, !isActive),
-                    icon: Icon(
-                      isActive ? Icons.block : Icons.check_circle,
-                      size: 16,
-                      color: isActive ? Colors.orange : Colors.green,
+                  if (!isPendingActivation)
+                    TextButton.icon(
+                      onPressed: () => _toggleUserStatus(userId, !isActive),
+                      icon: Icon(
+                        isActive ? Icons.block : Icons.check_circle,
+                        size: 16,
+                        color: isActive ? Colors.orange : Colors.green,
+                      ),
+                      label: Text(isActive ? 'Deactivate' : 'Activate'),
                     ),
-                    label: Text(isActive ? 'Deactivate' : 'Activate'),
-                  ),
                 ],
               ),
             ],
@@ -503,6 +792,51 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
         return Colors.green;
       default:
         return Colors.grey;
+    }
+  }
+
+  Future<void> _activateAdmin(String adminId) async {
+    final result = await _authService.activateAdmin(adminId, widget.organizationId);
+
+    if (result.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Admin activated successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _toggleAdminStatus(String userId, bool isActive) async {
+    if (isActive) {
+      // Regular activation
+      _toggleUserStatus(userId, isActive);
+    } else {
+      // Use special deactivation for admins if current user is org creator
+      final result = await _authService.deactivateAdmin(userId, widget.organizationId);
+      if (result.success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Admin deactivated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -563,7 +897,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                         IconButton(
                           icon: Icon(Icons.copy, color: Colors.blue),
                           onPressed: () {
-                            // Copy to clipboard functionality
+                            Clipboard.setData(ClipboardData(text: widget.organizationId));
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text('Organization code copied!')),
                             );
@@ -575,6 +909,29 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                     Text('2. Users can sign up with this code', style: TextStyle(fontSize: 14)),
                     SizedBox(height: 8),
                     Text('3. They will automatically join your organization', style: TextStyle(fontSize: 14)),
+                    if (_tabController.index == 3) ...[
+                      SizedBox(height: 8),
+                      Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[50],
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.orange[200]!),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.info_outline, color: Colors.orange[700], size: 16),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Note: New admins will require activation from the organization creator',
+                                style: TextStyle(fontSize: 12, color: Colors.orange[800]),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
