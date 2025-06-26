@@ -1,23 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../Authentication/auth_services.dart';
-import '../Authentication/custom_widgets.dart';
-import 'course_page.dart';
-import 'create_course.dart';
+import 'package:study_hub/Student/student_course.dart';
+import '../../Authentication/auth_services.dart';
+import '../../Authentication/custom_widgets.dart';
 
-class LecturerHomePage extends StatefulWidget {
+
+class StudentHomePage extends StatefulWidget {
   @override
-  _LecturerHomePageState createState() => _LecturerHomePageState();
+  _StudentHomePageState createState() => _StudentHomePageState();
 }
 
-class _LecturerHomePageState extends State<LecturerHomePage> {
+class _StudentHomePageState extends State<StudentHomePage> {
   final AuthService _authService = AuthService();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Data
   Map<String, dynamic>? _userData;
   Map<String, dynamic>? _organizationData;
-  List<Map<String, dynamic>> _courses = [];
+  List<Map<String, dynamic>> _enrolledCourses = [];
+  List<Map<String, dynamic>> _pendingAssignments = [];
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -67,8 +68,11 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
         });
       }
 
-      // Load courses created by this lecturer
-      await _loadCourses(orgCode, user.uid);
+      // Load enrolled courses and pending assignments
+      await Future.wait([
+        _loadEnrolledCourses(orgCode, user.uid),
+        _loadPendingAssignments(orgCode, user.uid),
+      ]);
     } catch (e) {
       print('Error loading data: $e');
       setState(() {
@@ -81,49 +85,111 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
     }
   }
 
-  Future<void> _loadCourses(String orgCode, String lecturerId) async {
+  Future<void> _loadEnrolledCourses(String orgCode, String studentId) async {
     try {
-      // Simple query without isActive check and orderBy to avoid index issues
-      final coursesSnapshot = await FirebaseFirestore.instance
+      // Get all enrollments for this student
+      final enrollmentsSnapshot = await FirebaseFirestore.instance
           .collection('organizations')
           .doc(orgCode)
           .collection('courses')
-          .where('lecturerId', isEqualTo: lecturerId)
           .get();
 
-      List<Map<String, dynamic>> coursesList = coursesSnapshot.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'id': doc.id,
-          ...data,
-        };
-      }).toList();
+      List<Map<String, dynamic>> coursesList = [];
 
-      // Filter out inactive courses if the field exists
+      for (var courseDoc in enrollmentsSnapshot.docs) {
+        // Check if student is enrolled in this course
+        final enrollmentQuery = await courseDoc.reference
+            .collection('enrollments')
+            .where('studentId', isEqualTo: studentId)
+            .get();
+
+        if (enrollmentQuery.docs.isNotEmpty) {
+          final courseData = courseDoc.data();
+          coursesList.add({
+            'id': courseDoc.id,
+            ...courseData,
+            'enrolledAt': enrollmentQuery.docs.first.data()['enrolledAt'],
+          });
+        }
+      }
+
+      // Filter active courses and sort by enrollment date
       coursesList = coursesList.where((course) {
         final isActive = course['isActive'];
-        // If isActive doesn't exist or is true, include the course
         return isActive == null || isActive == true;
       }).toList();
 
-      // Manual sorting by createdAt (descending)
       coursesList.sort((a, b) {
-        final aTime = a['createdAt'] as Timestamp?;
-        final bTime = b['createdAt'] as Timestamp?;
+        final aTime = a['enrolledAt'] as Timestamp?;
+        final bTime = b['enrolledAt'] as Timestamp?;
         if (aTime == null && bTime == null) return 0;
         if (aTime == null) return 1;
         if (bTime == null) return -1;
-        return bTime.compareTo(aTime); // Descending order
+        return bTime.compareTo(aTime);
       });
 
       setState(() {
-        _courses = coursesList;
+        _enrolledCourses = coursesList;
       });
     } catch (e) {
-      print('Error loading courses: $e');
-      setState(() {
-        _errorMessage = 'Error loading courses: $e';
+      print('Error loading enrolled courses: $e');
+    }
+  }
+
+  Future<void> _loadPendingAssignments(String orgCode, String studentId) async {
+    try {
+      List<Map<String, dynamic>> allAssignments = [];
+
+      // For each enrolled course, get assignments
+      for (var course in _enrolledCourses) {
+        final assignmentsSnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(course['id'])
+            .collection('assignments')
+            .get();
+
+        for (var assignmentDoc in assignmentsSnapshot.docs) {
+          final assignmentData = assignmentDoc.data();
+
+          // Check if student has submitted this assignment
+          final submissionQuery = await assignmentDoc.reference
+              .collection('submissions')
+              .where('studentId', isEqualTo: studentId)
+              .get();
+
+          // If no submission found and due date hasn't passed, add to pending
+          if (submissionQuery.docs.isEmpty) {
+            final dueDate = assignmentData['dueDate'] as Timestamp?;
+            if (dueDate != null && dueDate.toDate().isAfter(DateTime.now())) {
+              allAssignments.add({
+                'id': assignmentDoc.id,
+                'courseId': course['id'],
+                'courseName': course['title'] ?? course['name'],
+                'courseCode': course['code'],
+                ...assignmentData,
+              });
+            }
+          }
+        }
+      }
+
+      // Sort by due date (earliest first)
+      allAssignments.sort((a, b) {
+        final aTime = a['dueDate'] as Timestamp?;
+        final bTime = b['dueDate'] as Timestamp?;
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return aTime.compareTo(bTime);
       });
+
+      setState(() {
+        _pendingAssignments = allAssignments;
+      });
+    } catch (e) {
+      print('Error loading pending assignments: $e');
     }
   }
 
@@ -158,6 +224,48 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
     if (confirm == true) {
       await _authService.signOut();
       Navigator.pushReplacementNamed(context, '/');
+    }
+  }
+
+  String _getTimeRemaining(Timestamp? dueDate) {
+    if (dueDate == null) return 'No due date';
+
+    final now = DateTime.now();
+    final due = dueDate.toDate();
+    final difference = due.difference(now);
+
+    if (difference.isNegative) {
+      return 'Overdue';
+    } else if (difference.inDays > 7) {
+      return 'Due in ${difference.inDays} days';
+    } else if (difference.inDays > 1) {
+      return 'Due in ${difference.inDays} days';
+    } else if (difference.inDays == 1) {
+      return 'Due tomorrow';
+    } else if (difference.inHours > 1) {
+      return 'Due in ${difference.inHours} hours';
+    } else if (difference.inMinutes > 1) {
+      return 'Due in ${difference.inMinutes} minutes';
+    } else {
+      return 'Due soon';
+    }
+  }
+
+  Color _getDueDateColor(Timestamp? dueDate) {
+    if (dueDate == null) return Colors.grey;
+
+    final now = DateTime.now();
+    final due = dueDate.toDate();
+    final difference = due.difference(now);
+
+    if (difference.isNegative) {
+      return Colors.red;
+    } else if (difference.inDays <= 1) {
+      return Colors.orange;
+    } else if (difference.inDays <= 3) {
+      return Colors.amber;
+    } else {
+      return Colors.green;
     }
   }
 
@@ -218,23 +326,6 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
         child: _buildBody(),
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => CreateCoursePage(),
-            ),
-          );
-
-          if (result == true) {
-            // Reload courses if a new course was created
-            _loadData();
-          }
-        },
-        backgroundColor: Colors.purple[400],
-        child: Icon(Icons.add),
-      ),
     );
   }
 
@@ -301,7 +392,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                     radius: 35,
                     backgroundColor: Colors.white,
                     child: Text(
-                      _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'L',
+                      _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'S',
                       style: TextStyle(
                         color: Colors.purple[600],
                         fontSize: 28,
@@ -311,7 +402,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   ),
                   SizedBox(height: 12),
                   Text(
-                    _userData?['fullName'] ?? 'Lecturer',
+                    _userData?['fullName'] ?? 'Student',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 18,
@@ -360,8 +451,13 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
             ),
             ListTile(
               leading: Icon(Icons.code),
-              title: Text('Organization Code'),
-              subtitle: Text(_organizationData?['code'] ?? ''),
+              title: Text('Student ID'),
+              subtitle: Text(_userData?['studentId'] ?? 'N/A'),
+            ),
+            ListTile(
+              leading: Icon(Icons.school),
+              title: Text('Faculty'),
+              subtitle: Text(_userData?['facultyName'] ?? 'N/A'),
             ),
             Divider(),
             ListTile(
@@ -405,7 +501,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Welcome back, ${_userData?['fullName']?.split(' ').first ?? 'Lecturer'}!',
+                  'Welcome back, ${_userData?['fullName']?.split(' ').first ?? 'Student'}!',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
@@ -414,7 +510,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                 ),
                 SizedBox(height: 8),
                 Text(
-                  'You have ${_courses.length} active course${_courses.length == 1 ? '' : 's'}',
+                  'You have ${_enrolledCourses.length} enrolled course${_enrolledCourses.length == 1 ? '' : 's'}',
                   style: TextStyle(
                     fontSize: 16,
                     color: Colors.white.withValues(alpha: 0.9),
@@ -424,6 +520,137 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
             ),
           ),
           SizedBox(height: 24),
+
+          // To Do Section
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey[300]!),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'To do:',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        // TODO: Navigate to assignment history
+                      },
+                      child: Text(
+                        'View History',
+                        style: TextStyle(
+                          color: Colors.blue[400],
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Column(
+                          children: [
+                            Text(
+                              _pendingAssignments.length.toString(),
+                              style: TextStyle(
+                                fontSize: 36,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.purple[600],
+                              ),
+                            ),
+                            Text(
+                              'Work',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Container(
+                      height: 60,
+                      child: VerticalDivider(
+                        color: Colors.grey[400],
+                        thickness: 1,
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Column(
+                          children: [
+                            Text(
+                              '0', // TODO: Calculate missed assignments
+                              style: TextStyle(
+                                fontSize: 36,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.purple[600],
+                              ),
+                            ),
+                            Text(
+                              'Missed',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 24),
+
+          // Pending Assignments Section
+          if (_pendingAssignments.isNotEmpty) ...[
+            Text(
+              'Upcoming Assignments',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 16),
+            ...List.generate(
+              _pendingAssignments.take(3).length,
+                  (index) => _buildAssignmentCard(_pendingAssignments[index]),
+            ),
+            if (_pendingAssignments.length > 3)
+              Center(
+                child: TextButton(
+                  onPressed: () {
+                    // TODO: Navigate to all assignments
+                  },
+                  child: Text(
+                    'View all ${_pendingAssignments.length} assignments',
+                    style: TextStyle(color: Colors.purple[400]),
+                  ),
+                ),
+              ),
+            SizedBox(height: 24),
+          ],
 
           // Courses Section
           Row(
@@ -450,7 +677,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           SizedBox(height: 16),
 
           // Courses List
-          if (_courses.isEmpty)
+          if (_enrolledCourses.isEmpty)
             Container(
               width: double.infinity,
               padding: EdgeInsets.all(40),
@@ -468,7 +695,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   ),
                   SizedBox(height: 16),
                   Text(
-                    'No courses yet',
+                    'No courses enrolled',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -477,38 +704,130 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'Create your first course to get started',
+                    'Contact your lecturer to get enrolled in courses',
                     style: TextStyle(
                       color: Colors.grey[600],
                     ),
-                  ),
-                  SizedBox(height: 24),
-                  CustomButton(
-                    text: 'Create Course',
-                    onPressed: () async {
-                      final result = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => CreateCoursePage(),
-                        ),
-                      );
-
-                      if (result == true) {
-                        // Reload courses if a new course was created
-                        _loadData();
-                      }
-                    },
-                    icon: Icons.add,
                   ),
                 ],
               ),
             )
           else
             ...List.generate(
-              _courses.length,
-                  (index) => _buildCourseCard(_courses[index]),
+              _enrolledCourses.length,
+                  (index) => _buildCourseCard(_enrolledCourses[index]),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAssignmentCard(Map<String, dynamic> assignment) {
+    final dueDate = assignment['dueDate'] as Timestamp?;
+    final timeRemaining = _getTimeRemaining(dueDate);
+    final dueDateColor = _getDueDateColor(dueDate);
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: () {
+          // Navigate to course page with assignment focus
+          final courseId = assignment['courseId'];
+          final course = _enrolledCourses.firstWhere(
+                (c) => c['id'] == courseId,
+            orElse: () => {},
+          );
+
+          if (course.isNotEmpty) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => StudentCoursePage(
+                  courseId: courseId,
+                  courseData: course,
+                  focusAssignmentId: assignment['id'],
+                ),
+              ),
+            );
+          }
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Icon(Icons.assignment, color: Colors.orange, size: 28),
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      assignment['title'] ?? 'Assignment',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      '${assignment['courseCode'] ?? ''} - ${assignment['courseName'] ?? ''}',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 14,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.schedule,
+                          size: 14,
+                          color: dueDateColor,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          timeRemaining,
+                          style: TextStyle(
+                            color: dueDateColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: Colors.grey[400],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -532,7 +851,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => CoursePage(
+              builder: (context) => StudentCoursePage(
                 courseId: course['id'],
                 courseData: course,
               ),
@@ -593,10 +912,10 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                     SizedBox(height: 8),
                     Row(
                       children: [
-                        Icon(Icons.people_outline, size: 16, color: Colors.grey[600]),
+                        Icon(Icons.person_outline, size: 16, color: Colors.grey[600]),
                         SizedBox(width: 4),
                         Text(
-                          '${course['enrolledCount'] ?? 0} students',
+                          course['lecturerName'] ?? 'Unknown Lecturer',
                           style: TextStyle(
                             color: Colors.grey[600],
                             fontSize: 12,
@@ -644,7 +963,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
         // Handle navigation
         switch (index) {
           case 0:
-          // Already on courses page
+          // Already on home page
             break;
           case 1:
           // TODO: Navigate to community
@@ -665,8 +984,8 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
       type: BottomNavigationBarType.fixed,
       items: [
         BottomNavigationBarItem(
-          icon: Icon(Icons.library_books),
-          label: 'Courses',
+          icon: Icon(Icons.home),
+          label: 'Home',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.people),

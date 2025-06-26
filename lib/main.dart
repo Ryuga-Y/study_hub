@@ -6,9 +6,9 @@ import 'Authentication/role_selection.dart';
 import 'Authentication/sign_in.dart';
 import 'Authentication/sign_up.dart';
 import 'Authentication/admin_sign_up.dart';
+import 'Student/student_home.dart';
 import 'admin/admin_dashboard.dart';
 import 'Course/lecturer_home.dart';
-import 'student_home.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
