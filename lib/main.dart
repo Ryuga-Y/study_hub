@@ -6,12 +6,9 @@ import 'Authentication/role_selection.dart';
 import 'Authentication/sign_in.dart';
 import 'Authentication/sign_up.dart';
 import 'Authentication/admin_sign_up.dart';
+import 'Student/student_home.dart';
 import 'admin/admin_dashboard.dart';
 import 'Course/lecturer_home.dart';
-import 'student_home.dart';
-import 'Stu_goal.dart';
-import 'chat.dart';
-
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,7 +27,7 @@ class MyApp extends StatelessWidget {
         fontFamily: 'Abeezee',
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.purple),
       ),
-      home: ChatContactPage(),
+      home: AuthWrapper(),
       routes: {
         '/onboarding': (context) => OnboardingScreen(),
         '/roleSelection': (context) => RoleSelectionPage(),

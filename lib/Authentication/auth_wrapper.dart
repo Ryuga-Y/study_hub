@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../Student/student_home.dart';
 import 'auth_services.dart';
 import 'email_verification_screen.dart';
 import 'onboarding_screen.dart';
 import '../admin/admin_dashboard.dart';
 import '../Course/lecturer_home.dart';
-import '../student_home.dart';
+
 
 class AuthWrapper extends StatefulWidget {
   @override

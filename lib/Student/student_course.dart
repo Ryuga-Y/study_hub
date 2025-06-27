@@ -1,51 +1,50 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:study_hub/Student/student_submit_view.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
-import 'create_assignment.dart';
-import 'assignment_details.dart';
-import 'create_material.dart';
-import 'material_details.dart';
+import '../Course/feedback.dart';
 
-class CoursePage extends StatefulWidget {
+class StudentCoursePage extends StatefulWidget {
   final String courseId;
   final Map<String, dynamic> courseData;
+  final String? focusAssignmentId;
 
-  const CoursePage({
+  const StudentCoursePage({
     Key? key,
     required this.courseId,
     required this.courseData,
+    this.focusAssignmentId,
   }) : super(key: key);
 
   @override
-  _CoursePageState createState() => _CoursePageState();
+  _StudentCoursePageState createState() => _StudentCoursePageState();
 }
 
-class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
+class _StudentCoursePageState extends State<StudentCoursePage> with TickerProviderStateMixin {
   final AuthService _authService = AuthService();
   late TabController _tabController;
 
   // Data
   String? _organizationCode;
-  String? _lecturerFacultyId;
+  String? _studentId;
   List<Map<String, dynamic>> assignments = [];
   List<Map<String, dynamic>> materials = [];
   List<Map<String, dynamic>> enrolledStudents = [];
-  List<Map<String, dynamic>> facultyStudents = [];
+  Map<String, Map<String, dynamic>> submissionStatus = {};
+  Map<String, bool> hasRubric = {};
 
   bool isLoading = true;
   String? errorMessage;
-  bool showCreateOptions = false;
-  bool isLecturer = false;
   int _currentIndex = 2; // Course tab
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _tabController.addListener(() {
-      setState(() {}); // Rebuild to update FAB visibility
-    });
     _loadData();
   }
 
@@ -72,8 +71,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
 
       setState(() {
         _organizationCode = userData['organizationCode'];
-        _lecturerFacultyId = userData['facultyId'];
-        isLecturer = userData['role'] == 'lecturer' && widget.courseData['lecturerId'] == user.uid;
+        _studentId = user.uid;
       });
 
       // Load course content
@@ -81,12 +79,17 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         _fetchAssignments(),
         _fetchMaterials(),
         _fetchEnrolledStudents(),
-        if (isLecturer) _fetchFacultyStudents(),
+        _fetchSubmissionStatus(),
       ]);
 
       setState(() {
         isLoading = false;
       });
+
+      // If focusAssignmentId is provided, switch to content tab
+      if (widget.focusAssignmentId != null) {
+        _tabController.animateTo(0);
+      }
     } catch (e) {
       setState(() {
         errorMessage = 'Error loading data: $e';
@@ -108,13 +111,34 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           .orderBy('createdAt', descending: true)
           .get();
 
+      List<Map<String, dynamic>> fetchedAssignments = [];
+      Map<String, bool> rubricStatus = {};
+
+      for (var doc in assignmentQuery.docs) {
+        final assignmentData = {
+          'id': doc.id,
+          ...doc.data(),
+        };
+        fetchedAssignments.add(assignmentData);
+
+        // Check if assignment has rubric
+        final rubricDoc = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(doc.id)
+            .collection('rubric')
+            .doc('main')
+            .get();
+
+        rubricStatus[doc.id] = rubricDoc.exists;
+      }
+
       setState(() {
-        assignments = assignmentQuery.docs.map((doc) {
-          return {
-            'id': doc.id,
-            ...doc.data(),
-          };
-        }).toList();
+        assignments = fetchedAssignments;
+        hasRubric = rubricStatus;
       });
     } catch (e) {
       print('Error fetching assignments: $e');
@@ -186,114 +210,99 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _fetchFacultyStudents() async {
-    if (_organizationCode == null || _lecturerFacultyId == null) return;
+  Future<void> _fetchSubmissionStatus() async {
+    if (_organizationCode == null || _studentId == null) return;
 
     try {
-      var studentsQuery = await FirebaseFirestore.instance
-          .collection('users')
-          .where('organizationCode', isEqualTo: _organizationCode)
-          .where('role', isEqualTo: 'student')
-          .where('facultyId', isEqualTo: _lecturerFacultyId)
-          .where('isActive', isEqualTo: true)
-          .get();
+      Map<String, Map<String, dynamic>> status = {};
+
+      for (var assignment in assignments) {
+        var submissionQuery = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(assignment['id'])
+            .collection('submissions')
+            .where('studentId', isEqualTo: _studentId)
+            .orderBy('submittedAt', descending: true)
+            .get();
+
+        if (submissionQuery.docs.isNotEmpty) {
+          final latestSubmission = submissionQuery.docs.first;
+
+          // Check if evaluation exists
+          final evalDoc = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(_organizationCode)
+              .collection('courses')
+              .doc(widget.courseId)
+              .collection('assignments')
+              .doc(assignment['id'])
+              .collection('submissions')
+              .doc(latestSubmission.id)
+              .collection('evaluations')
+              .doc('current')
+              .get();
+
+          status[assignment['id']] = {
+            'submitted': true,
+            'submissionId': latestSubmission.id,
+            'submittedAt': latestSubmission.data()['submittedAt'],
+            'fileUrl': latestSubmission.data()['fileUrl'],
+            'fileName': latestSubmission.data()['fileName'],
+            'grade': latestSubmission.data()['grade'],
+            'feedback': latestSubmission.data()['feedback'],
+            'hasDetailedEvaluation': evalDoc.exists,
+            'submissionCount': submissionQuery.docs.length,
+          };
+        } else {
+          status[assignment['id']] = {'submitted': false};
+        }
+      }
 
       setState(() {
-        facultyStudents = studentsQuery.docs.map((doc) {
-          return {
-            'id': doc.id,
-            'fullName': doc.data()['fullName'] ?? 'Unknown Student',
-            'email': doc.data()['email'] ?? 'No email',
-            'studentId': doc.data()['studentId'] ?? '',
-          };
-        }).toList();
+        submissionStatus = status;
       });
     } catch (e) {
-      print('Error fetching faculty students: $e');
+      print('Error fetching submission status: $e');
     }
   }
 
-  void _showCreateDialog() {
-    setState(() {
-      showCreateOptions = !showCreateOptions;
-    });
-  }
-
-  void _navigateToCreateAssignment() async {
-    setState(() {
-      showCreateOptions = false;
-    });
-
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CreateAssignmentPage(
-          courseId: widget.courseId,
-          courseData: {
-            ...widget.courseData,
-            'organizationCode': _organizationCode, // Add this line
-          },
-        ),
-      ),
-    );
-
-    if (result == true) {
-      _fetchAssignments();
-    }
-  }
-
-  void _navigateToCreateMaterial() async {
-    setState(() {
-      showCreateOptions = false;
-    });
-
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CreateMaterialPage(
-          courseId: widget.courseId,
-          courseData: {
-            ...widget.courseData,
-            'organizationCode': _organizationCode, // Add this line
-          },
-        ),
-      ),
-    );
-
-    if (result == true) {
-      _fetchMaterials();
-    }
-  }
-
-  void _navigateToAssignmentDetail(Map<String, dynamic> assignment) {
+  void _navigateToSubmissionView(Map<String, dynamic> assignment) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => AssignmentDetailPage(
-          assignment: assignment,
+        builder: (context) => StudentSubmissionView(
           courseId: widget.courseId,
-          courseData: widget.courseData,
-          isLecturer: isLecturer,
+          assignmentId: assignment['id'],
+          assignmentData: assignment,
+          organizationCode: _organizationCode!,
+        ),
+      ),
+    ).then((_) => _fetchSubmissionStatus());
+  }
+
+  void _navigateToFeedbackHistory() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FeedbackHistoryPage(
+          courseId: widget.courseId,
+          organizationCode: _organizationCode!,
+          studentId: _studentId,
+          isStudent: true,
         ),
       ),
     );
   }
 
   void _navigateToMaterialDetail(Map<String, dynamic> material) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => MaterialDetailPage(
-          material: material,
-          courseId: widget.courseId,
-          courseData: widget.courseData,
-          isLecturer: isLecturer,
-        ),
-      ),
-    );
+    _showMaterialDetailDialog(material);
   }
 
-  void _showEnrollStudentDialog() {
+  void _showMaterialDetailDialog(Map<String, dynamic> material) {
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -302,19 +311,22 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         ),
         child: Container(
           width: 600,
-          height: 600,
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
           padding: EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Enroll Students',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Text(
+                      material['title'] ?? 'Material',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   IconButton(
@@ -325,31 +337,104 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
               ),
               SizedBox(height: 16),
 
-              // Tab selector
-              DefaultTabController(
-                length: 2,
-                child: Expanded(
+              // Material Details
+              Expanded(
+                child: SingleChildScrollView(
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      TabBar(
-                        indicatorColor: Colors.purple[400],
-                        labelColor: Colors.purple[600],
-                        unselectedLabelColor: Colors.grey[600],
-                        tabs: [
-                          Tab(text: 'Faculty Students'),
-                          Tab(text: 'Manual Entry'),
-                        ],
-                      ),
-                      Expanded(
-                        child: TabBarView(
-                          children: [
-                            // Faculty Students Tab
-                            _buildFacultyStudentsTab(),
-                            // Manual Entry Tab
-                            _buildManualEntryTab(),
-                          ],
+                      // Description
+                      Text(
+                        'Description',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
+                      SizedBox(height: 8),
+                      Text(
+                        material['description'] ?? 'No description available',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      SizedBox(height: 16),
+
+                      // Content
+                      if (material['content'] != null) ...[
+                        Text(
+                          'Content',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          material['content'],
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        SizedBox(height: 16),
+                      ],
+
+                      // Upload Date
+                      Row(
+                        children: [
+                          Icon(Icons.calendar_today, size: 20, color: Colors.grey[600]),
+                          SizedBox(width: 8),
+                          Text(
+                            'Uploaded: ${_formatDate(material['createdAt'])}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 16),
+
+                      // Files
+                      if (material['attachments'] != null && (material['attachments'] as List).isNotEmpty) ...[
+                        Text(
+                          'Files',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        ...(material['attachments'] as List).map((attachment) {
+                          return InkWell(
+                            onTap: () => _launchUrl(attachment['url']),
+                            child: Container(
+                              margin: EdgeInsets.only(bottom: 8),
+                              padding: EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey[300]!),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    _getFileIcon(attachment['name'] ?? ''),
+                                    color: Colors.grey[600],
+                                  ),
+                                  SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      attachment['name'] ?? 'File',
+                                      style: TextStyle(
+                                        color: Colors.blue[600],
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                  Icon(Icons.download, color: Colors.grey[600]),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ],
                     ],
                   ),
                 ),
@@ -358,300 +443,124 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           ),
         ),
       ),
-    ).then((_) {
-      // Reload enrolled students after dialog closes
-      _fetchEnrolledStudents();
-    });
-  }
-
-  Widget _buildFacultyStudentsTab() {
-    // Filter out already enrolled students
-    final enrolledStudentIds = enrolledStudents.map((s) => s['id']).toSet();
-    final availableStudents = facultyStudents.where((student) =>
-    !enrolledStudentIds.contains(student['id'])
-    ).toList();
-
-    if (availableStudents.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.people_outline, size: 64, color: Colors.grey[400]),
-            SizedBox(height: 16),
-            Text(
-              'No available students from your faculty',
-              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-            ),
-            Text(
-              'All students might already be enrolled',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      children: [
-        Padding(
-          padding: EdgeInsets.all(16),
-          child: Text(
-            'Select students from your faculty to enroll',
-            style: TextStyle(color: Colors.grey[600]),
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            itemCount: availableStudents.length,
-            itemBuilder: (context, index) {
-              final student = availableStudents[index];
-              return Card(
-                margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.purple[100],
-                    child: Text(
-                      student['fullName'].substring(0, 1).toUpperCase(),
-                      style: TextStyle(
-                        color: Colors.purple[600],
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  title: Text(student['fullName']),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(student['email']),
-                      if (student['studentId'].toString().isNotEmpty)
-                        Text(
-                          'ID: ${student['studentId']}',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                    ],
-                  ),
-                  trailing: ElevatedButton(
-                    onPressed: () => _enrollStudent(student['id'], student['fullName']),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: Text('Enroll', style: TextStyle(color: Colors.white)),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
     );
   }
 
-  Widget _buildManualEntryTab() {
-    final emailController = TextEditingController();
+  Future<void> _submitAssignment(Map<String, dynamic> assignment) async {
+    final dueDate = assignment['dueDate'] as Timestamp?;
+    final isOverdue = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
 
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Text(
-            'Enter student email address to enroll',
-            style: TextStyle(color: Colors.grey[600]),
-          ),
-          SizedBox(height: 24),
-          TextField(
-            controller: emailController,
-            decoration: InputDecoration(
-              labelText: 'Student Email',
-              hintText: 'student@example.com',
-              prefixIcon: Icon(Icons.email, color: Colors.purple[400]),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            keyboardType: TextInputType.emailAddress,
-          ),
-          SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () async {
-                String email = emailController.text.trim();
-                if (email.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Please enter student email')),
-                  );
-                  return;
-                }
-
-                try {
-                  // Find student by email
-                  var studentQuery = await FirebaseFirestore.instance
-                      .collection('users')
-                      .where('email', isEqualTo: email)
-                      .where('role', isEqualTo: 'student')
-                      .where('organizationCode', isEqualTo: _organizationCode)
-                      .get();
-
-                  if (studentQuery.docs.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Student not found in your organization')),
-                    );
-                    return;
-                  }
-
-                  String studentId = studentQuery.docs.first.id;
-                  String studentName = studentQuery.docs.first.data()['fullName'] ?? 'Unknown';
-
-                  await _enrollStudent(studentId, studentName);
-                  emailController.clear();
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: ${e.toString()}')),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.purple[400],
-                padding: EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: Text('Enroll Student', style: TextStyle(color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _enrollStudent(String studentId, String studentName) async {
-    try {
-      // Check if already enrolled
-      var existingEnrollment = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(_organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('enrollments')
-          .where('studentId', isEqualTo: studentId)
-          .get();
-
-      if (existingEnrollment.docs.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$studentName is already enrolled in this course')),
-        );
-        return;
-      }
-
-      // Enroll student
-      await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(_organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('enrollments')
-          .add({
-        'studentId': studentId,
-        'enrolledAt': FieldValue.serverTimestamp(),
-        'enrolledBy': _authService.currentUser!.uid,
-      });
-
-      // Update enrolled count
-      await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(_organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .update({
-        'enrolledCount': FieldValue.increment(1),
-      });
-
+    if (isOverdue) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$studentName enrolled successfully'),
-          backgroundColor: Colors.green[600],
+          content: Text('Cannot submit - assignment is overdue'),
+          backgroundColor: Colors.red,
         ),
       );
+      return;
+    }
 
-      // Refresh enrolled students
-      _fetchEnrolledStudents();
+    try {
+      // Pick file
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'zip'],
+      );
+
+      if (result != null) {
+        setState(() => isLoading = true);
+
+        PlatformFile file = result.files.first;
+
+        // Upload file to Firebase Storage
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('submissions')
+            .child(widget.courseId)
+            .child(assignment['id'])
+            .child('${_studentId}_${DateTime.now().millisecondsSinceEpoch}_${file.name}');
+
+        final uploadTask = ref.putData(file.bytes!);
+        final snapshot = await uploadTask;
+        final downloadUrl = await snapshot.ref.getDownloadURL();
+
+        // Create submission document
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(assignment['id'])
+            .collection('submissions')
+            .add({
+          'studentId': _studentId,
+          'submittedAt': FieldValue.serverTimestamp(),
+          'fileUrl': downloadUrl,
+          'fileName': file.name,
+          'fileSize': file.size,
+          'status': 'submitted',
+        });
+
+        await _fetchSubmissionStatus();
+        setState(() => isLoading = false);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Assignment submitted successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Navigate to submission view
+        _navigateToSubmissionView(assignment);
+      }
     } catch (e) {
+      setState(() => isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error enrolling student: ${e.toString()}')),
+        SnackBar(
+          content: Text('Error submitting assignment: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
 
-  void _removeStudent(String studentId, String studentName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Text('Remove Student'),
-        content: Text('Are you sure you want to remove $studentName from this course?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                // Remove from course enrollments
-                var enrollmentQuery = await FirebaseFirestore.instance
-                    .collection('organizations')
-                    .doc(_organizationCode)
-                    .collection('courses')
-                    .doc(widget.courseId)
-                    .collection('enrollments')
-                    .where('studentId', isEqualTo: studentId)
-                    .get();
+  IconData _getFileIcon(String fileName) {
+    final extension = fileName.split('.').last.toLowerCase();
+    switch (extension) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'doc':
+      case 'docx':
+        return Icons.description;
+      case 'ppt':
+      case 'pptx':
+        return Icons.slideshow;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'gif':
+        return Icons.image;
+      case 'mp4':
+      case 'avi':
+      case 'mov':
+        return Icons.video_file;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
 
-                for (var doc in enrollmentQuery.docs) {
-                  await doc.reference.delete();
-                }
-
-                // Update enrolled count
-                await FirebaseFirestore.instance
-                    .collection('organizations')
-                    .doc(_organizationCode)
-                    .collection('courses')
-                    .doc(widget.courseId)
-                    .update({
-                  'enrolledCount': FieldValue.increment(-1),
-                });
-
-                Navigator.pop(context);
-                _fetchEnrolledStudents();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Student removed successfully'),
-                    backgroundColor: Colors.orange,
-                  ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error removing student: $e')),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text('Remove', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
+  Future<void> _launchUrl(String url) async {
+    final Uri uri = Uri.parse(url);
+    if (!await launchUrl(uri)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open file')),
+      );
+    }
   }
 
   @override
@@ -861,10 +770,6 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           ),
         ],
       ),
-      // Floating Action Button with Speed Dial
-      floatingActionButton: isLecturer && _tabController.index == 0
-          ? _buildFloatingActionButton()
-          : null,
       bottomNavigationBar: _buildBottomNavigationBar(),
     );
   }
@@ -901,107 +806,15 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       ),
       actions: [
         IconButton(
+          icon: Icon(Icons.feedback_outlined, color: Colors.purple[600]),
+          onPressed: _navigateToFeedbackHistory,
+          tooltip: 'Feedback History',
+        ),
+        IconButton(
           icon: Icon(Icons.notifications_outlined, color: Colors.black87),
           onPressed: () {
             // TODO: Implement notifications
           },
-        ),
-      ],
-    );
-  }
-
-  // New FAB widget with speed dial
-  Widget _buildFloatingActionButton() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        // Speed dial options
-        if (showCreateOptions) ...[
-          // Material FAB
-          Container(
-            margin: EdgeInsets.only(bottom: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.black87,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    'Material',
-                    style: TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ),
-                SizedBox(width: 8),
-                FloatingActionButton.small(
-                  heroTag: "material",
-                  onPressed: () {
-                    setState(() {
-                      showCreateOptions = false;
-                    });
-                    _navigateToCreateMaterial();
-                  },
-                  backgroundColor: Colors.green,
-                  elevation: 4,
-                  child: Icon(Icons.description, color: Colors.white, size: 20),
-                ),
-              ],
-            ),
-          ),
-          // Assignment FAB
-          Container(
-            margin: EdgeInsets.only(bottom: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.black87,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    'Assignment',
-                    style: TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ),
-                SizedBox(width: 8),
-                FloatingActionButton.small(
-                  heroTag: "assignment",
-                  onPressed: () {
-                    setState(() {
-                      showCreateOptions = false;
-                    });
-                    _navigateToCreateAssignment();
-                  },
-                  backgroundColor: Colors.orange,
-                  elevation: 4,
-                  child: Icon(Icons.assignment, color: Colors.white, size: 20),
-                ),
-              ],
-            ),
-          ),
-        ],
-        // Main FAB
-        FloatingActionButton.extended(
-          onPressed: _showCreateDialog,
-          backgroundColor: Colors.purple[400],
-          elevation: 6,
-          icon: AnimatedRotation(
-            turns: showCreateOptions ? 0.125 : 0,
-            duration: Duration(milliseconds: 200),
-            child: Icon(
-              showCreateOptions ? Icons.close : Icons.add,
-              color: Colors.white,
-            ),
-          ),
-          label: Text(
-            'Create',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
         ),
       ],
     );
@@ -1013,6 +826,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         await Future.wait([
           _fetchAssignments(),
           _fetchMaterials(),
+          _fetchSubmissionStatus(),
         ]);
       },
       child: SingleChildScrollView(
@@ -1023,15 +837,18 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             // Assignments Section
             if (assignments.isNotEmpty) ...[
               _buildSectionHeader('Assignments', Icons.assignment),
-              ...assignments.map((assignment) => _buildContentCard(
-                title: assignment['title'] ?? 'Assignment',
-                subtitle: assignment['description'] ?? 'No description',
-                date: _formatDate(assignment['createdAt']),
-                icon: Icons.assignment,
-                color: Colors.orange,
-                onTap: () => _navigateToAssignmentDetail(assignment),
-                onDelete: isLecturer ? () => _deleteAssignment(assignment) : null,
-              )),
+              ...assignments.map((assignment) {
+                final submission = submissionStatus[assignment['id']] ?? {'submitted': false};
+                final dueDate = assignment['dueDate'] as Timestamp?;
+                final isOverdue = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
+
+                return _buildAssignmentCard(
+                  assignment: assignment,
+                  submission: submission,
+                  isOverdue: isOverdue,
+                  highlighted: widget.focusAssignmentId == assignment['id'],
+                );
+              }),
               SizedBox(height: 24),
             ],
 
@@ -1045,7 +862,6 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 icon: Icons.description,
                 color: Colors.green,
                 onTap: () => _navigateToMaterialDetail(material),
-                onDelete: isLecturer ? () => _deleteMaterial(material) : null,
               )),
             ],
 
@@ -1062,9 +878,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                     ),
                     SizedBox(height: 16),
                     Text(
-                      isLecturer
-                          ? 'No content yet.\nTap the Create button to add assignments or materials.'
-                          : 'No content available yet.',
+                      'No content available yet.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 16,
@@ -1075,9 +889,335 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 ),
               ),
 
-            SizedBox(height: 100), // Space for floating button
+            SizedBox(height: 100),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAssignmentCard({
+    required Map<String, dynamic> assignment,
+    required Map<String, dynamic> submission,
+    required bool isOverdue,
+    bool highlighted = false,
+  }) {
+    final hasAssignmentRubric = hasRubric[assignment['id']] ?? false;
+    final hasDetailedEvaluation = submission['hasDetailedEvaluation'] ?? false;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: highlighted ? Colors.purple[50] : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: highlighted ? Border.all(color: Colors.purple[400]!, width: 2) : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: submission['submitted']
+            ? () => _navigateToSubmissionView(assignment)
+            : () => _showSubmitDialog(assignment, isOverdue),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Icon(Icons.assignment, color: Colors.orange, size: 28),
+                    ),
+                  ),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                assignment['title'] ?? 'Assignment',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                            if (hasAssignmentRubric)
+                              Container(
+                                margin: EdgeInsets.only(left: 4),
+                                padding: EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.purple[50],
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.rule,
+                                  size: 16,
+                                  color: Colors.purple[600],
+                                ),
+                              ),
+                          ],
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          assignment['description'] ?? 'No description',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.calendar_today,
+                              size: 14,
+                              color: isOverdue ? Colors.red : Colors.grey[500],
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Due: ${_formatDate(assignment['dueDate'])}',
+                              style: TextStyle(
+                                color: isOverdue ? Colors.red : Colors.grey[500],
+                                fontSize: 12,
+                                fontWeight: isOverdue ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            if (assignment['points'] != null) ...[
+                              SizedBox(width: 12),
+                              Icon(Icons.grade, size: 14, color: Colors.grey[500]),
+                              SizedBox(width: 4),
+                              Text(
+                                '${assignment['points']} pts',
+                                style: TextStyle(
+                                  color: Colors.grey[500],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  _buildSubmissionStatus(submission, hasDetailedEvaluation),
+                ],
+              ),
+              if (submission['submitted'] && submission['submissionCount'] != null && submission['submissionCount'] > 1) ...[
+                SizedBox(height: 8),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.history, size: 14, color: Colors.grey[600]),
+                      SizedBox(width: 4),
+                      Text(
+                        '${submission['submissionCount']} submissions',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubmissionStatus(Map<String, dynamic> submission, bool hasDetailedEvaluation) {
+    if (submission['submitted']) {
+      final hasGrade = submission['grade'] != null;
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (hasGrade)
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green[300]!),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.grade, size: 16, color: Colors.green[700]),
+                  SizedBox(width: 4),
+                  Text(
+                    '${submission['grade']}',
+                    style: TextStyle(
+                      color: Colors.green[700],
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue[300]!),
+              ),
+              child: Text(
+                'Submitted',
+                style: TextStyle(
+                  color: Colors.blue[700],
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          if (hasDetailedEvaluation) ...[
+            SizedBox(height: 4),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.purple[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.feedback, size: 12, color: Colors.purple[600]),
+                  SizedBox(width: 4),
+                  Text(
+                    'View Feedback',
+                    style: TextStyle(
+                      color: Colors.purple[600],
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      );
+    } else {
+      return Container(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.orange[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.orange[300]!),
+        ),
+        child: Text(
+          'Pending',
+          style: TextStyle(
+            color: Colors.orange[700],
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
+    }
+  }
+
+  void _showSubmitDialog(Map<String, dynamic> assignment, bool isOverdue) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Submit Assignment'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              assignment['title'] ?? 'Assignment',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            SizedBox(height: 8),
+            if (isOverdue)
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning, color: Colors.red[700], size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'This assignment is overdue and cannot be submitted.',
+                        style: TextStyle(
+                          color: Colors.red[700],
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Text(
+                'Select a file to submit for this assignment.',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          if (!isOverdue)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _submitAssignment(assignment);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple[400],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('Choose File', style: TextStyle(color: Colors.white)),
+            ),
+        ],
       ),
     );
   }
@@ -1109,7 +1249,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     required IconData icon,
     required Color color,
     required VoidCallback onTap,
-    VoidCallback? onDelete,
+    Widget? trailing,
   }) {
     return Container(
       margin: EdgeInsets.only(bottom: 12),
@@ -1175,11 +1315,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-              if (isLecturer && onDelete != null)
-                IconButton(
-                  icon: Icon(Icons.delete_outline, color: Colors.red[400]),
-                  onPressed: onDelete,
-                ),
+              if (trailing != null) trailing,
             ],
           ),
         ),
@@ -1188,54 +1324,37 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
   }
 
   Widget _buildStudentsTab() {
-    return Column(
-      children: [
-        if (isLecturer)
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: CustomButton(
-              text: 'Enroll Students',
-              onPressed: _showEnrollStudentDialog,
-              icon: Icons.person_add,
+    return enrolledStudents.isEmpty
+        ? Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.people_outline,
+            size: 64,
+            color: Colors.grey[400],
+          ),
+          SizedBox(height: 16),
+          Text(
+            'No students enrolled in this course yet.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey[600],
             ),
           ),
-        Expanded(
-          child: enrolledStudents.isEmpty
-              ? Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.people_outline,
-                  size: 64,
-                  color: Colors.grey[400],
-                ),
-                SizedBox(height: 16),
-                Text(
-                  isLecturer
-                      ? 'No students enrolled yet.\nTap "Enroll Students" to add students.'
-                      : 'No students enrolled in this course yet.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-          )
-              : RefreshIndicator(
-            onRefresh: _fetchEnrolledStudents,
-            child: ListView.builder(
-              padding: EdgeInsets.all(16),
-              itemCount: enrolledStudents.length,
-              itemBuilder: (context, index) {
-                return _buildStudentCard(enrolledStudents[index]);
-              },
-            ),
-          ),
-        ),
-      ],
+        ],
+      ),
+    )
+        : RefreshIndicator(
+      onRefresh: _fetchEnrolledStudents,
+      child: ListView.builder(
+        padding: EdgeInsets.all(16),
+        itemCount: enrolledStudents.length,
+        itemBuilder: (context, index) {
+          return _buildStudentCard(enrolledStudents[index]);
+        },
+      ),
     );
   }
 
@@ -1290,53 +1409,52 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                   fontSize: 12,
                 ),
               ),
-            SizedBox(height: 4),
-            Text(
-              'Enrolled: ${_formatDate(student['enrolledAt'])}',
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 12,
-              ),
-            ),
           ],
         ),
-        trailing: isLecturer
-            ? IconButton(
-          icon: Icon(Icons.remove_circle_outline, color: Colors.red[400]),
-          onPressed: () => _removeStudent(
-            student['id'],
-            student['fullName'] ?? 'Unknown Student',
-          ),
-        )
-            : null,
       ),
     );
   }
 
   Widget _buildOverviewTab() {
+    final totalAssignments = assignments.length;
+    final submittedAssignments = submissionStatus.values.where((s) => s['submitted'] == true).length;
+    final gradedAssignments = submissionStatus.values.where((s) => s['grade'] != null).length;
+    final pendingAssignments = totalAssignments - submittedAssignments;
+
+    // Calculate average grade
+    double totalGrade = 0;
+    int gradedCount = 0;
+    submissionStatus.values.forEach((submission) {
+      if (submission['grade'] != null) {
+        totalGrade += submission['grade'];
+        gradedCount++;
+      }
+    });
+    final averageGrade = gradedCount > 0 ? (totalGrade / gradedCount).toStringAsFixed(1) : 'N/A';
+
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Statistics Cards
+          // Progress Cards
           Row(
             children: [
               Expanded(
                 child: _buildStatCard(
-                  'Students',
-                  enrolledStudents.length.toString(),
-                  Icons.people,
-                  Colors.blue,
+                  'Submitted',
+                  submittedAssignments.toString(),
+                  Icons.check_circle,
+                  Colors.green,
                 ),
               ),
               SizedBox(width: 12),
               Expanded(
                 child: _buildStatCard(
-                  'Assignments',
-                  assignments.length.toString(),
-                  Icons.assignment,
-                  Colors.orange,
+                  'Graded',
+                  gradedAssignments.toString(),
+                  Icons.grade,
+                  Colors.blue,
                 ),
               ),
             ],
@@ -1346,18 +1464,18 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             children: [
               Expanded(
                 child: _buildStatCard(
-                  'Materials',
-                  materials.length.toString(),
-                  Icons.description,
-                  Colors.green,
+                  'Pending',
+                  pendingAssignments.toString(),
+                  Icons.pending,
+                  Colors.orange,
                 ),
               ),
               SizedBox(width: 12),
               Expanded(
                 child: _buildStatCard(
-                  'Total Content',
-                  (assignments.length + materials.length).toString(),
-                  Icons.library_books,
+                  'Avg Grade',
+                  averageGrade,
+                  Icons.analytics,
                   Colors.purple,
                 ),
               ),
@@ -1392,10 +1510,6 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 ),
                 SizedBox(height: 16),
                 _buildDetailRow('Code', widget.courseData['code'] ?? 'N/A'),
-                if (widget.courseData['courseTemplateId'] != null)
-                  _buildDetailRow('Course Template', widget.courseData['courseTemplateName'] ?? 'N/A'),
-                if (widget.courseData['baseCourseId'] != null)
-                  _buildDetailRow('Base Course', widget.courseData['baseCourseName'] ?? 'N/A'),
                 _buildDetailRow('Faculty', widget.courseData['facultyName'] ?? 'N/A'),
                 _buildDetailRow('Lecturer', widget.courseData['lecturerName'] ?? 'N/A'),
                 _buildDetailRow('Created', _formatDate(widget.courseData['createdAt'])),
@@ -1458,32 +1572,25 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                     ],
                   ),
                 ),
+                if (item['type'] == 'assignment' && submissionStatus[item['id']]?['grade'] != null)
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${submissionStatus[item['id']]!['grade']}',
+                      style: TextStyle(
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ))),
-
-          if (assignments.isEmpty && materials.isEmpty)
-            Container(
-              padding: EdgeInsets.all(40),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.analytics_outlined,
-                    size: 64,
-                    color: Colors.grey[400],
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    'No activity yet. Start by creating assignments or materials.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
-            ),
         ],
       ),
     );
@@ -1561,7 +1668,6 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         // Handle navigation
         switch (index) {
           case 0:
-          // TODO: Navigate to courses
             Navigator.pop(context);
             break;
           case 1:
@@ -1583,8 +1689,8 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       type: BottomNavigationBarType.fixed,
       items: [
         BottomNavigationBarItem(
-          icon: Icon(Icons.library_books),
-          label: 'Courses',
+          icon: Icon(Icons.home),
+          label: 'Home',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.people),
@@ -1612,6 +1718,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     // Add assignments
     for (var assignment in assignments) {
       recentItems.add({
+        'id': assignment['id'],
         'title': assignment['title'] ?? 'Assignment',
         'type': 'assignment',
         'createdAt': assignment['createdAt'],
@@ -1660,113 +1767,5 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     }
 
     return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-  }
-
-  Future<void> _deleteAssignment(Map<String, dynamic> assignment) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Text('Delete Assignment'),
-        content: Text('Are you sure you want to delete this assignment?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text('Delete', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(_organizationCode)
-            .collection('courses')
-            .doc(widget.courseId)
-            .collection('assignments')
-            .doc(assignment['id'])
-            .delete();
-
-        _fetchAssignments();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Assignment deleted'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting assignment: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _deleteMaterial(Map<String, dynamic> material) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Text('Delete Material'),
-        content: Text('Are you sure you want to delete this material?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text('Delete', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(_organizationCode)
-            .collection('courses')
-            .doc(widget.courseId)
-            .collection('materials')
-            .doc(material['id'])
-            .delete();
-
-        _fetchMaterials();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Material deleted'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting material: $e')),
-        );
-      }
-    }
   }
 }
