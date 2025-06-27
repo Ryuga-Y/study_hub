@@ -9,6 +9,8 @@ import 'Authentication/admin_sign_up.dart';
 import 'Student/student_home.dart';
 import 'admin/admin_dashboard.dart';
 import 'Course/lecturer_home.dart';
+import 'Stu_goal.dart';
+import 'chat.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

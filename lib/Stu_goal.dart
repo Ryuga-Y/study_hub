@@ -433,56 +433,26 @@ class TreePainter extends CustomPainter {
 
   void _drawImageStyleTrunk(Canvas canvas, Size size, double centerX, double groundY) {
     final Paint trunkPaint = Paint()
-      ..color = Color(0xFF8B4513) // Saddle brown like the image
+      ..color = Color(0xFF8B4513) // Saddle brown
       ..style = PaintingStyle.fill;
 
     double trunkHeight = size.height * 0.48;
     double trunkBase = groundY;
     double trunkTop = groundY - trunkHeight;
 
-    // Create trunk shape matching the image - wider at base, narrower at top
+    // Create straight trunk shape - more like a rectangle with slight taper
     final Path trunkPath = Path();
 
-    double baseWidth = 28;
-    double midWidth = 22;
-    double upperMidWidth = 18;
-    double topWidth = 14;
+    double baseWidth = 25;
+    double topWidth = 20;
 
-    // Create realistic trunk with multiple sections like the image
+    // Create simple straight trunk
     trunkPath.moveTo(centerX - baseWidth/2, trunkBase);
-
-    // Left side with natural organic curves
-    trunkPath.quadraticBezierTo(
-        centerX - midWidth/2 - 1, trunkBase - trunkHeight * 0.25,
-        centerX - midWidth/2, trunkBase - trunkHeight * 0.4
-    );
-    trunkPath.quadraticBezierTo(
-        centerX - upperMidWidth/2 + 1, trunkBase - trunkHeight * 0.65,
-        centerX - upperMidWidth/2, trunkBase - trunkHeight * 0.8
-    );
-    trunkPath.quadraticBezierTo(
-        centerX - topWidth/2, trunkBase - trunkHeight * 0.9,
-        centerX - topWidth/2, trunkTop
-    );
-
-    // Top of trunk
+    trunkPath.lineTo(centerX - topWidth/2, trunkTop);
     trunkPath.lineTo(centerX + topWidth/2, trunkTop);
-
-    // Right side with natural organic curves
-    trunkPath.quadraticBezierTo(
-        centerX + topWidth/2, trunkBase - trunkHeight * 0.9,
-        centerX + upperMidWidth/2, trunkBase - trunkHeight * 0.8
-    );
-    trunkPath.quadraticBezierTo(
-        centerX + upperMidWidth/2 - 1, trunkBase - trunkHeight * 0.65,
-        centerX + midWidth/2, trunkBase - trunkHeight * 0.4
-    );
-    trunkPath.quadraticBezierTo(
-        centerX + midWidth/2 + 1, trunkBase - trunkHeight * 0.25,
-        centerX + baseWidth/2, trunkBase
-    );
-
+    trunkPath.lineTo(centerX + baseWidth/2, trunkBase);
     trunkPath.close();
+
     canvas.drawPath(trunkPath, trunkPaint);
 
     // Add realistic bark texture like the image
