@@ -1,7 +1,214 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:io';
 
 void main() {
   runApp(MyApp());
+}
+
+// Text Overlay Model
+class TextOverlay {
+  final String text;
+  final Offset position;
+  final double fontSize;
+  final Color color;
+
+  TextOverlay({
+    required this.text,
+    required this.position,
+    this.fontSize = 24,
+    this.color = Colors.white,
+  });
+
+  TextOverlay copyWith({
+    String? text,
+    Offset? position,
+    double? fontSize,
+    Color? color,
+  }) {
+    return TextOverlay(
+      text: text ?? this.text,
+      position: position ?? this.position,
+      fontSize: fontSize ?? this.fontSize,
+      color: color ?? this.color,
+    );
+  }
+
+  // Convert to Map for storage
+  Map<String, dynamic> toMap() {
+    return {
+      'text': text,
+      'positionX': position.dx,
+      'positionY': position.dy,
+      'fontSize': fontSize,
+      'colorValue': color.value,
+    };
+  }
+
+  // Create from Map
+  factory TextOverlay.fromMap(Map<String, dynamic> map) {
+    return TextOverlay(
+      text: map['text'],
+      position: Offset(map['positionX'], map['positionY']),
+      fontSize: map['fontSize'],
+      color: Color(map['colorValue']),
+    );
+  }
+}
+
+class ChatMessage {
+  final String text;
+  final bool isMe;
+  final DateTime timestamp;
+  final String? attachmentType;
+  final List<TextOverlay>? textOverlays; // Added to store text overlays
+
+  ChatMessage({
+    required this.text,
+    required this.isMe,
+    required this.timestamp,
+    this.attachmentType,
+    this.textOverlays,
+  });
+}
+
+// Image View Screen for viewing sent images
+class ImageViewScreen extends StatelessWidget {
+  final ChatMessage message;
+  final String contactName;
+
+  ImageViewScreen({
+    required this.message,
+    required this.contactName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          message.isMe ? "You" : contactName,
+          style: TextStyle(color: Colors.white),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.more_vert, color: Colors.white),
+            onPressed: () {
+              // Show options like save, share, etc.
+            },
+          ),
+        ],
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Image container with text overlays
+            Container(
+              width: MediaQuery.of(context).size.width,
+              height: MediaQuery.of(context).size.height * 0.6,
+              margin: EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.grey[400],
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Stack(
+                children: [
+                  // Base image placeholder
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.image,
+                          size: 100,
+                          color: Colors.grey[600],
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          "Photo",
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Display text overlays if they exist
+                  if (message.textOverlays != null)
+                    ...message.textOverlays!.map((overlay) {
+                      return Positioned(
+                        left: overlay.position.dx,
+                        top: overlay.position.dy,
+                        child: Container(
+                          padding: EdgeInsets.all(4),
+                          child: Text(
+                            overlay.text,
+                            style: TextStyle(
+                              fontSize: overlay.fontSize,
+                              color: overlay.color,
+                              fontWeight: FontWeight.bold,
+                              shadows: [
+                                Shadow(
+                                  offset: Offset(1, 1),
+                                  blurRadius: 2,
+                                  color: Colors.black.withOpacity(0.7),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                ],
+              ),
+            ),
+
+            SizedBox(height: 20),
+
+            // Caption if exists
+            if (message.text.isNotEmpty && message.text != "📷 Photo")
+              Container(
+                margin: EdgeInsets.symmetric(horizontal: 20),
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[900],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  message.text,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+
+            SizedBox(height: 20),
+
+            // Timestamp
+            Text(
+              "${message.timestamp.day}/${message.timestamp.month}/${message.timestamp.year} at ${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}",
+              style: TextStyle(
+                color: Colors.grey[400],
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -225,6 +432,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _focusNode = FocusNode();
 
   List<ChatMessage> messages = [
     ChatMessage(
@@ -258,9 +466,27 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _filteredMessages = messages;
+
+    // Listen for keyboard visibility
+    _focusNode.addListener(() {
+      if (_focusNode.hasFocus) {
+        setState(() {
+          _showEmojiPicker = false;
+        });
+      }
+    });
   }
 
-  void _sendMessage({String? text, String? attachmentType}) {
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    _focusNode.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _sendMessage({String? text, String? attachmentType, List<TextOverlay>? textOverlays}) {
     if (text != null && text.trim().isNotEmpty) {
       setState(() {
         messages.add(ChatMessage(
@@ -268,22 +494,28 @@ class _ChatScreenState extends State<ChatScreen> {
           isMe: true,
           timestamp: DateTime.now(),
           attachmentType: attachmentType,
+          textOverlays: textOverlays,
         ));
         _filteredMessages = messages;
       });
       _messageController.clear();
       _scrollToBottom();
+
+      // Give haptic feedback
+      HapticFeedback.lightImpact();
     } else if (attachmentType != null) {
       setState(() {
         messages.add(ChatMessage(
-          text: attachmentType == 'image' ? "📷 Image sent" : "📎 File sent",
+          text: attachmentType == 'image' ? "📷 Photo" : "📎 File sent",
           isMe: true,
           timestamp: DateTime.now(),
           attachmentType: attachmentType,
+          textOverlays: textOverlays,
         ));
         _filteredMessages = messages;
       });
       _scrollToBottom();
+      HapticFeedback.lightImpact();
     }
   }
 
@@ -312,67 +544,228 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _pickImage() {
-    // Simulate image picker
-    showDialog(
+  void _viewImage(ChatMessage message) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ImageViewScreen(
+          message: message,
+          contactName: widget.contactName,
+        ),
+      ),
+    );
+  }
+
+  void _showImagePickerOptions() {
+    // Hide keyboard and emoji picker
+    _focusNode.unfocus();
+    setState(() {
+      _showEmojiPicker = false;
+    });
+
+    showModalBottomSheet(
       context: context,
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text("Select Image"),
-          content: Text("Choose an image from gallery"),
-          actions: [
-            TextButton(
-              child: Text("Cancel"),
-              onPressed: () => Navigator.of(context).pop(),
+        return SafeArea(
+          child: Container(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                SizedBox(height: 20),
+                Text(
+                  'Select Photo',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildPhotoOption(
+                      icon: Icons.photo_library,
+                      label: 'Gallery',
+                      onTap: () {
+                        Navigator.pop(context);
+                        _simulateImagePicker('gallery');
+                      },
+                    ),
+                    _buildPhotoOption(
+                      icon: Icons.camera_alt,
+                      label: 'Camera',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => CameraScreen(
+                              onImageCaptured: (caption, textOverlays) {
+                                // Send message with caption and text overlays
+                                if (caption.isNotEmpty) {
+                                  _sendMessage(text: caption, attachmentType: 'image', textOverlays: textOverlays);
+                                } else {
+                                  _sendMessage(attachmentType: 'image', textOverlays: textOverlays);
+                                }
+                                // Show confirmation that photo was sent
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Photo sent!')),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                SizedBox(height: 20),
+              ],
             ),
-            TextButton(
-              child: Text("Gallery"),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _sendMessage(attachmentType: 'image');
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Image selected and sent!")),
-                );
-              },
-            ),
-            TextButton(
-              child: Text("Camera"),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _sendMessage(attachmentType: 'image');
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Photo taken and sent!")),
-                );
-              },
-            ),
-          ],
+          ),
         );
       },
     );
   }
 
-  void _pickFile() {
-    // Simulate file picker
+  Widget _buildPhotoOption({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 80,
+        child: Column(
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Icon(
+                icon,
+                color: Colors.blue,
+                size: 30,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[700],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _simulateImagePicker(String source) {
+    // Simulate image selection with a delay
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return Center(
+          child: Container(
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text(
+                  'Loading from gallery...',
+                  style: TextStyle(fontSize: 16),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    // Simulate loading time
+    Future.delayed(Duration(seconds: 2), () {
+      Navigator.pop(context); // Close loading dialog
+      _sendMessage(attachmentType: 'image');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Image selected from gallery!'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    });
+  }
+
+  void _simulateFilePicker() {
+    // Hide keyboard and emoji picker
+    _focusNode.unfocus();
+    setState(() {
+      _showEmojiPicker = false;
+    });
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text("Select File"),
-          content: Text("Choose a file to send"),
+          title: Row(
+            children: [
+              Icon(Icons.folder_open, color: Colors.blue),
+              SizedBox(width: 8),
+              Text("Select File"),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("Choose a file type to simulate:"),
+              SizedBox(height: 16),
+              ...[
+                {'icon': Icons.description, 'label': 'Document (PDF)', 'type': 'document'},
+                {'icon': Icons.image, 'label': 'Image File', 'type': 'image'},
+                {'icon': Icons.audiotrack, 'label': 'Audio File', 'type': 'audio'},
+                {'icon': Icons.videocam, 'label': 'Video File', 'type': 'video'},
+              ].map((item) => ListTile(
+                leading: Icon(item['icon'] as IconData, color: Colors.blue),
+                title: Text(item['label'] as String),
+                onTap: () {
+                  Navigator.pop(context);
+                  _sendMessage(attachmentType: 'file');
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("${item['label']} selected and sent!")),
+                  );
+                },
+              )).toList(),
+            ],
+          ),
           actions: [
             TextButton(
               child: Text("Cancel"),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            TextButton(
-              child: Text("Documents"),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _sendMessage(attachmentType: 'file');
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Document selected and sent!")),
-                );
-              },
+              onPressed: () => Navigator.pop(context),
             ),
           ],
         );
@@ -381,6 +774,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showEmojiPanel() {
+    _focusNode.unfocus(); // Hide keyboard
     setState(() {
       _showEmojiPicker = !_showEmojiPicker;
     });
@@ -390,6 +784,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 1,
@@ -399,16 +794,34 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         title: Row(
           children: [
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: Colors.grey[300],
-              child: Text(
-                widget.contactName[0],
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: Colors.grey[300],
+                  child: Text(
+                    widget.contactName[0],
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
-              ),
+                if (widget.isOnline)
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: Colors.green,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             SizedBox(width: 12),
             Expanded(
@@ -460,37 +873,46 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          if (_isSearching)
-            Container(
-              padding: EdgeInsets.all(8),
-              color: Colors.white,
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: "Search messages...",
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
+      body: GestureDetector(
+        onTap: () {
+          _focusNode.unfocus();
+          setState(() {
+            _showEmojiPicker = false;
+          });
+        },
+        child: Column(
+          children: [
+            if (_isSearching)
+              Container(
+                padding: EdgeInsets.all(8),
+                color: Colors.white,
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: "Search messages...",
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(25),
+                    ),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   ),
+                  onChanged: _searchMessages,
                 ),
-                onChanged: _searchMessages,
+              ),
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: EdgeInsets.all(16),
+                itemCount: _filteredMessages.length,
+                itemBuilder: (context, index) {
+                  return _buildMessageBubble(_filteredMessages[index]);
+                },
               ),
             ),
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: EdgeInsets.all(16),
-              itemCount: _filteredMessages.length,
-              itemBuilder: (context, index) {
-                return _buildMessageBubble(_filteredMessages[index]);
-              },
-            ),
-          ),
-          if (_showEmojiPicker) _buildEmojiPicker(),
-          _buildMessageInput(),
-        ],
+            if (_showEmojiPicker) _buildEmojiPicker(),
+            _buildMessageInput(),
+          ],
+        ),
       ),
     );
   }
@@ -519,40 +941,122 @@ class _ChatScreenState extends State<ChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (message.attachmentType == 'image')
-              Container(
-                height: 150,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  color: Colors.grey[300],
-                ),
-                child: Icon(
-                  Icons.image,
-                  size: 50,
-                  color: Colors.grey[600],
-                ),
-              ),
-            if (message.attachmentType == 'file')
-              Row(
+              Column(
                 children: [
-                  Icon(
-                    Icons.attach_file,
-                    size: 16,
-                    color: message.isMe ? Colors.white : Colors.black,
-                  ),
-                  SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      "document.pdf",
-                      style: TextStyle(
-                        color: message.isMe ? Colors.white : Colors.black,
-                        decoration: TextDecoration.underline,
+                  GestureDetector(
+                    onTap: () => _viewImage(message),
+                    child: Container(
+                      height: 150,
+                      width: double.infinity,
+                      margin: EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        color: Colors.grey[300],
+                      ),
+                      child: Stack(
+                        children: [
+                          Center(
+                            child: Icon(
+                              Icons.image,
+                              size: 50,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+
+                          // Display text overlays in chat bubble preview
+                          if (message.textOverlays != null)
+                            ...message.textOverlays!.map((overlay) {
+                              // Scale down the position and size for the preview
+                              double scale = 0.3; // Scale factor for preview
+                              return Positioned(
+                                left: overlay.position.dx * scale,
+                                top: overlay.position.dy * scale,
+                                child: Text(
+                                  overlay.text,
+                                  style: TextStyle(
+                                    fontSize: overlay.fontSize * scale,
+                                    color: overlay.color,
+                                    fontWeight: FontWeight.bold,
+                                    shadows: [
+                                      Shadow(
+                                        offset: Offset(1, 1),
+                                        blurRadius: 1,
+                                        color: Colors.black.withOpacity(0.7),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+
+                          // Play button overlay to indicate it's tappable
+                          Center(
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.6),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.fullscreen,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
+                  if (message.text.isNotEmpty && message.text != "📷 Photo")
+                    Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.all(8),
+                      margin: EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        color: message.isMe
+                            ? Colors.blue.withOpacity(0.1)
+                            : Colors.grey.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        message.text,
+                        style: TextStyle(
+                          color: message.isMe ? Colors.white : Colors.black,
+                          fontSize: 14,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
                 ],
               ),
-            if (message.text.isNotEmpty)
+            if (message.attachmentType == 'file')
+              Container(
+                margin: EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.attach_file,
+                      size: 16,
+                      color: message.isMe ? Colors.white : Colors.black,
+                    ),
+                    SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        "document.pdf",
+                        style: TextStyle(
+                          color: message.isMe ? Colors.white : Colors.black,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (message.text.isNotEmpty &&
+                message.text != "📷 Photo" &&
+                message.attachmentType != 'image')
               Text(
                 message.text,
                 style: TextStyle(
@@ -578,64 +1082,86 @@ class _ChatScreenState extends State<ChatScreen> {
     return Container(
       padding: EdgeInsets.all(8),
       color: Colors.white,
-      child: Row(
-        children: [
-          IconButton(
-            icon: Icon(Icons.attach_file, color: Colors.grey[600]),
-            onPressed: _pickFile,
-          ),
-          IconButton(
-            icon: Icon(Icons.camera_alt, color: Colors.grey[600]),
-            onPressed: _pickImage,
-          ),
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(25),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      decoration: InputDecoration(
-                        hintText: "Write your message",
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
+      child: SafeArea(
+        child: Row(
+          children: [
+            IconButton(
+              icon: Icon(Icons.attach_file, color: Colors.grey[600]),
+              onPressed: _simulateFilePicker,
+            ),
+            IconButton(
+              icon: Icon(Icons.camera_alt, color: Colors.grey[600]),
+              onPressed: _showImagePickerOptions,
+            ),
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(25),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _messageController,
+                        focusNode: _focusNode,
+                        keyboardType: TextInputType.multiline,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: InputDecoration(
+                          hintText: "Write your message",
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
                         ),
+                        maxLines: null,
+                        minLines: 1,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (text) {
+                          _sendMessage(text: text);
+                        },
+                        onTap: () {
+                          setState(() {
+                            _showEmojiPicker = false;
+                          });
+                          // Scroll to bottom when keyboard appears
+                          Future.delayed(Duration(milliseconds: 300), () {
+                            _scrollToBottom();
+                          });
+                        },
                       ),
-                      maxLines: null,
                     ),
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.emoji_emotions, color: Colors.grey[600]),
-                    onPressed: _showEmojiPanel,
-                  ),
-                ],
+                    IconButton(
+                      icon: Icon(
+                        _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions,
+                        color: Colors.grey[600],
+                      ),
+                      onPressed: _showEmojiPanel,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => _sendMessage(text: _messageController.text),
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: Colors.blue,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.send,
-                color: Colors.white,
-                size: 20,
+            SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _sendMessage(text: _messageController.text),
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.send,
+                  color: Colors.white,
+                  size: 20,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -647,7 +1173,8 @@ class _ChatScreenState extends State<ChatScreen> {
       "😘", "😗", "😙", "😚", "😋", "😛", "😝", "😜",
       "🤪", "🤨", "🧐", "🤓", "😎", "🤩", "🥳", "😏",
       "👍", "👎", "👌", "✌️", "🤞", "🤟", "🤘", "🤙",
-      "👈", "👉", "👆", "🖕", "👇", "☝️", "👋", "🤚"
+      "👈", "👉", "👆", "🖕", "👇", "☝️", "👋", "🤚",
+      "❤️", "💙", "💚", "💛", "🧡", "💜", "🖤", "🤍"
     ];
 
     return Container(
@@ -657,12 +1184,34 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           Container(
             padding: EdgeInsets.all(8),
-            child: Text(
-              "Tap an emoji to add it",
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.grey[300]!),
               ),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  "Tap an emoji to add it",
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                Spacer(),
+                IconButton(
+                  icon: Icon(Icons.backspace, color: Colors.grey[600]),
+                  onPressed: () {
+                    if (_messageController.text.isNotEmpty) {
+                      _messageController.text = _messageController.text
+                          .substring(0, _messageController.text.length - 1);
+                      _messageController.selection = TextSelection.fromPosition(
+                        TextPosition(offset: _messageController.text.length),
+                      );
+                    }
+                  },
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -677,9 +1226,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 return GestureDetector(
                   onTap: () {
                     _messageController.text += emojis[index];
-                    setState(() {
-                      _showEmojiPicker = false;
-                    });
+                    _messageController.selection = TextSelection.fromPosition(
+                      TextPosition(offset: _messageController.text.length),
+                    );
+                    HapticFeedback.lightImpact();
                   },
                   child: Container(
                     margin: EdgeInsets.all(2),
@@ -690,7 +1240,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: Center(
                       child: Text(
                         emojis[index],
-                        style: TextStyle(fontSize: 24),
+                        style: TextStyle(fontSize: 20),
                       ),
                     ),
                   ),
@@ -747,7 +1297,6 @@ class _ChatScreenState extends State<ChatScreen> {
             height: MediaQuery.of(context).size.height,
             child: Stack(
               children: [
-                // Video call interface
                 Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -784,7 +1333,6 @@ class _ChatScreenState extends State<ChatScreen> {
                     ],
                   ),
                 ),
-                // Control buttons
                 Positioned(
                   bottom: 50,
                   left: 0,
@@ -792,7 +1340,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // Mute button
                       Container(
                         width: 60,
                         height: 60,
@@ -805,7 +1352,6 @@ class _ChatScreenState extends State<ChatScreen> {
                           onPressed: () {},
                         ),
                       ),
-                      // End call button
                       Container(
                         width: 60,
                         height: 60,
@@ -823,7 +1369,6 @@ class _ChatScreenState extends State<ChatScreen> {
                           },
                         ),
                       ),
-                      // Camera toggle button
                       Container(
                         width: 60,
                         height: 60,
@@ -848,16 +1393,739 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-class ChatMessage {
-  final String text;
-  final bool isMe;
-  final DateTime timestamp;
-  final String? attachmentType;
+// Camera Screen
+class CameraScreen extends StatefulWidget {
+  final Function(String, List<TextOverlay>?) onImageCaptured;
 
-  ChatMessage({
-    required this.text,
-    required this.isMe,
-    required this.timestamp,
-    this.attachmentType,
+  CameraScreen({required this.onImageCaptured});
+
+  @override
+  _CameraScreenState createState() => _CameraScreenState();
+}
+
+class _CameraScreenState extends State<CameraScreen> {
+  bool _isFlashOn = false;
+  bool _isFrontCamera = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Camera Preview Area
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            color: Colors.grey[800],
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.camera_alt,
+                    size: 100,
+                    color: Colors.white54,
+                  ),
+                  SizedBox(height: 20),
+                  Text(
+                    _isFrontCamera ? "Front Camera" : "Back Camera",
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 18,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Top Controls
+          Positioned(
+            top: 50,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.close, color: Colors.white, size: 30),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        _isFlashOn ? Icons.flash_on : Icons.flash_off,
+                        color: Colors.white,
+                        size: 30,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _isFlashOn = !_isFlashOn;
+                        });
+                        HapticFeedback.lightImpact();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Bottom Controls
+          Positioned(
+            bottom: 50,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 30),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Gallery Button
+                    Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white, width: 2),
+                        borderRadius: BorderRadius.circular(10),
+                        color: Colors.white.withOpacity(0.1),
+                      ),
+                      child: Icon(
+                        Icons.photo_library,
+                        color: Colors.white,
+                        size: 25,
+                      ),
+                    ),
+
+                    // Capture Button
+                    GestureDetector(
+                      onTap: () {
+                        _capturePhoto();
+                      },
+                      child: Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 4),
+                        ),
+                        child: Container(
+                          margin: EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Camera Switch Button
+                    GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _isFrontCamera = !_isFrontCamera;
+                        });
+                        HapticFeedback.lightImpact();
+                      },
+                      child: Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withOpacity(0.1),
+                          border: Border.all(color: Colors.white, width: 1),
+                        ),
+                        child: Icon(
+                          Icons.flip_camera_ios,
+                          color: Colors.white,
+                          size: 25,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Camera Focus Frame
+          Center(
+            child: Container(
+              width: 200,
+              height: 200,
+              child: Stack(
+                children: [
+                  // Top-left corner
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(color: Colors.white, width: 2),
+                          left: BorderSide(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Top-right corner
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(color: Colors.white, width: 2),
+                          right: BorderSide(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Bottom-left corner
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Colors.white, width: 2),
+                          left: BorderSide(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Bottom-right corner
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Colors.white, width: 2),
+                          right: BorderSide(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Center focus point
+                  Center(
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _capturePhoto() {
+    HapticFeedback.heavyImpact();
+
+    // Show capture animation
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.white,
+      builder: (context) => Container(),
+    );
+
+    // Simulate photo capture
+    Future.delayed(Duration(milliseconds: 100), () {
+      Navigator.pop(context); // Close flash animation
+
+      // Navigate to photo edit screen, replacing camera screen
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PhotoEditScreen(
+            imagePath: "captured_image_path",
+            onImageSent: (caption, textOverlays) {
+              // This will be called after navigation back to chat
+              widget.onImageCaptured(caption, textOverlays);
+            },
+          ),
+        ),
+      );
+    });
+  }
+}
+
+// Photo Edit Screen with Text Overlay
+class PhotoEditScreen extends StatefulWidget {
+  final String imagePath;
+  final Function(String, List<TextOverlay>?) onImageSent;
+
+  PhotoEditScreen({
+    required this.imagePath,
+    required this.onImageSent,
   });
+
+  @override
+  _PhotoEditScreenState createState() => _PhotoEditScreenState();
+}
+
+class _PhotoEditScreenState extends State<PhotoEditScreen> {
+  final TextEditingController _captionController = TextEditingController();
+  final TextEditingController _textOverlayController = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+  final FocusNode _overlayFocusNode = FocusNode();
+
+  List<TextOverlay> _textOverlays = [];
+  bool _isAddingText = false;
+  bool _showTextInput = false;
+  int? _selectedTextIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen to caption changes to update helper text
+    _captionController.addListener(() {
+      setState(() {
+        // This will trigger a rebuild to update the helper text
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _captionController.dispose();
+    _textOverlayController.dispose();
+    _focusNode.dispose();
+    _overlayFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _sendPhoto() {
+    String caption = _captionController.text.trim();
+
+    // First navigate back to chat screen
+    Navigator.of(context).pop();
+
+    // Then call the callback to send the photo with text overlays
+    Future.delayed(Duration(milliseconds: 100), () {
+      widget.onImageSent(caption, _textOverlays.isNotEmpty ? _textOverlays : null);
+    });
+  }
+
+  void _addTextOverlay() {
+    if (_textOverlayController.text.trim().isNotEmpty) {
+      setState(() {
+        _textOverlays.add(
+          TextOverlay(
+            text: _textOverlayController.text.trim(),
+            position: Offset(100, 200), // Default position
+            fontSize: 24,
+            color: Colors.white,
+          ),
+        );
+        _textOverlayController.clear();
+        _showTextInput = false;
+        _isAddingText = false;
+      });
+      _overlayFocusNode.unfocus();
+    }
+  }
+
+  void _deleteTextOverlay(int index) {
+    setState(() {
+      _textOverlays.removeAt(index);
+      _selectedTextIndex = null;
+    });
+  }
+
+  void _updateTextPosition(int index, Offset newPosition) {
+    setState(() {
+      _textOverlays[index] = _textOverlays[index].copyWith(position: newPosition);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: true,
+      body: GestureDetector(
+        onTap: () {
+          _focusNode.unfocus();
+          _overlayFocusNode.unfocus();
+          setState(() {
+            _selectedTextIndex = null;
+          });
+        },
+        child: Stack(
+          children: [
+            // Background image area
+            Container(
+              width: double.infinity,
+              height: double.infinity,
+              child: Stack(
+                children: [
+                  // Simulated captured image
+                  Container(
+                    width: double.infinity,
+                    height: double.infinity,
+                    color: Colors.grey[400],
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.image,
+                            size: 100,
+                            color: Colors.grey[600],
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            "Captured Photo",
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Dark overlay
+                  Container(
+                    width: double.infinity,
+                    height: double.infinity,
+                    color: Colors.black.withOpacity(0.2),
+                  ),
+
+                  // Text overlays
+                  ..._textOverlays.asMap().entries.map((entry) {
+                    int index = entry.key;
+                    TextOverlay overlay = entry.value;
+                    bool isSelected = _selectedTextIndex == index;
+
+                    return Positioned(
+                      left: overlay.position.dx,
+                      top: overlay.position.dy,
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _selectedTextIndex = isSelected ? null : index;
+                          });
+                        },
+                        onPanUpdate: (details) {
+                          _updateTextPosition(index, overlay.position + details.delta);
+                        },
+                        child: Container(
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.black.withOpacity(0.6) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: isSelected ? Border.all(color: Colors.white, width: 1) : null,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                overlay.text,
+                                style: TextStyle(
+                                  fontSize: overlay.fontSize,
+                                  color: overlay.color,
+                                  fontWeight: FontWeight.bold,
+                                  shadows: [
+                                    Shadow(
+                                      offset: Offset(1, 1),
+                                      blurRadius: 2,
+                                      color: Colors.black.withOpacity(0.7),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isSelected) ...[
+                                SizedBox(width: 8),
+                                GestureDetector(
+                                  onTap: () => _deleteTextOverlay(index),
+                                  child: Container(
+                                    padding: EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      Icons.close,
+                                      color: Colors.white,
+                                      size: 16,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+
+            // Close button
+            Positioned(
+              top: 50,
+              left: 20,
+              child: SafeArea(
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.6),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // Add text button
+            Positioned(
+              top: 50,
+              right: 20,
+              child: SafeArea(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _showTextInput = !_showTextInput;
+                      _isAddingText = !_isAddingText;
+                    });
+                    if (_showTextInput) {
+                      Future.delayed(Duration(milliseconds: 100), () {
+                        _overlayFocusNode.requestFocus();
+                      });
+                    }
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _isAddingText ? Colors.blue : Colors.black.withOpacity(0.6),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.text_fields,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // Text input overlay
+            if (_showTextInput)
+              Positioned(
+                top: 120,
+                left: 20,
+                right: 20,
+                child: SafeArea(
+                  child: Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: _textOverlayController,
+                          focusNode: _overlayFocusNode,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: "Enter text to add on image...",
+                            hintStyle: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 16,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(color: Colors.grey[600]!),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(color: Colors.grey[600]!),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(color: Colors.blue),
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey[800],
+                            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          ),
+                          maxLines: null,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (text) {
+                            _addTextOverlay();
+                          },
+                        ),
+                        SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _showTextInput = false;
+                                    _isAddingText = false;
+                                    _textOverlayController.clear();
+                                  });
+                                  _overlayFocusNode.unfocus();
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey[700],
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: Text(
+                                  "Cancel",
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: _addTextOverlay,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: Text(
+                                  "Add Text",
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+            // Bottom caption input area
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.8),
+                  borderRadius: BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                ),
+                child: SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Caption input
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[800],
+                          borderRadius: BorderRadius.circular(25),
+                        ),
+                        child: TextField(
+                          controller: _captionController,
+                          focusNode: _focusNode,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: "Add a caption (optional)...",
+                            hintStyle: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 16,
+                            ),
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          maxLines: null,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (text) {
+                            _sendPhoto();
+                          },
+                        ),
+                      ),
+
+                      SizedBox(height: 12),
+
+                      // Send button only
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          GestureDetector(
+                            onTap: _sendPhoto,
+                            child: Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.send,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          ],
+        ),
+      ),
+    );
+  }
 }
