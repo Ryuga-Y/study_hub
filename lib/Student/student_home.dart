@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:study_hub/Student/student_course.dart';
-import '../../Authentication/auth_services.dart';
-import '../../Authentication/custom_widgets.dart';
-
+import '../Authentication/auth_services.dart';
+import '../Authentication/custom_widgets.dart';
+import 'student_course.dart';
 
 class StudentHomePage extends StatefulWidget {
   @override
@@ -18,7 +17,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
   Map<String, dynamic>? _userData;
   Map<String, dynamic>? _organizationData;
   List<Map<String, dynamic>> _enrolledCourses = [];
-  List<Map<String, dynamic>> _pendingAssignments = [];
+  int _pendingAssignments = 0;
+  int _missedAssignments = 0;
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -68,11 +68,9 @@ class _StudentHomePageState extends State<StudentHomePage> {
         });
       }
 
-      // Load enrolled courses and pending assignments
-      await Future.wait([
-        _loadEnrolledCourses(orgCode, user.uid),
-        _loadPendingAssignments(orgCode, user.uid),
-      ]);
+      // Load enrolled courses and assignments
+      await _loadEnrolledCourses(orgCode, user.uid);
+      await _loadAssignmentStats(orgCode, user.uid);
     } catch (e) {
       print('Error loading data: $e');
       setState(() {
@@ -89,36 +87,32 @@ class _StudentHomePageState extends State<StudentHomePage> {
     try {
       // Get all enrollments for this student
       final enrollmentsSnapshot = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(orgCode)
-          .collection('courses')
+          .collectionGroup('enrollments')
+          .where('studentId', isEqualTo: studentId)
           .get();
 
       List<Map<String, dynamic>> coursesList = [];
 
-      for (var courseDoc in enrollmentsSnapshot.docs) {
-        // Check if student is enrolled in this course
-        final enrollmentQuery = await courseDoc.reference
-            .collection('enrollments')
-            .where('studentId', isEqualTo: studentId)
-            .get();
-
-        if (enrollmentQuery.docs.isNotEmpty) {
-          final courseData = courseDoc.data();
-          coursesList.add({
-            'id': courseDoc.id,
-            ...courseData,
-            'enrolledAt': enrollmentQuery.docs.first.data()['enrolledAt'],
-          });
+      for (var enrollmentDoc in enrollmentsSnapshot.docs) {
+        // Get the course reference from the enrollment
+        final courseRef = enrollmentDoc.reference.parent.parent;
+        if (courseRef != null) {
+          final courseDoc = await courseRef.get();
+          if (courseDoc.exists) {
+            final courseData = courseDoc.data() as Map<String, dynamic>;
+            // Only include active courses
+            if (courseData['isActive'] != false) {
+              coursesList.add({
+                'id': courseDoc.id,
+                ...courseData,
+                'enrolledAt': enrollmentDoc.data()['enrolledAt'],
+              });
+            }
+          }
         }
       }
 
-      // Filter active courses and sort by enrollment date
-      coursesList = coursesList.where((course) {
-        final isActive = course['isActive'];
-        return isActive == null || isActive == true;
-      }).toList();
-
+      // Sort by enrolled date (most recent first)
       coursesList.sort((a, b) {
         final aTime = a['enrolledAt'] as Timestamp?;
         final bTime = b['enrolledAt'] as Timestamp?;
@@ -133,14 +127,18 @@ class _StudentHomePageState extends State<StudentHomePage> {
       });
     } catch (e) {
       print('Error loading enrolled courses: $e');
+      setState(() {
+        _errorMessage = 'Error loading courses: $e';
+      });
     }
   }
 
-  Future<void> _loadPendingAssignments(String orgCode, String studentId) async {
+  Future<void> _loadAssignmentStats(String orgCode, String studentId) async {
     try {
-      List<Map<String, dynamic>> allAssignments = [];
+      int pending = 0;
+      int missed = 0;
 
-      // For each enrolled course, get assignments
+      // For each enrolled course, check assignments
       for (var course in _enrolledCourses) {
         final assignmentsSnapshot = await FirebaseFirestore.instance
             .collection('organizations')
@@ -152,44 +150,42 @@ class _StudentHomePageState extends State<StudentHomePage> {
 
         for (var assignmentDoc in assignmentsSnapshot.docs) {
           final assignmentData = assignmentDoc.data();
+          final dueDate = assignmentData['dueDate'] as Timestamp?;
 
-          // Check if student has submitted this assignment
-          final submissionQuery = await assignmentDoc.reference
-              .collection('submissions')
-              .where('studentId', isEqualTo: studentId)
-              .get();
+          if (dueDate != null) {
+            // Check if student has submitted
+            final submissionSnapshot = await FirebaseFirestore.instance
+                .collection('organizations')
+                .doc(orgCode)
+                .collection('courses')
+                .doc(course['id'])
+                .collection('assignments')
+                .doc(assignmentDoc.id)
+                .collection('submissions')
+                .where('studentId', isEqualTo: studentId)
+                .get();
 
-          // If no submission found and due date hasn't passed, add to pending
-          if (submissionQuery.docs.isEmpty) {
-            final dueDate = assignmentData['dueDate'] as Timestamp?;
-            if (dueDate != null && dueDate.toDate().isAfter(DateTime.now())) {
-              allAssignments.add({
-                'id': assignmentDoc.id,
-                'courseId': course['id'],
-                'courseName': course['title'] ?? course['name'],
-                'courseCode': course['code'],
-                ...assignmentData,
-              });
+            final hasSubmitted = submissionSnapshot.docs.isNotEmpty;
+            final now = DateTime.now();
+            final dueDatetime = dueDate.toDate();
+
+            if (!hasSubmitted) {
+              if (dueDatetime.isAfter(now)) {
+                pending++;
+              } else {
+                missed++;
+              }
             }
           }
         }
       }
 
-      // Sort by due date (earliest first)
-      allAssignments.sort((a, b) {
-        final aTime = a['dueDate'] as Timestamp?;
-        final bTime = b['dueDate'] as Timestamp?;
-        if (aTime == null && bTime == null) return 0;
-        if (aTime == null) return 1;
-        if (bTime == null) return -1;
-        return aTime.compareTo(bTime);
-      });
-
       setState(() {
-        _pendingAssignments = allAssignments;
+        _pendingAssignments = pending;
+        _missedAssignments = missed;
       });
     } catch (e) {
-      print('Error loading pending assignments: $e');
+      print('Error loading assignment stats: $e');
     }
   }
 
@@ -224,48 +220,6 @@ class _StudentHomePageState extends State<StudentHomePage> {
     if (confirm == true) {
       await _authService.signOut();
       Navigator.pushReplacementNamed(context, '/');
-    }
-  }
-
-  String _getTimeRemaining(Timestamp? dueDate) {
-    if (dueDate == null) return 'No due date';
-
-    final now = DateTime.now();
-    final due = dueDate.toDate();
-    final difference = due.difference(now);
-
-    if (difference.isNegative) {
-      return 'Overdue';
-    } else if (difference.inDays > 7) {
-      return 'Due in ${difference.inDays} days';
-    } else if (difference.inDays > 1) {
-      return 'Due in ${difference.inDays} days';
-    } else if (difference.inDays == 1) {
-      return 'Due tomorrow';
-    } else if (difference.inHours > 1) {
-      return 'Due in ${difference.inHours} hours';
-    } else if (difference.inMinutes > 1) {
-      return 'Due in ${difference.inMinutes} minutes';
-    } else {
-      return 'Due soon';
-    }
-  }
-
-  Color _getDueDateColor(Timestamp? dueDate) {
-    if (dueDate == null) return Colors.grey;
-
-    final now = DateTime.now();
-    final due = dueDate.toDate();
-    final difference = due.difference(now);
-
-    if (difference.isNegative) {
-      return Colors.red;
-    } else if (difference.inDays <= 1) {
-      return Colors.orange;
-    } else if (difference.inDays <= 3) {
-      return Colors.amber;
-    } else {
-      return Colors.green;
     }
   }
 
@@ -451,13 +405,13 @@ class _StudentHomePageState extends State<StudentHomePage> {
             ),
             ListTile(
               leading: Icon(Icons.code),
-              title: Text('Student ID'),
-              subtitle: Text(_userData?['studentId'] ?? 'N/A'),
+              title: Text('Organization Code'),
+              subtitle: Text(_organizationData?['code'] ?? ''),
             ),
             ListTile(
-              leading: Icon(Icons.school),
-              title: Text('Faculty'),
-              subtitle: Text(_userData?['facultyName'] ?? 'N/A'),
+              leading: Icon(Icons.badge),
+              title: Text('Student ID'),
+              subtitle: Text(_userData?['studentId'] ?? 'N/A'),
             ),
             Divider(),
             ListTile(
@@ -526,9 +480,15 @@ class _StudentHomePageState extends State<StudentHomePage> {
             width: double.infinity,
             padding: EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: Colors.white,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey[300]!),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withValues(alpha: 0.1),
+                  blurRadius: 10,
+                  offset: Offset(0, 5),
+                ),
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -541,7 +501,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: Colors.grey[700],
+                        color: Colors.grey[800],
                       ),
                     ),
                     TextButton(
@@ -551,7 +511,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                       child: Text(
                         'View History',
                         style: TextStyle(
-                          color: Colors.blue[400],
+                          color: Colors.cyan,
                           fontSize: 14,
                         ),
                       ),
@@ -562,58 +522,54 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 Row(
                   children: [
                     Expanded(
-                      child: Container(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Column(
-                          children: [
-                            Text(
-                              _pendingAssignments.length.toString(),
-                              style: TextStyle(
-                                fontSize: 36,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.purple[600],
-                              ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '$_pendingAssignments',
+                            style: TextStyle(
+                              fontSize: 48,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.purple[400],
                             ),
-                            Text(
-                              'Work',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey[600],
-                              ),
+                          ),
+                          SizedBox(width: 12),
+                          Text(
+                            'Work',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: Colors.grey[600],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                     Container(
                       height: 60,
-                      child: VerticalDivider(
-                        color: Colors.grey[400],
-                        thickness: 1,
-                      ),
+                      width: 1,
+                      color: Colors.grey[300],
                     ),
                     Expanded(
-                      child: Container(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Column(
-                          children: [
-                            Text(
-                              '0', // TODO: Calculate missed assignments
-                              style: TextStyle(
-                                fontSize: 36,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.purple[600],
-                              ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '$_missedAssignments',
+                            style: TextStyle(
+                              fontSize: 48,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.purple[400],
                             ),
-                            Text(
-                              'Missed',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey[600],
-                              ),
+                          ),
+                          SizedBox(width: 12),
+                          Text(
+                            'Missed',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: Colors.grey[600],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -622,35 +578,6 @@ class _StudentHomePageState extends State<StudentHomePage> {
             ),
           ),
           SizedBox(height: 24),
-
-          // Pending Assignments Section
-          if (_pendingAssignments.isNotEmpty) ...[
-            Text(
-              'Upcoming Assignments',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            SizedBox(height: 16),
-            ...List.generate(
-              _pendingAssignments.take(3).length,
-                  (index) => _buildAssignmentCard(_pendingAssignments[index]),
-            ),
-            if (_pendingAssignments.length > 3)
-              Center(
-                child: TextButton(
-                  onPressed: () {
-                    // TODO: Navigate to all assignments
-                  },
-                  child: Text(
-                    'View all ${_pendingAssignments.length} assignments',
-                    style: TextStyle(color: Colors.purple[400]),
-                  ),
-                ),
-              ),
-            SizedBox(height: 24),
-          ],
 
           // Courses Section
           Row(
@@ -695,7 +622,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   ),
                   SizedBox(height: 16),
                   Text(
-                    'No courses enrolled',
+                    'No courses enrolled yet',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -718,116 +645,6 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   (index) => _buildCourseCard(_enrolledCourses[index]),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildAssignmentCard(Map<String, dynamic> assignment) {
-    final dueDate = assignment['dueDate'] as Timestamp?;
-    final timeRemaining = _getTimeRemaining(dueDate);
-    final dueDateColor = _getDueDateColor(dueDate);
-
-    return Container(
-      margin: EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 5,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: InkWell(
-        onTap: () {
-          // Navigate to course page with assignment focus
-          final courseId = assignment['courseId'];
-          final course = _enrolledCourses.firstWhere(
-                (c) => c['id'] == courseId,
-            orElse: () => {},
-          );
-
-          if (course.isNotEmpty) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => StudentCoursePage(
-                  courseId: courseId,
-                  courseData: course,
-                  focusAssignmentId: assignment['id'],
-                ),
-              ),
-            );
-          }
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: Icon(Icons.assignment, color: Colors.orange, size: 28),
-                ),
-              ),
-              SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      assignment['title'] ?? 'Assignment',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '${assignment['courseCode'] ?? ''} - ${assignment['courseName'] ?? ''}',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 14,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.schedule,
-                          size: 14,
-                          color: dueDateColor,
-                        ),
-                        SizedBox(width: 4),
-                        Text(
-                          timeRemaining,
-                          style: TextStyle(
-                            color: dueDateColor,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: Colors.grey[400],
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -914,11 +731,15 @@ class _StudentHomePageState extends State<StudentHomePage> {
                       children: [
                         Icon(Icons.person_outline, size: 16, color: Colors.grey[600]),
                         SizedBox(width: 4),
-                        Text(
-                          course['lecturerName'] ?? 'Unknown Lecturer',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 12,
+                        Expanded(
+                          child: Text(
+                            course['lecturerName'] ?? 'Unknown Lecturer',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                         SizedBox(width: 16),
@@ -963,7 +784,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
         // Handle navigation
         switch (index) {
           case 0:
-          // Already on home page
+          // Already on courses page
             break;
           case 1:
           // TODO: Navigate to community
@@ -984,8 +805,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
       type: BottomNavigationBarType.fixed,
       items: [
         BottomNavigationBarItem(
-          icon: Icon(Icons.home),
-          label: 'Home',
+          icon: Icon(Icons.library_books),
+          label: 'Courses',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.people),

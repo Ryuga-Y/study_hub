@@ -493,11 +493,15 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                   children: [
                     Icon(Icons.library_books, color: Colors.white.withValues(alpha: 0.9), size: 18),
                     SizedBox(width: 8),
-                    Text(
-                      '${widget.courseData['code'] ?? ''} - ${widget.courseData['title'] ?? widget.courseData['name'] ?? ''}',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.white.withValues(alpha: 0.9),
+                    Expanded(  // Add this wrapper
+                      child: Text(
+                        '${widget.courseData['code'] ?? ''} - ${widget.courseData['title'] ?? widget.courseData['name'] ?? ''}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                        overflow: TextOverflow.ellipsis,  // Optional: add this to truncate with "..."
+                        maxLines: 1,  // Optional: ensure it stays on one line
                       ),
                     ),
                   ],
