@@ -8,11 +8,17 @@ import '../Authentication/custom_widgets.dart';
 class CreateAssignmentPage extends StatefulWidget {
   final String courseId;
   final Map<String, dynamic> courseData;
+  final bool editMode;
+  final String? assignmentId;
+  final Map<String, dynamic>? assignmentData;
 
   const CreateAssignmentPage({
     Key? key,
     required this.courseId,
     required this.courseData,
+    this.editMode = false,
+    this.assignmentId,
+    this.assignmentData,
   }) : super(key: key);
 
   @override
@@ -30,8 +36,42 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   TimeOfDay? _dueTime;
   bool _isLoading = false;
   List<PlatformFile> _selectedFiles = [];
-  List<Map<String, String>> _uploadedFiles = [];
+  List<Map<String, dynamic>> _uploadedFiles = [];
+  List<Map<String, dynamic>> _existingFiles = [];
   double _uploadProgress = 0;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // If in edit mode, populate the fields with existing data
+    if (widget.editMode && widget.assignmentData != null) {
+      _titleController.text = widget.assignmentData!['title'] ?? '';
+      _descriptionController.text = widget.assignmentData!['description'] ?? '';
+      _instructionsController.text = widget.assignmentData!['instructions'] ?? '';
+      _pointsController.text = (widget.assignmentData!['points'] ?? 0).toString();
+
+      // Set due date if exists
+      if (widget.assignmentData!['dueDate'] != null) {
+        final dueDateTime = (widget.assignmentData!['dueDate'] as Timestamp).toDate();
+        _dueDate = DateTime(dueDateTime.year, dueDateTime.month, dueDateTime.day);
+        _dueTime = TimeOfDay(hour: dueDateTime.hour, minute: dueDateTime.minute);
+      }
+
+      // Handle existing attachments
+      if (widget.assignmentData!['attachments'] != null &&
+          widget.assignmentData!['attachments'] is List &&
+          (widget.assignmentData!['attachments'] as List).isNotEmpty) {
+        _existingFiles = List<Map<String, dynamic>>.from(
+          (widget.assignmentData!['attachments'] as List).map((attachment) => {
+            'url': attachment['url'] ?? '',
+            'name': attachment['name'] ?? 'Unknown file',
+            'size': attachment['size']?.toString() ?? '0',
+          }),
+        );
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -94,19 +134,25 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
           final snapshot = await uploadTask;
           final downloadUrl = await snapshot.ref.getDownloadURL();
 
+          // Add to uploaded files list with proper structure
           _uploadedFiles.add({
             'url': downloadUrl,
             'name': file.name,
             'size': file.size.toString(),
           });
+
+          print('File uploaded successfully: ${file.name}');
         } catch (e) {
+          print('Error uploading file ${file.name}: $e');
           throw Exception('Failed to upload ${file.name}: $e');
         }
       }
     }
+
+    print('Total files uploaded: ${_uploadedFiles.length}');
   }
 
-  Future<void> _createAssignment() async {
+  Future<void> _saveAssignment() async {
     if (!_formKey.currentState!.validate()) return;
 
     if (_dueDate == null) {
@@ -125,10 +171,38 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     });
 
     try {
-      // Upload files if any
+      // DEBUG: Check selected files
+      print('Selected files count: ${_selectedFiles.length}');
+      print('Existing files count: ${_existingFiles.length}');
+
+      // Upload new files if any
       if (_selectedFiles.isNotEmpty) {
         await _uploadFiles();
+        print('Uploaded files count: ${_uploadedFiles.length}');
       }
+
+      // Combine existing and new files - ensure proper format
+      final List<Map<String, dynamic>> allFiles = [];
+
+      // Add existing files
+      for (var file in _existingFiles) {
+        allFiles.add({
+          'url': file['url'] ?? '',
+          'name': file['name'] ?? 'Unknown file',
+          'size': file['size']?.toString() ?? '0',
+        });
+      }
+
+      // Add newly uploaded files
+      for (var file in _uploadedFiles) {
+        allFiles.add({
+          'url': file['url'],
+          'name': file['name'],
+          'size': file['size'],
+        });
+      }
+
+      print('Total files to save: ${allFiles.length}');
 
       // Prepare due date time
       final dueDateTime = DateTime(
@@ -158,36 +232,60 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         'courseCode': widget.courseData['code'] ?? '',
         'lecturerId': FirebaseAuth.instance.currentUser?.uid,
         'lecturerName': widget.courseData['lecturerName'],
-        'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-        'attachments': _uploadedFiles,
-        'submissionCount': 0,
-        'isActive': true,
+        'attachments': allFiles,  // This will now be properly formatted
       };
 
-      // Create assignment document
-      await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('assignments')
-          .add(assignmentData);
+      // If creating new assignment, add creation fields
+      if (!widget.editMode) {
+        assignmentData['createdAt'] = FieldValue.serverTimestamp();
+        assignmentData['submissionCount'] = 0;
+        assignmentData['isActive'] = true;
+      }
 
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Assignment created successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      // Save or update assignment
+      if (widget.editMode && widget.assignmentId != null) {
+        // Update existing assignment
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .update(assignmentData);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Assignment updated successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        // Create new assignment
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .add(assignmentData);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Assignment created successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
 
       // Navigate back
       Navigator.pop(context, true);
     } catch (e) {
+      print('Error saving assignment: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error creating assignment: $e'),
+          content: Text('Error ${widget.editMode ? 'updating' : 'creating'} assignment: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -201,7 +299,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   Future<void> _selectDueDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now().add(Duration(days: 7)),
+      initialDate: _dueDate ?? DateTime.now().add(Duration(days: 7)),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(Duration(days: 365)),
     );
@@ -216,7 +314,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   Future<void> _selectDueTime() async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay(hour: 23, minute: 59),
+      initialTime: _dueTime ?? TimeOfDay(hour: 23, minute: 59),
     );
 
     if (picked != null) {
@@ -234,7 +332,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         backgroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          'Create Assignment',
+          widget.editMode ? 'Edit Assignment' : 'Create Assignment',
           style: TextStyle(
             color: Colors.black87,
             fontSize: 20,
@@ -309,7 +407,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Assignment',
+                            widget.editMode ? 'Edit Assignment' : 'Assignment',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
@@ -317,7 +415,9 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                             ),
                           ),
                           Text(
-                            'Students must submit their work before the due date',
+                            widget.editMode
+                                ? 'Update the assignment details below'
+                                : 'Students must submit their work before the due date',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.orange[600],
@@ -581,8 +681,81 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                     ),
                     SizedBox(height: 16),
 
+                    // Existing Files (if in edit mode)
+                    if (widget.editMode && _existingFiles.isNotEmpty) ...[
+                      Text(
+                        'Existing Files',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      ..._existingFiles.map((file) => Container(
+                        margin: EdgeInsets.only(bottom: 8),
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue[300]!),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _getFileIcon(file['name'] ?? ''),
+                              color: Colors.blue[600],
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    file['name'] ?? 'File',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    'Existing file',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.blue[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.close, size: 20),
+                              onPressed: () {
+                                setState(() {
+                                  _existingFiles.remove(file);
+                                });
+                              },
+                              color: Colors.red[400],
+                            ),
+                          ],
+                        ),
+                      )).toList(),
+                      if (_selectedFiles.isNotEmpty) ...[
+                        SizedBox(height: 8),
+                        Text(
+                          'New Files to Upload',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                      ],
+                    ],
+
                     // Selected Files List
-                    if (_selectedFiles.isEmpty)
+                    if (_selectedFiles.isEmpty && _existingFiles.isEmpty)
                       Container(
                         padding: EdgeInsets.all(32),
                         decoration: BoxDecoration(
@@ -613,7 +786,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                           ),
                         ),
                       )
-                    else
+                    else if (_selectedFiles.isNotEmpty)
                       ...(_selectedFiles.map((file) => Container(
                         margin: EdgeInsets.only(bottom: 8),
                         padding: EdgeInsets.all(12),
@@ -711,12 +884,14 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
 
               SizedBox(height: 32),
 
-              // Create Button
+              // Create/Update Button
               SizedBox(
                 width: double.infinity,
                 child: CustomButton(
-                  text: _isLoading ? 'Creating...' : 'Create Assignment',
-                  onPressed: _isLoading ? () {} : _createAssignment,
+                  text: _isLoading
+                      ? (widget.editMode ? 'Updating...' : 'Creating...')
+                      : (widget.editMode ? 'Update Assignment' : 'Create Assignment'),
+                  onPressed: _isLoading ? () {} : _saveAssignment,
                   isLoading: _isLoading,
                 ),
               ),

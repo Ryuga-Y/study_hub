@@ -1,4 +1,3 @@
-// create_material.dart (Updated)
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,11 +8,17 @@ import '../Authentication/custom_widgets.dart';
 class CreateMaterialPage extends StatefulWidget {
   final String courseId;
   final Map<String, dynamic> courseData;
+  final bool editMode;
+  final String? materialId;
+  final Map<String, dynamic>? materialData;
 
   const CreateMaterialPage({
     Key? key,
     required this.courseId,
     required this.courseData,
+    this.editMode = false,
+    this.materialId,
+    this.materialData,
   }) : super(key: key);
 
   @override
@@ -32,7 +37,44 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   bool _isLoading = false;
   List<PlatformFile> _selectedFiles = [];
   List<String> _uploadedUrls = [];
+  List<Map<String, dynamic>> _existingFiles = [];
   double _uploadProgress = 0;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // If in edit mode, populate the fields with existing data
+    if (widget.editMode && widget.materialData != null) {
+      _titleController.text = widget.materialData!['title'] ?? '';
+      _descriptionController.text = widget.materialData!['description'] ?? '';
+      _materialType = widget.materialData!['materialType'] ?? 'learning';
+
+      if (widget.materialData!['instructions'] != null) {
+        _instructionsController.text = widget.materialData!['instructions'];
+      }
+
+      // Set due date if exists (for tutorials)
+      if (widget.materialData!['dueDate'] != null) {
+        final dueDateTime = (widget.materialData!['dueDate'] as Timestamp).toDate();
+        _dueDate = DateTime(dueDateTime.year, dueDateTime.month, dueDateTime.day);
+        _dueTime = TimeOfDay(hour: dueDateTime.hour, minute: dueDateTime.minute);
+      }
+
+      // Handle existing files
+      if (widget.materialData!['files'] != null &&
+          widget.materialData!['files'] is List &&
+          (widget.materialData!['files'] as List).isNotEmpty) {
+        _existingFiles = List<Map<String, dynamic>>.from(
+          (widget.materialData!['files'] as List).map((file) => {
+            'url': file['url'] ?? '',
+            'name': file['name'] ?? 'Unknown file',
+            'size': file['size']?.toString() ?? '0',
+          }),
+        );
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -95,14 +137,19 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           final downloadUrl = await snapshot.ref.getDownloadURL();
 
           _uploadedUrls.add(downloadUrl);
+
+          print('File uploaded successfully: ${file.name}');
         } catch (e) {
+          print('Error uploading file ${file.name}: $e');
           throw Exception('Failed to upload ${file.name}: $e');
         }
       }
     }
+
+    print('Total files uploaded: ${_uploadedUrls.length}');
   }
 
-  Future<void> _createMaterial() async {
+  Future<void> _saveMaterial() async {
     if (!_formKey.currentState!.validate()) return;
 
     // Validate tutorial specific requirements
@@ -122,10 +169,40 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
     });
 
     try {
-      // Upload files if any
+      // DEBUG: Check selected files
+      print('Selected files count: ${_selectedFiles.length}');
+      print('Existing files count: ${_existingFiles.length}');
+
+      // Upload new files if any
       if (_selectedFiles.isNotEmpty) {
         await _uploadFiles();
+        print('Uploaded URLs count: ${_uploadedUrls.length}');
       }
+
+      // Combine existing and new files - ensure proper format
+      final List<Map<String, dynamic>> allFiles = [];
+
+      // Add existing files
+      for (var file in _existingFiles) {
+        allFiles.add({
+          'url': file['url'] ?? '',
+          'name': file['name'] ?? 'Unknown file',
+          'size': file['size']?.toString() ?? '0',
+        });
+      }
+
+      // Add newly uploaded files
+      if (_selectedFiles.isNotEmpty) {
+        for (int i = 0; i < _selectedFiles.length; i++) {
+          allFiles.add({
+            'url': _uploadedUrls[i],
+            'name': _selectedFiles[i].name,
+            'size': _selectedFiles[i].size.toString(),
+          });
+        }
+      }
+
+      print('Total files to save: ${allFiles.length}');
 
       // Prepare material data
       final materialData = {
@@ -136,13 +213,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         'courseName': widget.courseData['name'],
         'lecturerId': FirebaseAuth.instance.currentUser?.uid,
         'lecturerName': widget.courseData['lecturerName'],
-        'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-        'files': _uploadedUrls.map((url) => {
-          'url': url,
-          'name': _selectedFiles[_uploadedUrls.indexOf(url)].name,
-          'size': _selectedFiles[_uploadedUrls.indexOf(url)].size,
-        }).toList(),
+        'files': allFiles,  // This will now be properly formatted
       };
 
       // Add tutorial-specific fields
@@ -160,31 +232,63 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         materialData['requiresSubmission'] = true;
       } else {
         materialData['requiresSubmission'] = false;
+        // Remove tutorial fields if changing from tutorial to learning
+        if (widget.editMode) {
+          materialData['dueDate'] = FieldValue.delete();
+          materialData['instructions'] = FieldValue.delete();
+        }
       }
 
-      // Create material document
-      await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(widget.courseData['organizationCode'] ?? widget.courseData['organizationId'])
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('materials')
-          .add(materialData);
+      // If creating new material, add creation field
+      if (!widget.editMode) {
+        materialData['createdAt'] = FieldValue.serverTimestamp();
+      }
 
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Material created successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      final organizationCode = widget.courseData['organizationCode'] ?? widget.courseData['organizationId'];
+
+      // Save or update material
+      if (widget.editMode && widget.materialId != null) {
+        // Update existing material
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('materials')
+            .doc(widget.materialId)
+            .update(materialData);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Material updated successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        // Create new material
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('materials')
+            .add(materialData);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Material created successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
 
       // Navigate back
       Navigator.pop(context, true);
     } catch (e) {
+      print('Error saving material: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error creating material: $e'),
+          content: Text('Error ${widget.editMode ? 'updating' : 'creating'} material: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -198,7 +302,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   Future<void> _selectDueDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now().add(Duration(days: 7)),
+      initialDate: _dueDate ?? DateTime.now().add(Duration(days: 7)),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(Duration(days: 365)),
     );
@@ -213,7 +317,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   Future<void> _selectDueTime() async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay(hour: 23, minute: 59),
+      initialTime: _dueTime ?? TimeOfDay(hour: 23, minute: 59),
     );
 
     if (picked != null) {
@@ -231,7 +335,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         backgroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          'Create Material',
+          widget.editMode ? 'Edit Material' : 'Create Material',
           style: TextStyle(
             color: Colors.black87,
             fontSize: 20,
@@ -298,12 +402,36 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                   color: Colors.grey[800],
                 ),
               ),
+              if (widget.editMode) ...[
+                SizedBox(height: 8),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
+                      SizedBox(width: 8),
+                      Text(
+                        'Material type cannot be changed',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
                     child: InkWell(
-                      onTap: () => setState(() => _materialType = 'learning'),
+                      onTap: widget.editMode ? null : () => setState(() => _materialType = 'learning'),
                       child: Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -345,7 +473,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                   SizedBox(width: 12),
                   Expanded(
                     child: InkWell(
-                      onTap: () => setState(() => _materialType = 'tutorial'),
+                      onTap: widget.editMode ? null : () => setState(() => _materialType = 'tutorial'),
                       child: Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -608,8 +736,81 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                     ),
                     SizedBox(height: 16),
 
+                    // Existing Files (if in edit mode)
+                    if (widget.editMode && _existingFiles.isNotEmpty) ...[
+                      Text(
+                        'Existing Files',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      ..._existingFiles.map((file) => Container(
+                        margin: EdgeInsets.only(bottom: 8),
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.purple[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.purple[300]!),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _getFileIcon(file['name'] ?? ''),
+                              color: Colors.purple[600],
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    file['name'] ?? 'File',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    'Existing file',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.purple[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.close, size: 20),
+                              onPressed: () {
+                                setState(() {
+                                  _existingFiles.remove(file);
+                                });
+                              },
+                              color: Colors.red[400],
+                            ),
+                          ],
+                        ),
+                      )).toList(),
+                      if (_selectedFiles.isNotEmpty) ...[
+                        SizedBox(height: 8),
+                        Text(
+                          'New Files to Upload',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                      ],
+                    ],
+
                     // Selected Files List
-                    if (_selectedFiles.isEmpty)
+                    if (_selectedFiles.isEmpty && _existingFiles.isEmpty)
                       Container(
                         padding: EdgeInsets.all(32),
                         decoration: BoxDecoration(
@@ -640,7 +841,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                           ),
                         ),
                       )
-                    else
+                    else if (_selectedFiles.isNotEmpty)
                       ...(_selectedFiles.map((file) => Container(
                         margin: EdgeInsets.only(bottom: 8),
                         padding: EdgeInsets.all(12),
@@ -738,12 +939,14 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
 
               SizedBox(height: 32),
 
-              // Create Button
+              // Create/Update Button
               SizedBox(
                 width: double.infinity,
                 child: CustomButton(
-                  text: _isLoading ? 'Creating...' : 'Create Material',
-                  onPressed: _isLoading ? () {} : _createMaterial,
+                  text: _isLoading
+                      ? (widget.editMode ? 'Updating...' : 'Creating...')
+                      : (widget.editMode ? 'Update Material' : 'Create Material'),
+                  onPressed: _isLoading ? () {} : _saveMaterial,
                   isLoading: _isLoading,
                 ),
               ),
