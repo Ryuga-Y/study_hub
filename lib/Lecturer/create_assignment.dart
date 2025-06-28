@@ -270,7 +270,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course',
+                            widget.courseData['title'] ?? widget.courseData['name'] ?? 'Lecturer',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,

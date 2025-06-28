@@ -32,7 +32,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
 
   bool isLoading = true;
   String? errorMessage;
-  int _currentIndex = 2; // Course tab
+  int _currentIndex = 2; // Lecturer tab
 
   @override
   void initState() {
@@ -518,7 +518,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                 ),
                 SizedBox(height: 12),
                 Text(
-                  widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course Title',
+                  widget.courseData['title'] ?? widget.courseData['name'] ?? 'Lecturer Title',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
@@ -1108,7 +1108,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Course Details',
+                  'Lecturer Details',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,

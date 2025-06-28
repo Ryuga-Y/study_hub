@@ -176,7 +176,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                   children: [
                     Flexible(
                       child: Text(
-                        'Course Management',
+                        'Lecturer Management',
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
@@ -213,7 +213,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                             ? ElevatedButton.icon(
                           onPressed: () => _showAddCourseDialog(context),
                           icon: Icon(Icons.add, color: Colors.white, size: 20),
-                          label: Text('Add Course', style: TextStyle(color: Colors.white)),
+                          label: Text('Add Lecturer', style: TextStyle(color: Colors.white)),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue,
                             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -350,7 +350,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Course Templates',
+                  'Lecturer Templates',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -520,7 +520,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                         runSpacing: 4,
                         children: [
                           Text(
-                            data['name'] ?? 'Unknown Course',
+                            data['name'] ?? 'Unknown Lecturer',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -662,7 +662,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                         children: [
                           Icon(Icons.edit, size: 18),
                           SizedBox(width: 12),
-                          Text('Edit Course'),
+                          Text('Edit Lecturer'),
                         ],
                       ),
                     ),
@@ -687,7 +687,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                         children: [
                           Icon(Icons.delete, size: 18, color: Colors.red),
                           SizedBox(width: 12),
-                          Text('Delete Course', style: TextStyle(color: Colors.red)),
+                          Text('Delete Lecturer', style: TextStyle(color: Colors.red)),
                         ],
                       ),
                     ),
@@ -730,7 +730,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: Text('Add Course Template'),
+          title: Text('Add Lecturer Template'),
           content: Container(
             width: 500,
             child: SingleChildScrollView(
@@ -808,7 +808,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                   TextField(
                     controller: nameController,
                     decoration: InputDecoration(
-                      labelText: 'Course Name *',
+                      labelText: 'Lecturer Name *',
                       hintText: 'e.g., Introduction to Programming',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -819,7 +819,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                   TextField(
                     controller: codeController,
                     decoration: InputDecoration(
-                      labelText: 'Course Code *',
+                      labelText: 'Lecturer Code *',
                       hintText: 'e.g., CS101',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -898,7 +898,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                   _loadBaseCourses();
                   scaffoldMessenger.showSnackBar(
                     SnackBar(
-                      content: Text('Course template added successfully'),
+                      content: Text('Lecturer template added successfully'),
                       backgroundColor: Colors.green,
                     ),
                   );
@@ -917,7 +917,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
-              child: Text('Add Course', style: TextStyle(color: Colors.white)),
+              child: Text('Add Lecturer', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -943,7 +943,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Course Templates',
+                    'Lecturer Templates',
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -1060,7 +1060,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: Text('Edit Course Template'),
+        title: Text('Edit Lecturer Template'),
         content: Container(
           width: 500,
           child: SingleChildScrollView(
@@ -1117,7 +1117,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 TextField(
                   controller: nameController,
                   decoration: InputDecoration(
-                    labelText: 'Course Name *',
+                    labelText: 'Lecturer Name *',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -1127,7 +1127,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 TextField(
                   controller: codeController,
                   decoration: InputDecoration(
-                    labelText: 'Course Code *',
+                    labelText: 'Lecturer Code *',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -1192,7 +1192,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 _loadBaseCourses();
                 scaffoldMessenger.showSnackBar(
                   SnackBar(
-                    content: Text('Course template updated successfully'),
+                    content: Text('Lecturer template updated successfully'),
                     backgroundColor: Colors.green,
                   ),
                 );
@@ -1211,7 +1211,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 borderRadius: BorderRadius.circular(8),
               ),
             ),
-            child: Text('Update Course', style: TextStyle(color: Colors.white)),
+            child: Text('Update Lecturer', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -1228,7 +1228,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: Text('Delete Course Template'),
+        title: Text('Delete Lecturer Template'),
         content: Text('Are you sure you want to delete this course template?'),
         actions: [
           TextButton(
@@ -1267,7 +1267,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
         if (mounted) {
           scaffoldMessenger.showSnackBar(
             SnackBar(
-              content: Text('Course template deleted successfully'),
+              content: Text('Lecturer template deleted successfully'),
               backgroundColor: Colors.green,
             ),
           );
@@ -1296,7 +1296,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: Text('Edit Course'),
+        title: Text('Edit Lecturer'),
         content: Container(
           width: 500,
           child: SingleChildScrollView(
@@ -1355,7 +1355,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 TextField(
                   controller: nameController,
                   decoration: InputDecoration(
-                    labelText: 'Course Name *',
+                    labelText: 'Lecturer Name *',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -1365,7 +1365,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 TextField(
                   controller: codeController,
                   decoration: InputDecoration(
-                    labelText: 'Course Code *',
+                    labelText: 'Lecturer Code *',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -1425,7 +1425,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 navigator.pop();
                 scaffoldMessenger.showSnackBar(
                   SnackBar(
-                    content: Text('Course updated successfully'),
+                    content: Text('Lecturer updated successfully'),
                     backgroundColor: Colors.green,
                   ),
                 );
@@ -1444,7 +1444,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 borderRadius: BorderRadius.circular(8),
               ),
             ),
-            child: Text('Update Course', style: TextStyle(color: Colors.white)),
+            child: Text('Update Lecturer', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -1470,7 +1470,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
       if (mounted) {
         scaffoldMessenger.showSnackBar(
           SnackBar(
-            content: Text(isActive ? 'Course activated successfully' : 'Course deactivated successfully'),
+            content: Text(isActive ? 'Lecturer activated successfully' : 'Lecturer deactivated successfully'),
             backgroundColor: Colors.green,
           ),
         );
@@ -1494,7 +1494,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: Text('Delete Course'),
+        title: Text('Delete Lecturer'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1547,7 +1547,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                 navigator.pop();
                 scaffoldMessenger.showSnackBar(
                   SnackBar(
-                    content: Text('Course deleted successfully'),
+                    content: Text('Lecturer deleted successfully'),
                     backgroundColor: Colors.green,
                   ),
                 );
