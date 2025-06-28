@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'dart:math' as math;
+import 'set_goal.dart'; // Import the new set goal page
 
 void main() => runApp(MyApp());
 
@@ -43,7 +44,8 @@ class StuGoal extends StatefulWidget {
 class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   int wateringCount = 0;
   double treeGrowth = 0.0;
-  String goal = "Complete five quizzes this week";
+  String goal = "No goal selected - Press 'Set Goal' to choose one";
+  bool hasActiveGoal = false;
   double maxGrowth = 1.0;
   int maxWatering = 49; // 8 big branches + 41 small branches
 
@@ -69,6 +71,24 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
         _flowerController.forward();
       }
     }
+  }
+
+  // Function to update goal from the set goal page
+  void updateGoal(String newGoal) {
+    print('Updating goal to: $newGoal'); // Debug print
+    setState(() {
+      goal = newGoal;
+      hasActiveGoal = true;
+    });
+
+    // Show confirmation that goal was set
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Mission set: $newGoal ⭐'),
+        backgroundColor: Colors.amber,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -204,11 +224,11 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
             Container(
               padding: EdgeInsets.all(15),
               decoration: BoxDecoration(
-                color: Colors.blueAccent,
+                color: hasActiveGoal ? Colors.blueAccent : Colors.grey[400],
                 borderRadius: BorderRadius.circular(10),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.blue.withOpacity(0.3),
+                    color: hasActiveGoal ? Colors.blue.withOpacity(0.3) : Colors.grey.withOpacity(0.3),
                     blurRadius: 5,
                     offset: Offset(0, 3),
                   ),
@@ -216,32 +236,74 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
               ),
               child: Column(
                 children: [
-                  Text(
-                    'Goal Setting',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (hasActiveGoal) ...[
+                        Icon(
+                          Icons.star,
+                          color: Colors.amber,
+                          size: 20,
+                        ),
+                        SizedBox(width: 8),
+                      ],
+                      Text(
+                        'Mission in Progress',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold
+                        ),
+                      ),
+                    ],
                   ),
                   SizedBox(height: 10),
                   Text(
                     goal,
-                    style: TextStyle(color: Colors.white, fontSize: 14),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: 10),
-                  ElevatedButton(
-                    onPressed: () {
-                      // Handle save goal action
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.blueAccent,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontStyle: hasActiveGoal ? FontStyle.normal : FontStyle.italic,
                     ),
-                    child: Text('Save Goal'),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
             ),
 
             SizedBox(height: 20),
+
+            // Set Goal Button
+            ElevatedButton(
+              onPressed: () async {
+                // Navigate to set goal page with callback
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SetGoalPage(
+                      onGoalStarred: (String starredGoal) {
+                        // This callback will be called when a goal is starred
+                        updateGoal(starredGoal);
+                      },
+                    ),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                shadowColor: Colors.blue.withOpacity(0.3),
+                elevation: 5,
+              ),
+              child: Text('Set Goal'),
+            ),
+
+            SizedBox(height: 10),
+
             ElevatedButton(
               onPressed: () {
                 // Handle view badges action
@@ -250,6 +312,11 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                 backgroundColor: Colors.green,
                 foregroundColor: Colors.white,
                 padding: EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                shadowColor: Colors.green.withOpacity(0.3),
+                elevation: 5,
               ),
               child: Text('View Badges'),
             ),
@@ -260,6 +327,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   }
 }
 
+// Keep all your existing TreePainter class and other classes exactly the same
 class TreePainter extends CustomPainter {
   final int growthLevel;
   final double totalGrowth;

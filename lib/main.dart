@@ -29,7 +29,7 @@ class MyApp extends StatelessWidget {
         fontFamily: 'Abeezee',
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.purple),
       ),
-      home: AuthWrapper(),
+      home: ChatContactPage(),
       routes: {
         '/onboarding': (context) => OnboardingScreen(),
         '/roleSelection': (context) => RoleSelectionPage(),
