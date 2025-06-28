@@ -267,7 +267,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            widget.courseData['name'] ?? 'Course',
+                            widget.courseData['name'] ?? 'Lecturer',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,

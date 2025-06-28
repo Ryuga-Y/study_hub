@@ -37,7 +37,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
   String? errorMessage;
   bool showCreateOptions = false;
   bool isLecturer = false;
-  int _currentIndex = 2; // Course tab
+  int _currentIndex = 2; // Lecturer tab
 
   @override
   void initState() {
@@ -762,7 +762,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                             Icon(Icons.link, size: 14, color: Colors.white),
                             SizedBox(width: 4),
                             Text(
-                              'Course Template',
+                              'Lecturer Template',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
@@ -776,7 +776,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 ),
                 SizedBox(height: 12),
                 Text(
-                  widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course Title',
+                  widget.courseData['title'] ?? widget.courseData['name'] ?? 'Lecturer Title',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
@@ -1384,7 +1384,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Course Details',
+                  'Lecturer Details',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -1393,9 +1393,9 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 SizedBox(height: 16),
                 _buildDetailRow('Code', widget.courseData['code'] ?? 'N/A'),
                 if (widget.courseData['courseTemplateId'] != null)
-                  _buildDetailRow('Course Template', widget.courseData['courseTemplateName'] ?? 'N/A'),
+                  _buildDetailRow('Lecturer Template', widget.courseData['courseTemplateName'] ?? 'N/A'),
                 if (widget.courseData['baseCourseId'] != null)
-                  _buildDetailRow('Base Course', widget.courseData['baseCourseName'] ?? 'N/A'),
+                  _buildDetailRow('Base Lecturer', widget.courseData['baseCourseName'] ?? 'N/A'),
                 _buildDetailRow('Faculty', widget.courseData['facultyName'] ?? 'N/A'),
                 _buildDetailRow('Lecturer', widget.courseData['lecturerName'] ?? 'N/A'),
                 _buildDetailRow('Created', _formatDate(widget.courseData['createdAt'])),

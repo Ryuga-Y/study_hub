@@ -484,7 +484,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   ),
                   SizedBox(height: 24),
                   CustomButton(
-                    text: 'Create Course',
+                    text: 'Create Lecturer',
                     onPressed: () async {
                       final result = await Navigator.push(
                         context,
@@ -574,7 +574,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      course['title'] ?? 'Untitled Course',
+                      course['title'] ?? 'Untitled Lecturer',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,

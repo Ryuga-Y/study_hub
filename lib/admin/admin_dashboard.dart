@@ -741,7 +741,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
               _buildQuickAction(
                 icon: Icons.library_books,
-                label: MediaQuery.of(context).size.width > 400 ? 'Add Course' : 'Course',
+                label: MediaQuery.of(context).size.width > 400 ? 'Add Lecturer' : 'Lecturer',
                 onTap: () => _navigateTo('Courses'),
               ),
             ],

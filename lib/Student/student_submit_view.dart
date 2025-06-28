@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../Authentication/auth_services.dart';
-import '../Course/feedback.dart';
+import '../Lecturer/feedback.dart';
 
 class StudentSubmissionView extends StatefulWidget {
   final String courseId;

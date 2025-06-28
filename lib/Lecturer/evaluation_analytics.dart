@@ -319,7 +319,7 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.courseData['title'] ?? 'Course',
+                        widget.courseData['title'] ?? 'Lecturer',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 18,

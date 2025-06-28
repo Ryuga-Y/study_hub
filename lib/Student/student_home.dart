@@ -710,7 +710,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      course['title'] ?? 'Untitled Course',
+                      course['title'] ?? 'Untitled Lecturer',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
