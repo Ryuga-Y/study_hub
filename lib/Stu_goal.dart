@@ -2,8 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'dart:math' as math;
 import 'set_goal.dart'; // Import the new set goal page
+import 'bronze_tree.dart'; // Import bronze tree
+import 'silver_tree.dart'; // Import silver tree
+import 'gold_tree.dart'; // Import gold tree
 
 void main() => runApp(MyApp());
+
+enum TreeLevel { bronze, silver, gold }
 
 class LeafData {
   final double x;
@@ -47,29 +52,219 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   String goal = "No goal selected - Press 'Set Goal' to choose one";
   bool hasActiveGoal = false;
   double maxGrowth = 1.0;
-  int maxWatering = 49; // 8 big branches + 41 small branches
+  int maxWatering = 49; // Points needed to complete one tree
+
+  // Tree progression system
+  TreeLevel currentTreeLevel = TreeLevel.bronze;
+  int completedTrees = 0; // Track completed trees
+  int totalProgress = 0; // Total progress across all trees
 
   late AnimationController _growthController;
   late AnimationController _flowerController;
   late AnimationController _leafController;
+  late AnimationController _levelUpController;
   late Animation<double> _scaleAnimation;
   late Animation<double> _flowerBloomAnimation;
   late Animation<double> _flowerRotationAnimation;
   late Animation<double> _leafScaleAnimation;
+  late Animation<double> _levelUpAnimation;
 
   void waterTree() {
     if (wateringCount < maxWatering) {
       setState(() {
         wateringCount++;
+        totalProgress++;
         treeGrowth = wateringCount / maxWatering;
       });
+
       _growthController.forward(from: 0.0);
       _leafController.forward(from: 0.0);
 
       // Start flower blooming animation when 100% complete
       if (treeGrowth >= 1.0) {
         _flowerController.forward();
+
+        // After a delay, level up the tree
+        Future.delayed(Duration(milliseconds: 2000), () {
+          _levelUpTree();
+        });
       }
+    }
+  }
+
+  void _levelUpTree() {
+    setState(() {
+      completedTrees++;
+      wateringCount = 0;
+      treeGrowth = 0.0;
+
+      // Progress to next tree level
+      if (currentTreeLevel == TreeLevel.bronze && completedTrees >= 1) {
+        currentTreeLevel = TreeLevel.silver;
+      } else if (currentTreeLevel == TreeLevel.silver && completedTrees >= 2) {
+        currentTreeLevel = TreeLevel.gold;
+      }
+    });
+
+    // Reset animations
+    _flowerController.reset();
+    _growthController.reset();
+    _leafController.reset();
+
+    // Play level up animation
+    _levelUpController.forward(from: 0.0);
+
+    // Show level up message
+    _showLevelUpMessage();
+  }
+
+  void _showLevelUpMessage() {
+    String message = "";
+    Color color = Colors.green;
+
+    switch (currentTreeLevel) {
+      case TreeLevel.silver:
+        message = "🥈 Level Up! Silver Tree Unlocked!";
+        color = Colors.grey[400]!;
+        break;
+      case TreeLevel.gold:
+        message = "🥇 Level Up! Gold Tree Unlocked!";
+        color = Colors.amber;
+        break;
+      default:
+        message = "🌳 Tree Complete! Keep growing!";
+        break;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
+  String _getProgressText() {
+    double remainingPercentage = ((maxWatering - wateringCount) / maxWatering) * 100;
+    return "${remainingPercentage.toInt()}% remaining";
+  }
+
+  Widget _getCurrentTreePainter() {
+    switch (currentTreeLevel) {
+      case TreeLevel.bronze:
+        return CustomPaint(
+          painter: BronzeTreePainter(
+            growthLevel: wateringCount,
+            totalGrowth: treeGrowth,
+            flowerBloom: _flowerBloomAnimation.value,
+            flowerRotation: _flowerRotationAnimation.value,
+            leafScale: _leafScaleAnimation.value,
+          ),
+        );
+      case TreeLevel.silver:
+        return CustomPaint(
+          painter: SilverTreePainter(
+            growthLevel: wateringCount,
+            totalGrowth: treeGrowth,
+            flowerBloom: _flowerBloomAnimation.value,
+            flowerRotation: _flowerRotationAnimation.value,
+            leafScale: _leafScaleAnimation.value,
+          ),
+        );
+      case TreeLevel.gold:
+        return CustomPaint(
+          painter: GoldTreePainter(
+            growthLevel: wateringCount,
+            totalGrowth: treeGrowth,
+            flowerBloom: _flowerBloomAnimation.value,
+            flowerRotation: _flowerRotationAnimation.value,
+            leafScale: _leafScaleAnimation.value,
+          ),
+        );
+    }
+  }
+
+  Widget _buildMedalIcons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // Bronze Medal
+        Container(
+          padding: EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: completedTrees >= 1 ? Color(0xFFCD7F32) : Colors.grey[300],
+            boxShadow: completedTrees >= 1 ? [
+              BoxShadow(
+                color: Color(0xFFCD7F32).withOpacity(0.3),
+                blurRadius: 8,
+                spreadRadius: 2,
+              ),
+            ] : null,
+          ),
+          child: Icon(
+            Icons.emoji_events,
+            color: completedTrees >= 1 ? Colors.white : Colors.grey[500],
+            size: currentTreeLevel == TreeLevel.bronze ? 28 : 24,
+          ),
+        ),
+        SizedBox(width: 12),
+
+        // Silver Medal
+        Container(
+          padding: EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: completedTrees >= 2 ? Color(0xFFC0C0C0) : Colors.grey[300],
+            boxShadow: completedTrees >= 2 ? [
+              BoxShadow(
+                color: Color(0xFFC0C0C0).withOpacity(0.3),
+                blurRadius: 8,
+                spreadRadius: 2,
+              ),
+            ] : null,
+          ),
+          child: Icon(
+            Icons.emoji_events,
+            color: completedTrees >= 2 ? Colors.white : Colors.grey[500],
+            size: currentTreeLevel == TreeLevel.silver ? 28 : 24,
+          ),
+        ),
+        SizedBox(width: 12),
+
+        // Gold Medal
+        Container(
+          padding: EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: completedTrees >= 3 ? Color(0xFFFFD700) : Colors.grey[300],
+            boxShadow: completedTrees >= 3 ? [
+              BoxShadow(
+                color: Color(0xFFFFD700).withOpacity(0.3),
+                blurRadius: 8,
+                spreadRadius: 2,
+              ),
+            ] : null,
+          ),
+          child: Icon(
+            Icons.emoji_events,
+            color: completedTrees >= 3 ? Colors.white : Colors.grey[500],
+            size: currentTreeLevel == TreeLevel.gold ? 28 : 24,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _getCurrentTreeLevelText() {
+    switch (currentTreeLevel) {
+      case TreeLevel.bronze:
+        return "🥉 Bronze Tree";
+      case TreeLevel.silver:
+        return "🥈 Silver Tree";
+      case TreeLevel.gold:
+        return "🥇 Gold Tree";
     }
   }
 
@@ -110,6 +305,11 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       duration: Duration(milliseconds: 600),
     );
 
+    _levelUpController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 1000),
+    );
+
     _scaleAnimation = Tween<double>(
       begin: 1.0,
       end: 1.05,
@@ -141,6 +341,14 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       parent: _flowerController,
       curve: Curves.easeInOut,
     ));
+
+    _levelUpAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _levelUpController,
+      curve: Curves.bounceOut,
+    ));
   }
 
   @override
@@ -148,6 +356,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     _growthController.dispose();
     _flowerController.dispose();
     _leafController.dispose();
+    _levelUpController.dispose();
     super.dispose();
   }
 
@@ -160,6 +369,43 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // Tree Level Indicator
+            AnimatedBuilder(
+              animation: _levelUpAnimation,
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: 1.0 + (_levelUpAnimation.value * 0.1),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: currentTreeLevel == TreeLevel.bronze ? Color(0xFFCD7F32) :
+                      currentTreeLevel == TreeLevel.silver ? Color(0xFFC0C0C0) :
+                      Color(0xFFFFD700),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: (currentTreeLevel == TreeLevel.bronze ? Color(0xFFCD7F32) :
+                          currentTreeLevel == TreeLevel.silver ? Color(0xFFC0C0C0) :
+                          Color(0xFFFFD700)).withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      _getCurrentTreeLevelText(),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            SizedBox(height: 15),
+
             Center(
               child: AnimatedBuilder(
                 animation: Listenable.merge([_scaleAnimation, _flowerBloomAnimation, _flowerRotationAnimation, _leafScaleAnimation]),
@@ -167,17 +413,9 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                   return Transform.scale(
                     scale: _scaleAnimation.value,
                     child: Container(
-                      width: 300,
-                      height: 350,
-                      child: CustomPaint(
-                        painter: TreePainter(
-                          growthLevel: wateringCount,
-                          totalGrowth: treeGrowth,
-                          flowerBloom: _flowerBloomAnimation.value,
-                          flowerRotation: _flowerRotationAnimation.value,
-                          leafScale: _leafScaleAnimation.value,
-                        ),
-                      ),
+                      width: 350, // Bigger container for bigger trees
+                      height: 400, // Taller container
+                      child: _getCurrentTreePainter(),
                     ),
                   );
                 },
@@ -209,15 +447,33 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
             ),
             SizedBox(height: 20),
 
-            LinearProgressIndicator(
-              value: treeGrowth,
-              backgroundColor: Colors.grey[300],
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+            // Progress bar with medals
+            Row(
+              children: [
+                Expanded(
+                  child: LinearProgressIndicator(
+                    value: treeGrowth,
+                    backgroundColor: Colors.grey[300],
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      currentTreeLevel == TreeLevel.bronze ? Color(0xFFCD7F32) :
+                      currentTreeLevel == TreeLevel.silver ? Color(0xFFC0C0C0) :
+                      Color(0xFFFFD700),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 16),
+                _buildMedalIcons(),
+              ],
             ),
             SizedBox(height: 10),
             Text(
-              "${(treeGrowth * 100).toInt()}% grown",
+              _getProgressText(),
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text(
+              "Trees Completed: $completedTrees",
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
             ),
             SizedBox(height: 20),
 
