@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:study_hub/Lecturer/create_assignment.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../Authentication/auth_services.dart';
 import 'evaluation_rubric.dart';
@@ -30,6 +31,9 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
   final AuthService _authService = AuthService();
   late TabController _tabController;
 
+  // Make assignmentData mutable to allow updates
+  late Map<String, dynamic> assignmentData;
+
   List<Map<String, dynamic>> submissions = [];
   bool isLoading = true;
   String? organizationCode;
@@ -39,6 +43,10 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
   void initState() {
     super.initState();
     _tabController = TabController(length: widget.isLecturer ? 2 : 1, vsync: this);
+
+    // Create a mutable copy of assignment data
+    assignmentData = Map<String, dynamic>.from(widget.assignment);
+
     _loadData();
   }
 
@@ -57,6 +65,9 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       if (userData == null) return;
 
       organizationCode = userData['organizationCode'];
+
+      // Load latest assignment data from Firestore
+      await _reloadAssignmentData();
 
       // Check if rubric exists
       await _checkRubric();
@@ -86,7 +97,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           .collection('courses')
           .doc(widget.courseId)
           .collection('assignments')
-          .doc(widget.assignment['id'])
+          .doc(assignmentData['id'])
           .collection('rubric')
           .doc('main')
           .get();
@@ -109,7 +120,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           .collection('courses')
           .doc(widget.courseId)
           .collection('assignments')
-          .doc(widget.assignment['id'])
+          .doc(assignmentData['id'])
           .collection('submissions')
           .orderBy('submittedAt', descending: true)
           .get();
@@ -133,7 +144,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
               .collection('courses')
               .doc(widget.courseId)
               .collection('assignments')
-              .doc(widget.assignment['id'])
+              .doc(assignmentData['id'])
               .collection('submissions')
               .doc(doc.id)
               .collection('evaluations')
@@ -160,14 +171,77 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     }
   }
 
+  void _navigateToEditAssignment() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CreateAssignmentPage(
+          courseId: widget.courseId,
+          courseData: {
+            ...widget.courseData,
+            'organizationCode': organizationCode,
+          },
+          editMode: true,
+          assignmentId: assignmentData['id'],
+          assignmentData: assignmentData,
+        ),
+      ),
+    );
+
+    if (result == true) {
+      // Reload assignment data
+      await _reloadAssignmentData();
+      await _loadSubmissions();
+    }
+  }
+
+  // Updated method to properly reload assignment data
+  Future<void> _reloadAssignmentData() async {
+    if (organizationCode == null) return;
+
+    try {
+      // Fetch updated assignment data
+      final assignmentDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .doc(assignmentData['id'])
+          .get();
+
+      if (assignmentDoc.exists) {
+        setState(() {
+          // Update the assignment data
+          assignmentData = {
+            'id': assignmentDoc.id,
+            ...assignmentDoc.data()!,
+          };
+
+          // Also update the widget's assignment data
+          widget.assignment.clear();
+          widget.assignment.addAll(assignmentData);
+        });
+      }
+    } catch (e) {
+      print('Error reloading assignment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error reloading assignment data'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   void _navigateToRubric() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => EvaluationRubricPage(
           courseId: widget.courseId,
-          assignmentId: widget.assignment['id'],
-          assignmentData: widget.assignment,
+          assignmentId: assignmentData['id'],
+          assignmentData: assignmentData,
           organizationCode: organizationCode!,
         ),
       ),
@@ -180,10 +254,10 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       MaterialPageRoute(
         builder: (context) => SubmissionEvaluationPage(
           courseId: widget.courseId,
-          assignmentId: widget.assignment['id'],
+          assignmentId: assignmentData['id'],
           submissionId: submission['id'],
           submissionData: submission,
-          assignmentData: widget.assignment,
+          assignmentData: assignmentData,
           organizationCode: organizationCode!,
         ),
       ),
@@ -256,7 +330,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
             .collection('courses')
             .doc(widget.courseId)
             .collection('assignments')
-            .doc(widget.assignment['id'])
+            .doc(assignmentData['id'])
             .delete();
 
         Navigator.pop(context, true);
@@ -278,10 +352,16 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
   }
 
   Future<void> _launchUrl(String url) async {
-    final Uri uri = Uri.parse(url);
-    if (!await launchUrl(uri)) {
+    try {
+      final Uri uri = Uri.parse(url);
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open file')),
+        );
+      }
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open file')),
+        SnackBar(content: Text('Error opening file: $e')),
       );
     }
   }
@@ -299,7 +379,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       );
     }
 
-    final dueDate = widget.assignment['dueDate'] as Timestamp?;
+    final dueDate = assignmentData['dueDate'] as Timestamp?;
     final isOverdue = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
 
     return Scaffold(
@@ -330,6 +410,9 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
             PopupMenuButton<String>(
               onSelected: (value) {
                 switch (value) {
+                  case 'edit':
+                    _navigateToEditAssignment();
+                    break;
                   case 'rubric':
                     _navigateToRubric();
                     break;
@@ -342,6 +425,16 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                 }
               },
               itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit, size: 20),
+                      SizedBox(width: 8),
+                      Text('Edit Assignment'),
+                    ],
+                  ),
+                ),
                 PopupMenuItem(
                   value: 'rubric',
                   child: Row(
@@ -481,7 +574,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                 ),
                 SizedBox(height: 12),
                 Text(
-                  widget.assignment['title'] ?? 'Assignment',
+                  assignmentData['title'] ?? 'Assignment',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
@@ -493,15 +586,15 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                   children: [
                     Icon(Icons.library_books, color: Colors.white.withValues(alpha: 0.9), size: 18),
                     SizedBox(width: 8),
-                    Expanded(  // Add this wrapper
+                    Expanded(
                       child: Text(
                         '${widget.courseData['code'] ?? ''} - ${widget.courseData['title'] ?? widget.courseData['name'] ?? ''}',
                         style: TextStyle(
                           fontSize: 16,
                           color: Colors.white.withValues(alpha: 0.9),
                         ),
-                        overflow: TextOverflow.ellipsis,  // Optional: add this to truncate with "..."
-                        maxLines: 1,  // Optional: ensure it stays on one line
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                     ),
                   ],
@@ -557,8 +650,8 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
   }
 
   Widget _buildDetailsTab() {
-    final dueDate = widget.assignment['dueDate'] as Timestamp?;
-    final attachments = widget.assignment['attachments'] as List<dynamic>? ?? [];
+    final dueDate = assignmentData['dueDate'] as Timestamp?;
+    final attachments = assignmentData['attachments'] as List<dynamic>? ?? [];
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
@@ -614,7 +707,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                       child: _buildInfoItem(
                         icon: Icons.grade,
                         label: 'Points',
-                        value: '${widget.assignment['points'] ?? 0}',
+                        value: '${assignmentData['points'] ?? 0}',
                         color: Colors.green,
                       ),
                     ),
@@ -633,7 +726,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                 ),
                 SizedBox(height: 8),
                 Text(
-                  widget.assignment['description'] ?? 'No description provided.',
+                  assignmentData['description'] ?? 'No description provided.',
                   style: TextStyle(
                     fontSize: 15,
                     color: Colors.grey[600],
@@ -660,7 +753,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                     border: Border.all(color: Colors.orange[200]!),
                   ),
                   child: Text(
-                    widget.assignment['instructions'] ?? 'No specific instructions provided.',
+                    assignmentData['instructions'] ?? 'No specific instructions provided.',
                     style: TextStyle(
                       fontSize: 15,
                       color: Colors.grey[700],
@@ -673,7 +766,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           ),
           SizedBox(height: 16),
 
-          // Attachments Card
+          // Attachments Card - FIXED DISPLAY
           if (attachments.isNotEmpty)
             Container(
               padding: EdgeInsets.all(20),
@@ -696,7 +789,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                       Icon(Icons.attach_file, color: Colors.purple[600], size: 24),
                       SizedBox(width: 12),
                       Text(
-                        'Reference Materials',
+                        'Reference Materials (${attachments.length})',
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -709,6 +802,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                   ...attachments.map((attachment) {
                     final name = attachment['name'] ?? 'File';
                     final url = attachment['url'] ?? '';
+                    final size = attachment['size'];
 
                     return Container(
                       margin: EdgeInsets.only(bottom: 8),
@@ -731,12 +825,29 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                               ),
                               SizedBox(width: 12),
                               Expanded(
-                                child: Text(
-                                  name,
-                                  style: TextStyle(
-                                    color: Colors.blue[600],
-                                    decoration: TextDecoration.underline,
-                                  ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      name,
+                                      style: TextStyle(
+                                        color: Colors.blue[600],
+                                        fontWeight: FontWeight.w500,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    if (size != null) ...[
+                                      SizedBox(height: 2),
+                                      Text(
+                                        _formatFileSize(size is int ? size : int.tryParse(size.toString()) ?? 0),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                               Icon(
@@ -932,7 +1043,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                         border: Border.all(color: Colors.green[300]!),
                       ),
                       child: Text(
-                        '${submission['grade']}/${widget.assignment['points'] ?? 100}',
+                        '${submission['grade']}/${assignmentData['points'] ?? 100}',
                         style: TextStyle(
                           color: Colors.green[700],
                           fontWeight: FontWeight.bold,
@@ -1071,7 +1182,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
               fontWeight: FontWeight.bold,
               color: Colors.blue.shade700,
             ),
-          )
+          ),
         ],
       ),
     );
@@ -1127,7 +1238,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     }
 
     final avgScore = totalScore / gradedSubmissions.length;
-    final maxPoints = widget.assignment['points'] ?? 100;
+    final maxPoints = assignmentData['points'] ?? 100;
     final percentage = (avgScore / maxPoints * 100).toStringAsFixed(1);
 
     return '$percentage%';
@@ -1157,6 +1268,12 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       default:
         return Icons.insert_drive_file;
     }
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   String _formatDateTime(Timestamp? timestamp) {
