@@ -146,8 +146,25 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   }
 
   String _getProgressText() {
-    double remainingPercentage = ((maxWatering - wateringCount) / maxWatering) * 100;
-    return "${remainingPercentage.toInt()}% remaining";
+    return "${(treeGrowth * 100).toInt()}% grown";
+  }
+
+  // Function to update goal from the set goal page (from code 1)
+  void updateGoal(String newGoal) {
+    print('Updating goal to: $newGoal'); // Debug print
+    setState(() {
+      goal = newGoal;
+      hasActiveGoal = true;
+    });
+
+    // Show confirmation that goal was set
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Mission set: $newGoal ⭐'),
+        backgroundColor: Colors.amber,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Widget _getCurrentTreePainter() {
@@ -191,66 +208,66 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       children: [
         // Bronze Medal
         Container(
-          padding: EdgeInsets.all(8),
+          padding: EdgeInsets.all(6),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: completedTrees >= 1 ? Color(0xFFCD7F32) : Colors.grey[300],
             boxShadow: completedTrees >= 1 ? [
               BoxShadow(
                 color: Color(0xFFCD7F32).withOpacity(0.3),
-                blurRadius: 8,
-                spreadRadius: 2,
+                blurRadius: 6,
+                spreadRadius: 1,
               ),
             ] : null,
           ),
           child: Icon(
             Icons.emoji_events,
             color: completedTrees >= 1 ? Colors.white : Colors.grey[500],
-            size: currentTreeLevel == TreeLevel.bronze ? 28 : 24,
+            size: currentTreeLevel == TreeLevel.bronze ? 20 : 16,
           ),
         ),
-        SizedBox(width: 12),
+        SizedBox(width: 8),
 
         // Silver Medal
         Container(
-          padding: EdgeInsets.all(8),
+          padding: EdgeInsets.all(6),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: completedTrees >= 2 ? Color(0xFFC0C0C0) : Colors.grey[300],
             boxShadow: completedTrees >= 2 ? [
               BoxShadow(
                 color: Color(0xFFC0C0C0).withOpacity(0.3),
-                blurRadius: 8,
-                spreadRadius: 2,
+                blurRadius: 6,
+                spreadRadius: 1,
               ),
             ] : null,
           ),
           child: Icon(
             Icons.emoji_events,
             color: completedTrees >= 2 ? Colors.white : Colors.grey[500],
-            size: currentTreeLevel == TreeLevel.silver ? 28 : 24,
+            size: currentTreeLevel == TreeLevel.silver ? 20 : 16,
           ),
         ),
-        SizedBox(width: 12),
+        SizedBox(width: 8),
 
         // Gold Medal
         Container(
-          padding: EdgeInsets.all(8),
+          padding: EdgeInsets.all(6),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: completedTrees >= 3 ? Color(0xFFFFD700) : Colors.grey[300],
             boxShadow: completedTrees >= 3 ? [
               BoxShadow(
                 color: Color(0xFFFFD700).withOpacity(0.3),
-                blurRadius: 8,
-                spreadRadius: 2,
+                blurRadius: 6,
+                spreadRadius: 1,
               ),
             ] : null,
           ),
           child: Icon(
             Icons.emoji_events,
             color: completedTrees >= 3 ? Colors.white : Colors.grey[500],
-            size: currentTreeLevel == TreeLevel.gold ? 28 : 24,
+            size: currentTreeLevel == TreeLevel.gold ? 20 : 16,
           ),
         ),
       ],
@@ -266,24 +283,6 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       case TreeLevel.gold:
         return "🥇 Gold Tree";
     }
-  }
-
-  // Function to update goal from the set goal page
-  void updateGoal(String newGoal) {
-    print('Updating goal to: $newGoal'); // Debug print
-    setState(() {
-      goal = newGoal;
-      hasActiveGoal = true;
-    });
-
-    // Show confirmation that goal was set
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Mission set: $newGoal ⭐'),
-        backgroundColor: Colors.amber,
-        duration: Duration(seconds: 2),
-      ),
-    );
   }
 
   @override
@@ -364,8 +363,8 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text('StudyHub')),
-      body: Padding(
-        padding: EdgeInsets.all(20),
+      body: SingleChildScrollView( // Added to prevent overflow
+        padding: EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -376,7 +375,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                 return Transform.scale(
                   scale: 1.0 + (_levelUpAnimation.value * 0.1),
                   child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     decoration: BoxDecoration(
                       color: currentTreeLevel == TreeLevel.bronze ? Color(0xFFCD7F32) :
                       currentTreeLevel == TreeLevel.silver ? Color(0xFFC0C0C0) :
@@ -387,8 +386,8 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                           color: (currentTreeLevel == TreeLevel.bronze ? Color(0xFFCD7F32) :
                           currentTreeLevel == TreeLevel.silver ? Color(0xFFC0C0C0) :
                           Color(0xFFFFD700)).withOpacity(0.3),
-                          blurRadius: 8,
-                          offset: Offset(0, 4),
+                          blurRadius: 6,
+                          offset: Offset(0, 3),
                         ),
                       ],
                     ),
@@ -397,14 +396,14 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                        fontSize: 14,
                       ),
                     ),
                   ),
                 );
               },
             ),
-            SizedBox(height: 15),
+            SizedBox(height: 12),
 
             Center(
               child: AnimatedBuilder(
@@ -413,39 +412,39 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                   return Transform.scale(
                     scale: _scaleAnimation.value,
                     child: Container(
-                      width: 350, // Bigger container for bigger trees
-                      height: 400, // Taller container
+                      width: 300, // Reduced size to prevent overflow
+                      height: 320, // Reduced height
                       child: _getCurrentTreePainter(),
                     ),
                   );
                 },
               ),
             ),
-            SizedBox(height: 20),
+            SizedBox(height: 15),
 
             GestureDetector(
               onTap: waterTree,
               child: Container(
-                padding: EdgeInsets.all(12),
+                padding: EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: Colors.blueAccent,
                   borderRadius: BorderRadius.circular(50),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.blue.withOpacity(0.3),
-                      blurRadius: 10,
-                      offset: Offset(0, 5),
+                      blurRadius: 8,
+                      offset: Offset(0, 4),
                     ),
                   ],
                 ),
                 child: Icon(
                   Icons.water_drop_outlined,
-                  size: 60,
+                  size: 50, // Reduced size
                   color: Colors.white,
                 ),
               ),
             ),
-            SizedBox(height: 20),
+            SizedBox(height: 15),
 
             // Progress bar with medals
             Row(
@@ -461,24 +460,25 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
-                SizedBox(width: 16),
+                SizedBox(width: 12),
                 _buildMedalIcons(),
               ],
             ),
-            SizedBox(height: 10),
-            Text(
-              _getProgressText(),
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
             SizedBox(height: 8),
             Text(
-              "Trees Completed: $completedTrees",
-              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              _getProgressText(),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
             ),
-            SizedBox(height: 20),
+            SizedBox(height: 6),
+            Text(
+              "Trees Completed: $completedTrees",
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+            SizedBox(height: 15),
 
+            // Mission in Progress Container (from code 1)
             Container(
-              padding: EdgeInsets.all(15),
+              padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: hasActiveGoal ? Colors.blueAccent : Colors.grey[400],
                 borderRadius: BorderRadius.circular(10),
@@ -499,26 +499,26 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                         Icon(
                           Icons.star,
                           color: Colors.amber,
-                          size: 20,
+                          size: 18,
                         ),
-                        SizedBox(width: 8),
+                        SizedBox(width: 6),
                       ],
                       Text(
                         'Mission in Progress',
                         style: TextStyle(
                             color: Colors.white,
-                            fontSize: 18,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold
                         ),
                       ),
                     ],
                   ),
-                  SizedBox(height: 10),
+                  SizedBox(height: 8),
                   Text(
                     goal,
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 14,
+                      fontSize: 13,
                       fontStyle: hasActiveGoal ? FontStyle.normal : FontStyle.italic,
                     ),
                     textAlign: TextAlign.center,
@@ -527,9 +527,9 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
               ),
             ),
 
-            SizedBox(height: 20),
+            SizedBox(height: 15),
 
-            // Set Goal Button
+            // Set Goal Button (from code 1)
             ElevatedButton(
               onPressed: () async {
                 // Navigate to set goal page with callback
@@ -548,18 +548,19 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blueAccent,
                 foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: 25, vertical: 10),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
                 shadowColor: Colors.blue.withOpacity(0.3),
-                elevation: 5,
+                elevation: 4,
               ),
               child: Text('Set Goal'),
             ),
 
-            SizedBox(height: 10),
+            SizedBox(height: 8),
 
+            // View Badges Button (from code 1)
             ElevatedButton(
               onPressed: () {
                 // Handle view badges action
@@ -567,15 +568,16 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
                 foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: 25, vertical: 10),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
                 shadowColor: Colors.green.withOpacity(0.3),
-                elevation: 5,
+                elevation: 4,
               ),
               child: Text('View Badges'),
             ),
+            SizedBox(height: 16), // Bottom padding
           ],
         ),
       ),
