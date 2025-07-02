@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'create_material.dart';
+import '../Authentication/auth_services.dart';
 
 class MaterialDetailPage extends StatefulWidget {
   final Map<String, dynamic> material;
@@ -22,13 +23,32 @@ class MaterialDetailPage extends StatefulWidget {
 }
 
 class _MaterialDetailPageState extends State<MaterialDetailPage> {
+  final AuthService _authService = AuthService();
   late Map<String, dynamic> materialData;
   bool isLoading = false;
+  String? organizationCode;
 
   @override
   void initState() {
     super.initState();
     materialData = Map<String, dynamic>.from(widget.material);
+    _loadOrganizationCode();
+  }
+
+  Future<void> _loadOrganizationCode() async {
+    try {
+      final user = _authService.currentUser;
+      if (user != null) {
+        final userData = await _authService.getUserData(user.uid);
+        if (userData != null) {
+          setState(() {
+            organizationCode = userData['organizationCode'];
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading organization code: $e');
+    }
   }
 
   IconData _getMaterialIcon() {
@@ -52,17 +72,16 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
   }
 
   void _navigateToEditMaterial() async {
-    // Extract organizationCode from courseData
-    final organizationCode = widget.courseData['organizationCode'] ??
-        widget.courseData['organizationId'];
-
     if (organizationCode == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Organization code not found'),
+          content: Text('Organization code not found. Please try again.'),
           backgroundColor: Colors.red,
         ),
       );
+
+      // Try to load organization code again
+      await _loadOrganizationCode();
       return;
     }
 
@@ -74,6 +93,7 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
           courseData: {
             ...widget.courseData,
             'organizationCode': organizationCode,
+            'organizationId': organizationCode, // Add both for compatibility
           },
           editMode: true,
           materialId: materialData['id'],
@@ -87,21 +107,25 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
     }
   }
 
-// Add this method to reload material data
   Future<void> _reloadMaterialData() async {
+    if (organizationCode == null) {
+      await _loadOrganizationCode();
+      if (organizationCode == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to reload data. Organization code not found.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() {
       isLoading = true;
     });
 
     try {
-      // Extract organizationCode from courseData
-      final organizationCode = widget.courseData['organizationCode'] ??
-          widget.courseData['organizationId'];
-
-      if (organizationCode == null) {
-        throw Exception('Organization code not found');
-      }
-
       final materialDoc = await FirebaseFirestore.instance
           .collection('organizations')
           .doc(organizationCode)
@@ -135,6 +159,16 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
   }
 
   Future<void> _deleteMaterial() async {
+    if (organizationCode == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to delete. Organization code not found.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -164,9 +198,6 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
 
     if (confirm == true) {
       try {
-        final organizationCode = widget.courseData['organizationCode'] ??
-            widget.courseData['organizationId'];
-
         await FirebaseFirestore.instance
             .collection('organizations')
             .doc(organizationCode)
@@ -270,7 +301,8 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
         child: CircularProgressIndicator(
           valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
         ),
-      ):SingleChildScrollView(
+      )
+          : SingleChildScrollView(
         padding: EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

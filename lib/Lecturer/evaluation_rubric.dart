@@ -657,7 +657,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                 shrinkWrap: true,
                 physics: NeverScrollableScrollPhysics(),
                 crossAxisCount: 2,
-                childAspectRatio: 2.5,
+                childAspectRatio: 1.8, // Changed from 2.5 to give more height
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 children: rubricTemplates.keys.map((templateName) {
@@ -665,7 +665,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                     onTap: () => _applyTemplate(templateName),
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: EdgeInsets.all(16),
+                      padding: EdgeInsets.all(12), // Reduced from 16
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
@@ -685,22 +685,30 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                       ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min, // Add this
                         children: [
-                          Icon(
-                            _getTemplateIcon(templateName),
-                            color: selectedTemplate == templateName
-                                ? Colors.purple[600]
-                                : Colors.grey[600],
-                            size: 28,
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            templateName,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
+                          Flexible( // Wrap in Flexible
+                            child: Icon(
+                              _getTemplateIcon(templateName),
                               color: selectedTemplate == templateName
                                   ? Colors.purple[600]
-                                  : Colors.grey[800],
+                                  : Colors.grey[600],
+                              size: 24, // Reduced from 28
+                            ),
+                          ),
+                          SizedBox(height: 4), // Reduced from 8
+                          Flexible( // Wrap in Flexible
+                            child: Text(
+                              templateName,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14, // Add explicit font size
+                                color: selectedTemplate == templateName
+                                    ? Colors.purple[600]
+                                    : Colors.grey[800],
+                              ),
+                              overflow: TextOverflow.ellipsis, // Add this
+                              textAlign: TextAlign.center, // Add this
                             ),
                           ),
                         ],
@@ -1319,6 +1327,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
 
   IconData _getTemplateIcon(String templateName) {
     switch (templateName) {
+
       case 'Essay':
         return Icons.article;
       case 'Programming':

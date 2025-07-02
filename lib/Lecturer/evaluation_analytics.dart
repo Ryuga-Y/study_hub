@@ -342,7 +342,7 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
 
           // Quick Stats
           Container(
-            height: 100,
+            height: 110,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: EdgeInsets.symmetric(horizontal: 16),
@@ -438,24 +438,32 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min, // Add this
         children: [
-          Icon(icon, color: color, size: 28),
-          SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: color,
+          Icon(icon, color: color, size: 24), // Reduced from 28
+          SizedBox(height: 4), // Reduced from 8
+          Flexible( // Wrap in Flexible
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 18, // Reduced from 20
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+              overflow: TextOverflow.ellipsis, // Add this
             ),
           ),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
+          Flexible( // Wrap in Flexible
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 11, // Reduced from 12
+                color: Colors.grey[600],
+              ),
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis, // Add this
+              maxLines: 2, // Add this
             ),
-            textAlign: TextAlign.center,
           ),
         ],
       ),
