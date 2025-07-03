@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
+import 'student_assignment_details.dart';
 
 class StudentCoursePage extends StatefulWidget {
   final String courseId;
@@ -28,11 +30,12 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
   List<Map<String, dynamic>> assignments = [];
   List<Map<String, dynamic>> materials = [];
   Map<String, Map<String, dynamic>> submissions = {};
+  Map<String, Map<String, dynamic>> tutorialSubmissions = {};
   List<Map<String, dynamic>> classmates = [];
 
   bool isLoading = true;
   String? errorMessage;
-  int _currentIndex = 2; // Lecturer tab
+  int _currentIndex = 2;
 
   @override
   void initState() {
@@ -55,7 +58,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         return;
       }
 
-      // Load user data
       final userData = await _authService.getUserData(user.uid);
       if (userData == null) {
         setState(() => errorMessage = 'User data not found');
@@ -66,11 +68,11 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         _organizationCode = userData['organizationCode'];
       });
 
-      // Load course content
       await Future.wait([
         _fetchAssignments(),
         _fetchMaterials(),
         _fetchSubmissions(user.uid),
+        _fetchTutorialSubmissions(user.uid),
         _fetchClassmates(user.uid),
       ]);
 
@@ -153,6 +155,8 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
             .doc(assignment['id'])
             .collection('submissions')
             .where('studentId', isEqualTo: studentId)
+            .orderBy('submittedAt', descending: true)
+            .limit(1)
             .get();
 
         if (submissionQuery.docs.isNotEmpty) {
@@ -168,6 +172,44 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       });
     } catch (e) {
       print('Error fetching submissions: $e');
+    }
+  }
+
+  Future<void> _fetchTutorialSubmissions(String studentId) async {
+    if (_organizationCode == null) return;
+
+    try {
+      Map<String, Map<String, dynamic>> tutorialMap = {};
+
+      for (var material in materials) {
+        if (material['materialType'] == 'tutorial') {
+          var submissionQuery = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(_organizationCode)
+              .collection('courses')
+              .doc(widget.courseId)
+              .collection('materials')
+              .doc(material['id'])
+              .collection('submissions')
+              .where('studentId', isEqualTo: studentId)
+              .orderBy('submittedAt', descending: true)
+              .limit(1)
+              .get();
+
+          if (submissionQuery.docs.isNotEmpty) {
+            tutorialMap[material['id']] = {
+              'id': submissionQuery.docs.first.id,
+              ...submissionQuery.docs.first.data(),
+            };
+          }
+        }
+      }
+
+      setState(() {
+        tutorialSubmissions = tutorialMap;
+      });
+    } catch (e) {
+      print('Error fetching tutorial submissions: $e');
     }
   }
 
@@ -215,27 +257,55 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     final user = _authService.currentUser;
     if (user == null) return;
 
-    // Check if due date has passed
     final dueDate = assignment['dueDate'] as Timestamp?;
     if (dueDate != null && dueDate.toDate().isBefore(DateTime.now())) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Assignment deadline has passed'),
-          backgroundColor: Colors.red,
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Past Due Date'),
+          content: Text('This assignment is past due. Do you still want to submit?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('Submit Anyway', style: TextStyle(color: Colors.white)),
+            ),
+          ],
         ),
       );
-      return;
+
+      if (confirm != true) return;
     }
 
     try {
-      // Pick file
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx', 'txt', 'jpg', 'png', 'zip'],
+        allowedExtensions: ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png', 'zip', 'ppt', 'pptx'],
+        withData: true,
       );
 
-      if (result != null) {
-        // Show loading dialog
+      if (result != null && result.files.single.bytes != null) {
+        // Check file size
+        if (result.files.single.size > 10 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('File size exceeds 10MB limit'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -252,15 +322,28 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           ),
         );
 
-        // Get user data
         final userData = await _authService.getUserData(user.uid);
         final studentName = userData?['fullName'] ?? 'Unknown Student';
 
-        // TODO: Upload file to storage and get URL
-        // For now, we'll use the file name as a placeholder
-        String fileUrl = result.files.single.name;
+        // Upload file to Firebase Storage
+        final fileName = '${DateTime.now().millisecondsSinceEpoch}_${result.files.single.name}';
+        final storagePath = 'submissions/${widget.courseId}/${assignment['id']}/$fileName';
 
-        // Submit assignment
+        final ref = FirebaseStorage.instance.ref().child(storagePath);
+        final metadata = SettableMetadata(
+          contentType: _getContentType(result.files.single.extension ?? ''),
+          customMetadata: {
+            'studentId': user.uid,
+            'studentName': studentName,
+            'assignmentId': assignment['id'],
+            'originalName': result.files.single.name,
+          },
+        );
+
+        final uploadTask = ref.putData(result.files.single.bytes!, metadata);
+        final snapshot = await uploadTask;
+        final fileUrl = await snapshot.ref.getDownloadURL();
+
         await FirebaseFirestore.instance
             .collection('organizations')
             .doc(_organizationCode)
@@ -272,17 +355,20 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
             .add({
           'studentId': user.uid,
           'studentName': studentName,
+          'studentEmail': userData?['email'] ?? '',
           'submittedAt': FieldValue.serverTimestamp(),
           'fileUrl': fileUrl,
           'fileName': result.files.single.name,
+          'fileSize': result.files.single.size,
+          'storagePath': storagePath,
           'status': 'submitted',
           'grade': null,
           'feedback': null,
+          'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
         });
 
-        Navigator.pop(context); // Close loading dialog
+        Navigator.pop(context);
 
-        // Reload submissions
         await _fetchSubmissions(user.uid);
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -293,7 +379,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         );
       }
     } catch (e) {
-      Navigator.pop(context); // Close loading dialog if error
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error submitting assignment: $e'),
@@ -303,111 +389,597 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     }
   }
 
+  Future<void> _submitTutorial(Map<String, dynamic> material) async {
+    final user = _authService.currentUser;
+    if (user == null) return;
+
+    final dueDate = material['dueDate'] as Timestamp?;
+    if (dueDate != null && dueDate.toDate().isBefore(DateTime.now())) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Past Due Date'),
+          content: Text('This tutorial is past due. Do you still want to submit?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('Submit Anyway', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm != true) return;
+    }
+
+    // Add comment dialog
+    final commentController = TextEditingController();
+    final comment = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Add Comments (Optional)'),
+        content: TextField(
+          controller: commentController,
+          maxLines: 3,
+          decoration: InputDecoration(
+            hintText: 'Any comments about your submission...',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, commentController.text),
+            child: Text('Continue'),
+          ),
+        ],
+      ),
+    );
+
+    if (comment == null) return;
+
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png', 'zip', 'ppt', 'pptx'],
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[400]!),
+                ),
+                SizedBox(width: 20),
+                Text('Submitting tutorial...'),
+              ],
+            ),
+          ),
+        );
+
+        final userData = await _authService.getUserData(user.uid);
+        final studentName = userData?['fullName'] ?? 'Unknown Student';
+
+        List<Map<String, dynamic>> uploadedFiles = [];
+
+        for (var file in result.files) {
+          if (file.bytes != null && file.size <= 10 * 1024 * 1024) {
+            final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+            final storagePath = 'materials/${widget.courseId}/${material['id']}/submissions/$fileName';
+
+            final ref = FirebaseStorage.instance.ref().child(storagePath);
+            final metadata = SettableMetadata(
+              contentType: _getContentType(file.extension ?? ''),
+            );
+
+            final uploadTask = ref.putData(file.bytes!, metadata);
+            final snapshot = await uploadTask;
+            final fileUrl = await snapshot.ref.getDownloadURL();
+
+            uploadedFiles.add({
+              'url': fileUrl,
+              'name': file.name,
+              'size': file.size,
+              'uploadedAt': Timestamp.now(),
+              'storagePath': storagePath,
+            });
+          }
+        }
+
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('materials')
+            .doc(material['id'])
+            .collection('submissions')
+            .add({
+          'studentId': user.uid,
+          'studentName': studentName,
+          'studentEmail': userData?['email'] ?? '',
+          'submittedAt': FieldValue.serverTimestamp(),
+          'files': uploadedFiles,
+          'comments': comment,
+          'status': 'submitted',
+          'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
+        });
+
+        Navigator.pop(context);
+
+        await _fetchTutorialSubmissions(user.uid);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Tutorial submitted successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error submitting tutorial: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   void _viewMaterial(Map<String, dynamic> material) {
+    final files = material['files'] as List<dynamic>? ?? [];
+    final materialType = material['materialType'] ?? 'learning';
+    final dueDate = material['dueDate'] as Timestamp?;
+    final isTutorial = materialType == 'tutorial';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.75,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
-          ),
-        ),
-        child: Column(
-          children: [
-            Container(
-              margin: EdgeInsets.symmetric(vertical: 10),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.85,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
               ),
             ),
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      material['title'] ?? 'Material',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+            child: Column(
+              children: [
+                Container(
+                  margin: EdgeInsets.symmetric(vertical: 10),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isTutorial ? Colors.blue[50] : Colors.green[50],
+                    border: Border(
+                      bottom: BorderSide(
+                        color: isTutorial ? Colors.blue[200]! : Colors.green[200]!,
                       ),
                     ),
-                    SizedBox(height: 8),
-                    Text(
-                      'By ${widget.courseData['lecturerName'] ?? 'Unknown'}',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 14,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isTutorial ? Icons.quiz : Icons.menu_book,
+                        color: isTutorial ? Colors.blue[700] : Colors.green[700],
+                        size: 24,
                       ),
-                    ),
-                    SizedBox(height: 16),
-                    if (material['description'] != null) ...[
-                      Text(
-                        'Description',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              material['title'] ?? 'Material',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey[800],
+                              ),
+                            ),
+                            Row(
+                              children: [
+                                Text(
+                                  isTutorial ? 'Tutorial' : 'Learning Material',
+                                  style: TextStyle(
+                                    color: isTutorial ? Colors.blue[600] : Colors.green[600],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                if (isTutorial && dueDate != null) ...[
+                                  SizedBox(width: 8),
+                                  Text('•', style: TextStyle(color: Colors.grey)),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Due: ${_formatDateTime(dueDate)}',
+                                    style: TextStyle(
+                                      color: dueDate.toDate().isBefore(DateTime.now())
+                                          ? Colors.red[600]
+                                          : Colors.grey[600],
+                                      fontSize: 12,
+                                      fontWeight: dueDate.toDate().isBefore(DateTime.now())
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
                         ),
                       ),
-                      SizedBox(height: 8),
-                      Text(
-                        material['description'],
-                        style: TextStyle(fontSize: 14),
+                      IconButton(
+                        icon: Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
                       ),
-                      SizedBox(height: 16),
                     ],
-                    if (material['content'] != null) ...[
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Text(
-                            material['content'],
-                            style: TextStyle(fontSize: 14),
+                  ),
+                ),
+
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.info_outline, color: Colors.grey[700], size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Description',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.grey[800],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                material['description'] ?? 'No description provided',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey[700],
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                    ],
-                    if (material['fileUrl'] != null) ...[
-                      SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: () => _downloadFile(material['fileUrl'], material['title']),
-                          icon: Icon(Icons.download, color: Colors.white),
-                          label: Text('Download Material', style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple[400],
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+
+                        if (isTutorial && material['instructions'] != null) ...[
+                          SizedBox(height: 16),
+                          Container(
+                            padding: EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[50],
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.blue[200]!),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(Icons.assignment, color: Colors.blue[700], size: 20),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Instructions',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue[800],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  material['instructions'],
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.blue[900],
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
+                        ],
+
+                        if (files.isNotEmpty) ...[
+                          SizedBox(height: 20),
+                          Row(
+                            children: [
+                              Icon(Icons.attach_file, color: Colors.purple[600], size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                'Files (${files.length})',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey[800],
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 12),
+                          ...files.map((file) {
+                            final fileName = file['name'] ?? 'Unknown file';
+                            final fileSize = file['size'] ?? 0;
+                            final fileUrl = file['url'] ?? '';
+
+                            return Container(
+                              margin: EdgeInsets.only(bottom: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey[300]!),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.grey.withOpacity(0.1),
+                                    blurRadius: 2,
+                                    offset: Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: ListTile(
+                                leading: Container(
+                                  padding: EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.purple[50],
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(
+                                    _getFileIcon(fileName),
+                                    color: Colors.purple[600],
+                                    size: 24,
+                                  ),
+                                ),
+                                title: Text(
+                                  fileName,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 14,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  _formatFileSize(fileSize),
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                trailing: IconButton(
+                                  icon: Icon(Icons.download, color: Colors.purple[600]),
+                                  onPressed: () => _downloadFile(fileUrl, fileName),
+                                ),
+                                onTap: () => _downloadFile(fileUrl, fileName),
+                              ),
+                            );
+                          }).toList(),
+                        ] else ...[
+                          SizedBox(height: 20),
+                          Container(
+                            padding: EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.folder_open,
+                                    size: 48,
+                                    color: Colors.grey[400],
+                                  ),
+                                  SizedBox(height: 8),
+                                  Text(
+                                    'No files attached',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+
+                        SizedBox(height: 20),
+                        Container(
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.person_outline, size: 16, color: Colors.grey[600]),
+                              SizedBox(width: 8),
+                              Text(
+                                'By ${widget.courseData['lecturerName'] ?? 'Lecturer'}',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                              SizedBox(width: 16),
+                              Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
+                              SizedBox(width: 4),
+                              Text(
+                                _formatDate(material['createdAt']),
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+
+                if (isTutorial)
+                  Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        top: BorderSide(color: Colors.grey[200]!),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.1),
+                          blurRadius: 10,
+                          offset: Offset(0, -5),
+                        ),
+                      ],
+                    ),
+                    child: FutureBuilder<bool>(
+                      future: _checkTutorialSubmission(material['id']),
+                      builder: (context, snapshot) {
+                        final hasSubmitted = snapshot.data ?? false;
+                        final isPastDue = dueDate != null &&
+                            dueDate.toDate().isBefore(DateTime.now());
+
+                        if (hasSubmitted) {
+                          return Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green[50],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green[300]!),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Tutorial Submitted',
+                                  style: TextStyle(
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _submitTutorial(material);
+                            },
+                            icon: Icon(Icons.upload_file, color: Colors.white),
+                            label: Text(
+                              isPastDue ? 'Submit (Late)' : 'Submit Tutorial',
+                              style: TextStyle(color: Colors.white, fontSize: 16),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isPastDue ? Colors.orange : Colors.blue[600],
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
+  }
+
+  Future<bool> _checkTutorialSubmission(String materialId) async {
+    final user = _authService.currentUser;
+    if (user == null || _organizationCode == null) return false;
+
+    try {
+      final submissionSnapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(_organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('materials')
+          .doc(materialId)
+          .collection('submissions')
+          .where('studentId', isEqualTo: user.uid)
+          .get();
+
+      return submissionSnapshot.docs.isNotEmpty;
+    } catch (e) {
+      print('Error checking tutorial submission: $e');
+      return false;
+    }
   }
 
   Future<void> _downloadFile(String fileUrl, String fileName) async {
     try {
       final Uri url = Uri.parse(fileUrl);
       if (await canLaunchUrl(url)) {
-        await launchUrl(url);
+        await launchUrl(url, mode: LaunchMode.externalApplication);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not open file')),
@@ -474,7 +1046,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       appBar: _buildAppBar(),
       body: Column(
         children: [
-          // Course Header
           Container(
             width: double.infinity,
             margin: EdgeInsets.all(16),
@@ -518,7 +1089,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                 ),
                 SizedBox(height: 12),
                 Text(
-                  widget.courseData['title'] ?? widget.courseData['name'] ?? 'Lecturer Title',
+                  widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course Title',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
@@ -564,7 +1135,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
             ),
           ),
 
-          // Tab Bar
           Container(
             margin: EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
@@ -593,7 +1163,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
             ),
           ),
 
-          // Tab Content
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -658,6 +1227,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           _fetchAssignments(),
           _fetchMaterials(),
           _fetchSubmissions(_authService.currentUser!.uid),
+          _fetchTutorialSubmissions(_authService.currentUser!.uid),
         ]);
       },
       child: SingleChildScrollView(
@@ -665,20 +1235,17 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         padding: EdgeInsets.all(16),
         child: Column(
           children: [
-            // Assignments Section
             if (assignments.isNotEmpty) ...[
               _buildSectionHeader('Assignments', Icons.assignment),
               ...assignments.map((assignment) => _buildAssignmentCard(assignment)),
               SizedBox(height: 24),
             ],
 
-            // Materials Section
             if (materials.isNotEmpty) ...[
               _buildSectionHeader('Materials', Icons.description),
               ...materials.map((material) => _buildMaterialCard(material)),
             ],
 
-            // Empty state
             if (assignments.isEmpty && materials.isEmpty)
               Container(
                 padding: EdgeInsets.all(40),
@@ -750,7 +1317,17 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       ),
       child: InkWell(
         onTap: () {
-          _showAssignmentDetails(assignment);
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => StudentAssignmentDetailsPage(
+                assignment: assignment,
+                courseId: widget.courseId,
+                courseData: widget.courseData,
+                organizationCode: _organizationCode!,
+              ),
+            ),
+          ).then((_) => _loadData());
         },
         borderRadius: BorderRadius.circular(12),
         child: Padding(
@@ -841,7 +1418,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              'Grade: ${submission!['grade']}',
+                              'Grade: ${submission!['grade']}/${assignment['points'] ?? 100}',
                               style: TextStyle(
                                 color: Colors.purple,
                                 fontSize: 12,
@@ -863,6 +1440,11 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
   }
 
   Widget _buildMaterialCard(Map<String, dynamic> material) {
+    final isTutorial = material['materialType'] == 'tutorial';
+    final hasSubmitted = tutorialSubmissions.containsKey(material['id']);
+    final dueDate = material['dueDate'] as Timestamp?;
+    final isPastDue = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
+
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -887,13 +1469,13 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
+                  color: (isTutorial ? Colors.blue : Colors.green).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
                   child: Icon(
-                    Icons.description,
-                    color: Colors.green,
+                    isTutorial ? Icons.quiz : Icons.menu_book,
+                    color: isTutorial ? Colors.blue : Colors.green,
                     size: 28,
                   ),
                 ),
@@ -903,12 +1485,35 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      material['title'] ?? 'Material',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            material['title'] ?? 'Material',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        if (isTutorial) ...[
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[100],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Tutorial',
+                              style: TextStyle(
+                                color: Colors.blue[700],
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     SizedBox(height: 4),
                     Text(
@@ -920,19 +1525,60 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    SizedBox(height: 4),
-                    Text(
-                      _formatDate(material['createdAt']),
-                      style: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 12,
-                      ),
+                    SizedBox(height: 8),
+                    Row(
+                      children: [
+                        if (isTutorial && dueDate != null) ...[
+                          Icon(Icons.access_time, size: 14, color: isPastDue ? Colors.red : Colors.grey[600]),
+                          SizedBox(width: 4),
+                          Text(
+                            'Due: ${_formatDate(dueDate)}',
+                            style: TextStyle(
+                              color: isPastDue ? Colors.red : Colors.grey[600],
+                              fontSize: 12,
+                              fontWeight: isPastDue ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                        ],
+                        if (isTutorial) ...[
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: hasSubmitted
+                                  ? Colors.green.withValues(alpha: 0.1)
+                                  : (isPastDue ? Colors.red.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              hasSubmitted ? 'Submitted' : (isPastDue ? 'Missing' : 'Pending'),
+                              style: TextStyle(
+                                color: hasSubmitted
+                                    ? Colors.green
+                                    : (isPastDue ? Colors.red : Colors.orange),
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ] else ...[
+                          Text(
+                            _formatDate(material['createdAt']),
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
               ),
               Icon(
-                material['fileUrl'] != null ? Icons.download : Icons.visibility,
+                material['files'] != null && (material['files'] as List).isNotEmpty
+                    ? Icons.download
+                    : Icons.visibility,
                 color: Colors.grey[400],
                 size: 20,
               ),
@@ -1038,12 +1684,14 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     final completedAssignments = assignments.where((a) => submissions.containsKey(a['id'])).length;
     final pendingAssignments = assignments.length - completedAssignments;
 
+    final tutorials = materials.where((m) => m['materialType'] == 'tutorial').toList();
+    final completedTutorials = tutorials.where((t) => tutorialSubmissions.containsKey(t['id'])).length;
+
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Statistics Cards
           Row(
             children: [
               Expanded(
@@ -1090,7 +1738,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
 
           SizedBox(height: 24),
 
-          // Course Details
           Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -1108,7 +1755,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Lecturer Details',
+                  'Course Details',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -1125,7 +1772,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
 
           SizedBox(height: 24),
 
-          // Progress Summary
           Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -1151,22 +1797,55 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                 ),
                 SizedBox(height: 16),
                 if (assignments.isNotEmpty) ...[
-                  LinearProgressIndicator(
-                    value: completedAssignments / assignments.length,
-                    backgroundColor: Colors.grey[200],
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
-                  ),
-                  SizedBox(height: 8),
                   Text(
-                    '${(completedAssignments / assignments.length * 100).toStringAsFixed(0)}% assignments completed',
+                    'Assignments',
                     style: TextStyle(
                       color: Colors.grey[600],
                       fontSize: 14,
                     ),
                   ),
-                ] else
+                  SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: completedAssignments / assignments.length,
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                  ),
+                  SizedBox(height: 4),
                   Text(
-                    'No assignments yet',
+                    '${(completedAssignments / assignments.length * 100).toStringAsFixed(0)}% completed',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+                if (tutorials.isNotEmpty) ...[
+                  SizedBox(height: 16),
+                  Text(
+                    'Tutorials',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: tutorials.isEmpty ? 0 : completedTutorials / tutorials.length,
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '${tutorials.isEmpty ? 0 : (completedTutorials / tutorials.length * 100).toStringAsFixed(0)}% completed',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+                if (assignments.isEmpty && tutorials.isEmpty)
+                  Text(
+                    'No assignments or tutorials yet',
                     style: TextStyle(
                       color: Colors.grey[600],
                       fontSize: 14,
@@ -1249,7 +1928,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         setState(() {
           _currentIndex = index;
         });
-        // Handle navigation
         switch (index) {
           case 0:
             Navigator.pop(context);
@@ -1296,209 +1974,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     );
   }
 
-  void _showAssignmentDetails(Map<String, dynamic> assignment) {
-    final hasSubmitted = submissions.containsKey(assignment['id']);
-    final submission = submissions[assignment['id']];
-    final dueDate = assignment['dueDate'] as Timestamp?;
-    final isDuePassed = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.85,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
-          ),
-        ),
-        child: Column(
-          children: [
-            Container(
-              margin: EdgeInsets.symmetric(vertical: 10),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            assignment['title'] ?? 'Assignment',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: hasSubmitted
-                                ? Colors.green.withValues(alpha: 0.1)
-                                : (isDuePassed
-                                ? Colors.red.withValues(alpha: 0.1)
-                                : Colors.orange.withValues(alpha: 0.1)),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            hasSubmitted
-                                ? 'Submitted'
-                                : (isDuePassed ? 'Missing' : 'Pending'),
-                            style: TextStyle(
-                              color: hasSubmitted
-                                  ? Colors.green
-                                  : (isDuePassed ? Colors.red : Colors.orange),
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 8),
-                    if (dueDate != null)
-                      Text(
-                        'Due: ${_formatDate(dueDate)}',
-                        style: TextStyle(
-                          color: isDuePassed ? Colors.red : Colors.grey[600],
-                          fontSize: 14,
-                          fontWeight: isDuePassed ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
-                    SizedBox(height: 16),
-                    Text(
-                      'Description',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      assignment['description'] ?? 'No description provided',
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    if (assignment['content'] != null) ...[
-                      SizedBox(height: 16),
-                      Text(
-                        'Instructions',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Text(
-                            assignment['content'],
-                            style: TextStyle(fontSize: 14),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (hasSubmitted && submission != null) ...[
-                      SizedBox(height: 16),
-                      Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.check_circle, color: Colors.green, size: 20),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Submission Details',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.green[700],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'Submitted: ${_formatDate(submission['submittedAt'])}',
-                              style: TextStyle(fontSize: 14),
-                            ),
-                            if (submission['fileName'] != null)
-                              Text(
-                                'File: ${submission['fileName']}',
-                                style: TextStyle(fontSize: 14),
-                              ),
-                            if (submission['grade'] != null) ...[
-                              SizedBox(height: 8),
-                              Text(
-                                'Grade: ${submission['grade']}',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.purple,
-                                ),
-                              ),
-                            ],
-                            if (submission['feedback'] != null) ...[
-                              SizedBox(height: 8),
-                              Text(
-                                'Feedback: ${submission['feedback']}',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey[700],
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ],
-                    SizedBox(height: 20),
-                    if (!hasSubmitted && !isDuePassed)
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _submitAssignment(assignment);
-                          },
-                          icon: Icon(Icons.upload, color: Colors.white),
-                          label: Text('Submit Assignment', style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple[400],
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   String _formatDate(dynamic timestamp) {
     if (timestamp == null) return 'N/A';
 
@@ -1512,5 +1987,95 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     }
 
     return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  }
+
+  String _formatDateTime(Timestamp? timestamp) {
+    if (timestamp == null) return 'N/A';
+
+    final date = timestamp.toDate();
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    String dateStr = '${date.day}/${date.month}/${date.year}';
+    String timeStr = '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+
+    if (difference.inDays == 0 && date.day == now.day) {
+      return 'Today at $timeStr';
+    } else if (difference.inDays == 1 || (difference.inDays == 0 && date.day != now.day)) {
+      return 'Yesterday at $timeStr';
+    } else {
+      return '$dateStr at $timeStr';
+    }
+  }
+
+  String _formatFileSize(dynamic size) {
+    int bytes = 0;
+    if (size is int) {
+      bytes = size;
+    } else if (size is String) {
+      bytes = int.tryParse(size) ?? 0;
+    }
+
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  IconData _getFileIcon(String fileName) {
+    final extension = fileName.split('.').last.toLowerCase();
+    switch (extension) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'doc':
+      case 'docx':
+        return Icons.description;
+      case 'ppt':
+      case 'pptx':
+        return Icons.slideshow;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+        return Icons.image;
+      case 'zip':
+      case 'rar':
+        return Icons.folder_zip;
+      case 'txt':
+        return Icons.text_snippet;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
+
+  String _getContentType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'ppt':
+        return 'application/vnd.ms-powerpoint';
+      case 'pptx':
+        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'txt':
+        return 'text/plain';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'zip':
+        return 'application/zip';
+      default:
+        return 'application/octet-stream';
+    }
   }
 }
