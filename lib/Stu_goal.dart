@@ -433,7 +433,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       backgroundColor: Colors.lightBlue[50],
       appBar: AppBar(
         title: Text('StudyHub'),
-        backgroundColor: Colors.green[600],
+        backgroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16),
