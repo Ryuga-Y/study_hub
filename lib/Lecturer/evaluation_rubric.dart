@@ -737,9 +737,9 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
 
             // Rubric Builder
             if (!useTemplate || criteriaList.isNotEmpty) ...[
-              // Rubric Header with Actions
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              // Rubric Header
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     'Evaluation Criteria',
@@ -749,26 +749,42 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                       color: Colors.grey[800],
                     ),
                   ),
-                  Row(
+                  SizedBox(height: 12),
+                  // Action buttons in a separate row
+                  Wrap( // Using Wrap for responsive layout
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
                       if (criteriaList.isNotEmpty)
-                        TextButton.icon(
+                        OutlinedButton.icon(
                           onPressed: _autoDistributeWeights,
-                          icon: Icon(Icons.balance, size: 20),
+                          icon: Icon(Icons.balance, size: 18),
                           label: Text('Auto-balance'),
-                          style: TextButton.styleFrom(
+                          style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.orange[600],
+                            side: BorderSide(color: Colors.orange[600]!),
                           ),
                         ),
+                      ElevatedButton.icon(
+                        onPressed: _addCriterion,
+                        icon: Icon(Icons.add, size: 18),
+                        label: Text('Add Custom',),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple[400],
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _showQuickAddDialog,
+                        icon: Icon(Icons.flash_on, size: 18),
+                        label: Text('Quick Add'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.purple[600],
+                          side: BorderSide(color: Colors.purple[600]!),
+                        ),
+                      ),
                       PopupMenuButton<String>(
                         onSelected: (value) {
                           switch (value) {
-                            case 'add':
-                              _addCriterion();
-                              break;
-                            case 'quick':
-                              _showQuickAddDialog();
-                              break;
                             case 'copy':
                               _loadFromPreviousAssignment();
                               break;
@@ -782,27 +798,6 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                           }
                         },
                         itemBuilder: (context) => [
-                          PopupMenuItem(
-                            value: 'add',
-                            child: Row(
-                              children: [
-                                Icon(Icons.add, size: 20),
-                                SizedBox(width: 8),
-                                Text('Add Custom Criterion'),
-                              ],
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: 'quick',
-                            child: Row(
-                              children: [
-                                Icon(Icons.flash_on, size: 20),
-                                SizedBox(width: 8),
-                                Text('Quick Add'),
-                              ],
-                            ),
-                          ),
-                          PopupMenuDivider(),
                           PopupMenuItem(
                             value: 'copy',
                             child: Row(
@@ -824,15 +819,19 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                             ),
                           ),
                         ],
-                        child: ElevatedButton.icon(
-                          onPressed: null,
-                          icon: Icon(Icons.add, color: Colors.white),
-                          label: Text('Add Criterion', style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple[400],
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
+                        child: Container(
+                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey[400]!),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.more_vert, color: Colors.grey[700], size: 18),
+                              SizedBox(width: 4),
+                              Text('More', style: TextStyle(color: Colors.grey[700])),
+                            ],
                           ),
                         ),
                       ),

@@ -38,6 +38,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
   bool isLoading = true;
   String? organizationCode;
   bool hasRubric = false;
+  Map<String, dynamic>? rubricData;
 
   @override
   void initState() {
@@ -104,6 +105,9 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
 
       setState(() {
         hasRubric = rubricDoc.exists;
+        if (rubricDoc.exists) {
+          rubricData = rubricDoc.data();
+        }
       });
     } catch (e) {
       print('Error checking rubric: $e');
@@ -766,7 +770,192 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           ),
           SizedBox(height: 16),
 
-          // Attachments Card - FIXED DISPLAY
+          // Rubric Card - NEW SECTION
+          if (hasRubric && rubricData != null) ...[
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.rule, color: Colors.purple[600], size: 24),
+                          SizedBox(width: 12),
+                          Text(
+                            'Evaluation Rubric',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey[800],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (widget.isLecturer)
+                        TextButton.icon(
+                          onPressed: _navigateToRubric,
+                          icon: Icon(Icons.edit, size: 16),
+                          label: Text('Edit'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.purple[600],
+                          ),
+                        ),
+                    ],
+                  ),
+                  SizedBox(height: 16),
+
+                  // Rubric criteria
+                  if (rubricData!['criteria'] != null) ...[
+                    ...(rubricData!['criteria'] as List).map((criterion) {
+                      final weight = criterion['weight'] ?? 0;
+                      final levels = criterion['levels'] as List? ?? [];
+
+                      return Container(
+                        margin: EdgeInsets.only(bottom: 12),
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.purple[50],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.purple[200]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    criterion['name'] ?? 'Criterion',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                      color: Colors.purple[800],
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.purple[600],
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '$weight%',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (criterion['description'] != null && criterion['description'].toString().isNotEmpty) ...[
+                              SizedBox(height: 4),
+                              Text(
+                                criterion['description'],
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                            SizedBox(height: 8),
+
+                            // Performance levels
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: levels.map<Widget>((level) {
+                                return Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.purple[300]!),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        level['name'] ?? '',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      SizedBox(width: 4),
+                                      Container(
+                                        padding: EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.purple[100],
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Text(
+                                          '${level['points'] ?? 0}',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.purple[700],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ],
+
+                  // Total points info
+                  Container(
+                    margin: EdgeInsets.only(top: 8),
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
+                        SizedBox(width: 8),
+                        Text(
+                          'Total Assignment Points: ${rubricData!['totalPoints'] ?? assignmentData['points'] ?? 100}',
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+          ],
+
+          // Attachments Card
           if (attachments.isNotEmpty)
             Container(
               padding: EdgeInsets.all(20),
@@ -865,54 +1054,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
               ),
             ),
 
-          // Statistics (for lecturer)
-          if (widget.isLecturer) ...[
-            SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard(
-                    'Submitted',
-                    submissions.length.toString(),
-                    Icons.check_circle,
-                    Colors.green,
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatCard(
-                    'Graded',
-                    submissions.where((s) => s['grade'] != null).length.toString(),
-                    Icons.grade,
-                    Colors.blue,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard(
-                    'With Rubric',
-                    submissions.where((s) => s['hasEvaluation'] == true &&
-                        s['evaluationData']?['rubricUsed'] == true).length.toString(),
-                    Icons.rule,
-                    Colors.purple,
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatCard(
-                    'Avg Score',
-                    _calculateAverageScore(),
-                    Icons.analytics,
-                    Colors.orange,
-                  ),
-                ),
-              ],
-            ),
-          ],
+
         ],
       ),
     );
@@ -1188,61 +1330,9 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 5,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 32),
-          SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  String _calculateAverageScore() {
-    if (submissions.isEmpty) return 'N/A';
 
-    final gradedSubmissions = submissions.where((s) => s['grade'] != null).toList();
-    if (gradedSubmissions.isEmpty) return 'N/A';
 
-    double totalScore = 0;
-    for (var submission in gradedSubmissions) {
-      totalScore += submission['grade'];
-    }
-
-    final avgScore = totalScore / gradedSubmissions.length;
-    final maxPoints = assignmentData['points'] ?? 100;
-    final percentage = (avgScore / maxPoints * 100).toStringAsFixed(1);
-
-    return '$percentage%';
-  }
 
   IconData _getFileIcon(String fileName) {
     final extension = fileName.split('.').last.toLowerCase();
