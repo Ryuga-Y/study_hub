@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/custom_widgets.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show File;
 
 class CreateAssignmentPage extends StatefulWidget {
   final String courseId;
@@ -36,9 +38,9 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   TimeOfDay? _dueTime;
   bool _isLoading = false;
   List<PlatformFile> _selectedFiles = [];
-  List<Map<String, dynamic>> _uploadedFiles = [];
   List<Map<String, dynamic>> _existingFiles = [];
   double _uploadProgress = 0;
+  String _uploadStatus = '';
 
   @override
   void initState() {
@@ -67,6 +69,8 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
             'url': attachment['url'] ?? '',
             'name': attachment['name'] ?? 'Unknown file',
             'size': attachment['size']?.toString() ?? '0',
+            'uploadedAt': attachment['uploadedAt'] ?? Timestamp.now(),
+            'storagePath': attachment['storagePath'] ?? '',
           }),
         );
       }
@@ -88,12 +92,60 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         allowMultiple: true,
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'zip', 'xls', 'xlsx'],
+        withData: true, // Important for web
+        withReadStream: false,
       );
 
       if (result != null) {
+        List<PlatformFile> validFiles = [];
+
+        for (var file in result.files) {
+          // Check file size
+          if (file.size > 10 * 1024 * 1024) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('${file.name} exceeds 10MB limit'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+            continue;
+          }
+
+          // Ensure we have bytes data
+          if (kIsWeb) {
+            if (file.bytes == null) {
+              continue;
+            }
+          } else if (file.bytes == null && file.path != null) {
+            // For mobile, read bytes from path
+            try {
+              final fileBytes = await File(file.path!).readAsBytes();
+              file = PlatformFile(
+                name: file.name,
+                size: file.size,
+                bytes: fileBytes,
+                path: file.path,
+              );
+            } catch (e) {
+              continue;
+            }
+          }
+
+          validFiles.add(file);
+        }
+
         setState(() {
-          _selectedFiles = result.files;
+          _selectedFiles = validFiles;
         });
+
+        if (validFiles.isEmpty && result.files.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('No valid files selected. Please try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -105,51 +157,114 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     }
   }
 
-  Future<void> _uploadFiles() async {
-    _uploadedFiles.clear();
+  Future<List<Map<String, dynamic>>> _uploadFiles() async {
+    List<Map<String, dynamic>> uploadedFilesList = [];
+
+    // Verify authentication
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      throw Exception('User must be authenticated to upload files');
+    }
 
     for (int i = 0; i < _selectedFiles.length; i++) {
       final file = _selectedFiles[i];
 
       if (file.bytes != null) {
         try {
-          // Create file reference
-          final ref = FirebaseStorage.instance
-              .ref()
-              .child('assignments')
-              .child(widget.courseId)
-              .child('${DateTime.now().millisecondsSinceEpoch}_${file.name}');
+          setState(() {
+            _uploadStatus = 'Uploading ${file.name}...';
+          });
 
-          // Upload file
-          final uploadTask = ref.putData(file.bytes!);
+          // Create a unique file name
+          String fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+          String storagePath = 'assignments/${widget.courseId}/$fileName';
+
+          // Create file reference
+          final ref = FirebaseStorage.instance.ref().child(storagePath);
+
+          // Set metadata
+          final metadata = SettableMetadata(
+            contentType: _getContentType(file.extension ?? ''),
+            customMetadata: {
+              'uploadedBy': currentUser.uid,
+              'originalName': file.name,
+              'courseId': widget.courseId,
+              'type': 'assignment_attachment',
+            },
+          );
+
+          // Upload file with metadata
+          final uploadTask = ref.putData(file.bytes!, metadata);
 
           // Monitor upload progress
-          uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
-            setState(() {
-              _uploadProgress = (i + snapshot.bytesTransferred / snapshot.totalBytes) / _selectedFiles.length;
-            });
-          });
+          uploadTask.snapshotEvents.listen(
+                (TaskSnapshot snapshot) {
+              setState(() {
+                _uploadProgress = (i + snapshot.bytesTransferred / snapshot.totalBytes) / _selectedFiles.length;
+              });
+            },
+            onError: (error) {
+              // Handle error silently
+            },
+          );
 
           // Wait for upload to complete
           final snapshot = await uploadTask;
           final downloadUrl = await snapshot.ref.getDownloadURL();
 
-          // Add to uploaded files list with proper structure
-          _uploadedFiles.add({
+          // Add to uploaded files list
+          uploadedFilesList.add({
             'url': downloadUrl,
             'name': file.name,
             'size': file.size.toString(),
+            'uploadedAt': Timestamp.now(),
+            'storagePath': ref.fullPath,
           });
 
-          print('File uploaded successfully: ${file.name}');
         } catch (e) {
-          print('Error uploading file ${file.name}: $e');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to upload ${file.name}: ${e.toString()}'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 5),
+            ),
+          );
           throw Exception('Failed to upload ${file.name}: $e');
         }
       }
     }
 
-    print('Total files uploaded: ${_uploadedFiles.length}');
+    return uploadedFilesList;
+  }
+
+  String _getContentType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'ppt':
+        return 'application/vnd.ms-powerpoint';
+      case 'pptx':
+        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'txt':
+        return 'text/plain';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'zip':
+        return 'application/zip';
+      default:
+        return 'application/octet-stream';
+    }
   }
 
   Future<void> _saveAssignment() async {
@@ -168,41 +283,21 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     setState(() {
       _isLoading = true;
       _uploadProgress = 0;
+      _uploadStatus = '';
     });
 
     try {
-      // DEBUG: Check selected files
-      print('Selected files count: ${_selectedFiles.length}');
-      print('Existing files count: ${_existingFiles.length}');
-
       // Upload new files if any
+      List<Map<String, dynamic>> newlyUploadedFiles = [];
       if (_selectedFiles.isNotEmpty) {
-        await _uploadFiles();
-        print('Uploaded files count: ${_uploadedFiles.length}');
+        newlyUploadedFiles = await _uploadFiles();
       }
 
-      // Combine existing and new files - ensure proper format
-      final List<Map<String, dynamic>> allFiles = [];
-
-      // Add existing files
-      for (var file in _existingFiles) {
-        allFiles.add({
-          'url': file['url'] ?? '',
-          'name': file['name'] ?? 'Unknown file',
-          'size': file['size']?.toString() ?? '0',
-        });
-      }
-
-      // Add newly uploaded files
-      for (var file in _uploadedFiles) {
-        allFiles.add({
-          'url': file['url'],
-          'name': file['name'],
-          'size': file['size'],
-        });
-      }
-
-      print('Total files to save: ${allFiles.length}');
+      // Combine existing and new files
+      final List<Map<String, dynamic>> allFiles = [
+        ..._existingFiles,
+        ...newlyUploadedFiles,
+      ];
 
       // Prepare due date time
       final dueDateTime = DateTime(
@@ -233,7 +328,13 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         'lecturerId': FirebaseAuth.instance.currentUser?.uid,
         'lecturerName': widget.courseData['lecturerName'],
         'updatedAt': FieldValue.serverTimestamp(),
-        'attachments': allFiles,  // This will now be properly formatted
+        'attachments': allFiles.map((file) => {
+          'url': file['url'],
+          'name': file['name'],
+          'size': file['size'],
+          'uploadedAt': file['uploadedAt'],
+          'storagePath': file['storagePath'] ?? '',
+        }).toList(),
       };
 
       // If creating new assignment, add creation fields
@@ -243,7 +344,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         assignmentData['isActive'] = true;
       }
 
-      // Save or update assignment
+      // Save or update assignment in Firestore
       if (widget.editMode && widget.assignmentId != null) {
         // Update existing assignment
         await FirebaseFirestore.instance
@@ -282,7 +383,6 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       // Navigate back
       Navigator.pop(context, true);
     } catch (e) {
-      print('Error saving assignment: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error ${widget.editMode ? 'updating' : 'creating'} assignment: $e'),
@@ -292,6 +392,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     } finally {
       setState(() {
         _isLoading = false;
+        _uploadStatus = '';
       });
     }
   }
@@ -368,7 +469,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            widget.courseData['title'] ?? widget.courseData['name'] ?? 'Lecturer',
+                            widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
@@ -540,39 +641,31 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                     ),
                     SizedBox(height: 16),
 
-                    // Points and Due Date Row
-                    Row(
-                      children: [
-                        // Points
-                        Expanded(
-                          child: TextFormField(
-                            controller: _pointsController,
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(
-                              labelText: 'Points',
-                              hintText: '100',
-                              prefixIcon: Icon(Icons.grade, color: Colors.purple[400]),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.purple[400]!, width: 2),
-                              ),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Enter points';
-                              }
-                              if (int.tryParse(value) == null) {
-                                return 'Invalid number';
-                              }
-                              return null;
-                            },
-                          ),
+                    // Points
+                    TextFormField(
+                      controller: _pointsController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'Points',
+                        hintText: '100',
+                        prefixIcon: Icon(Icons.grade, color: Colors.purple[400]),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        SizedBox(width: 12),
-                      ],
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.purple[400]!, width: 2),
+                        ),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Enter points';
+                        }
+                        if (int.tryParse(value) == null) {
+                          return 'Invalid number';
+                        }
+                        return null;
+                      },
                     ),
                     SizedBox(height: 16),
 
@@ -673,7 +766,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                     ),
                     SizedBox(height: 8),
                     Text(
-                      'Optional: Attach reference materials or examples',
+                      'Optional: Attach reference materials or examples (Max 10MB per file)',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey[600],
@@ -841,7 +934,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
               SizedBox(height: 24),
 
               // Upload Progress
-              if (_isLoading && _uploadProgress > 0)
+              if (_isLoading && (_uploadProgress > 0 || _uploadStatus.isNotEmpty))
                 Container(
                   padding: EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -859,25 +952,27 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Uploading files...',
+                        _uploadStatus.isNotEmpty ? _uploadStatus : 'Processing...',
                         style: TextStyle(
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      SizedBox(height: 8),
-                      LinearProgressIndicator(
-                        value: _uploadProgress,
-                        backgroundColor: Colors.grey[200],
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        '${(_uploadProgress * 100).toStringAsFixed(0)}%',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
+                      if (_uploadProgress > 0) ...[
+                        SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          value: _uploadProgress,
+                          backgroundColor: Colors.grey[200],
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
                         ),
-                      ),
+                        SizedBox(height: 4),
+                        Text(
+                          '${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -928,7 +1023,13 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   }
 
   IconData _getFileIcon(String extension) {
-    switch (extension.toLowerCase()) {
+    // Check if extension contains the file name
+    String ext = extension.toLowerCase();
+    if (ext.contains('.')) {
+      ext = ext.split('.').last;
+    }
+
+    switch (ext) {
       case 'pdf':
         return Icons.picture_as_pdf;
       case 'doc':
@@ -947,6 +1048,8 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       case 'zip':
       case 'rar':
         return Icons.folder_zip;
+      case 'txt':
+        return Icons.text_snippet;
       default:
         return Icons.insert_drive_file;
     }
