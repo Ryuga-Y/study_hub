@@ -110,14 +110,18 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
       // Load submission history
       await _loadSubmissionHistory();
 
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     } catch (e) {
       print('Error loading data: $e');
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -135,14 +139,16 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
           .orderBy('submittedAt', descending: true)
           .get();
 
-      setState(() {
-        submissionHistory = historySnapshot.docs.map((doc) {
-          return {
-            'id': doc.id,
-            ...doc.data(),
-          };
-        }).toList();
-      });
+      if (mounted) {
+        setState(() {
+          submissionHistory = historySnapshot.docs.map((doc) {
+            return {
+              'id': doc.id,
+              ...doc.data(),
+            };
+          }).toList();
+        });
+      }
     } catch (e) {
       print('Error loading submission history: $e');
     }
@@ -227,34 +233,42 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         'status': 'graded',
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Evaluation saved successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Evaluation saved successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
 
-      Navigator.pop(context, true);
+        Navigator.pop(context, true);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error saving evaluation: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving evaluation: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
   Future<void> _launchUrl(String url) async {
     final Uri uri = Uri.parse(url);
     if (!await launchUrl(uri)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open file')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open file')),
+        );
+      }
     }
   }
 
@@ -270,6 +284,10 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         ),
       );
     }
+
+    // Fixed null safety issue
+    final studentName = widget.submissionData['studentName'] ?? 'Unknown Student';
+    final studentInitial = studentName.isNotEmpty ? studentName.substring(0, 1).toUpperCase() : 'S';
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -315,7 +333,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                 CircleAvatar(
                   backgroundColor: Colors.purple[400],
                   child: Text(
-                    widget.submissionData['studentName'].substring(0, 1).toUpperCase(),
+                    studentInitial,
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -325,14 +343,14 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.submissionData['studentName'],
+                        studentName,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
                       ),
                       Text(
-                        'ID: ${widget.submissionData['studentId']} • ${widget.submissionData['studentEmail']}',
+                        'ID: ${widget.submissionData['studentId'] ?? 'N/A'} • ${widget.submissionData['studentEmail'] ?? 'No email'}',
                         style: TextStyle(
                           color: Colors.grey[600],
                           fontSize: 14,
@@ -373,7 +391,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 5,
                   offset: Offset(0, 2),
                 ),
@@ -456,7 +474,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 10,
             offset: Offset(0, 5),
           ),
@@ -474,7 +492,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        criterion['name'],
+                        criterion['name'] ?? 'Criterion',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -502,7 +520,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    '${criterion['weight']}%',
+                    '${criterion['weight'] ?? 0}%',
                     style: TextStyle(
                       color: Colors.purple[700],
                       fontWeight: FontWeight.bold,
@@ -559,7 +577,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                               Row(
                                 children: [
                                   Text(
-                                    level['name'],
+                                    level['name'] ?? 'Level',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       color: isSelected ? Colors.purple[700] : null,
@@ -573,7 +591,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Text(
-                                      '${level['points']} pts',
+                                      '${level['points'] ?? 0} pts',
                                       style: TextStyle(
                                         color: Colors.white,
                                         fontSize: 12,
@@ -624,7 +642,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
@@ -674,7 +692,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
@@ -739,7 +757,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
@@ -792,7 +810,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
@@ -822,7 +840,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                 ),
                 _buildDetailRow(
                   'Version',
-                  'Version ${submissionHistory.indexOf(submissionHistory.firstWhere((s) => s['id'] == widget.submissionId)) + 1} of ${submissionHistory.length}',
+                  'Version ${submissionHistory.indexOf(submissionHistory.firstWhere((s) => s['id'] == widget.submissionId, orElse: () => {'id': ''})) + 1} of ${submissionHistory.length}',
                   Icons.history,
                 ),
                 if (fileUrl != null)
@@ -875,7 +893,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),

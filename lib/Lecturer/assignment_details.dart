@@ -77,14 +77,18 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
         await _loadSubmissions();
       }
 
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     } catch (e) {
       print('Error loading data: $e');
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -103,12 +107,14 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           .doc('main')
           .get();
 
-      setState(() {
-        hasRubric = rubricDoc.exists;
-        if (rubricDoc.exists) {
-          rubricData = rubricDoc.data();
-        }
-      });
+      if (mounted) {
+        setState(() {
+          hasRubric = rubricDoc.exists;
+          if (rubricDoc.exists) {
+            rubricData = rubricDoc.data();
+          }
+        });
+      }
     } catch (e) {
       print('Error checking rubric: $e');
     }
@@ -167,9 +173,11 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
         }
       }
 
-      setState(() {
-        submissions = loadedSubmissions;
-      });
+      if (mounted) {
+        setState(() {
+          submissions = loadedSubmissions;
+        });
+      }
     } catch (e) {
       print('Error loading submissions: $e');
     }
@@ -192,7 +200,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       ),
     );
 
-    if (result == true) {
+    if (result == true && mounted) {
       // Reload assignment data
       await _reloadAssignmentData();
       await _loadSubmissions();
@@ -214,27 +222,25 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           .doc(assignmentData['id'])
           .get();
 
-      if (assignmentDoc.exists) {
+      if (assignmentDoc.exists && mounted) {
         setState(() {
           // Update the assignment data
           assignmentData = {
             'id': assignmentDoc.id,
             ...assignmentDoc.data()!,
           };
-
-          // Also update the widget's assignment data
-          widget.assignment.clear();
-          widget.assignment.addAll(assignmentData);
         });
       }
     } catch (e) {
       print('Error reloading assignment: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error reloading assignment data'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error reloading assignment data'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -249,7 +255,11 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           organizationCode: organizationCode!,
         ),
       ),
-    ).then((_) => _checkRubric());
+    ).then((_) {
+      if (mounted) {
+        _checkRubric();
+      }
+    });
   }
 
   void _navigateToEvaluation(Map<String, dynamic> submission) {
@@ -266,7 +276,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
         ),
       ),
     ).then((result) {
-      if (result == true) {
+      if (result == true && mounted) {
         _loadSubmissions();
       }
     });
@@ -337,20 +347,24 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
             .doc(assignmentData['id'])
             .delete();
 
-        Navigator.pop(context, true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Assignment deleted successfully'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        if (mounted) {
+          Navigator.pop(context, true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Assignment deleted successfully'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error deleting assignment: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error deleting assignment: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -359,14 +373,18 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     try {
       final Uri uri = Uri.parse(url);
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open file')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not open file')),
+          );
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error opening file: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error opening file: $e')),
+        );
+      }
     }
   }
 
@@ -1133,7 +1151,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                   CircleAvatar(
                     backgroundColor: Colors.purple[100],
                     child: Text(
-                      submission['studentName'].substring(0, 1).toUpperCase(),
+                      (submission['studentName'] ?? 'S').substring(0, 1).toUpperCase(),
                       style: TextStyle(
                         color: Colors.purple[600],
                         fontWeight: FontWeight.bold,
@@ -1146,7 +1164,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          submission['studentName'],
+                          submission['studentName'] ?? 'Unknown Student',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,

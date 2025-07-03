@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/custom_widgets.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File;
+import 'dart:async';
 
 class CreateAssignmentPage extends StatefulWidget {
   final String courseId;
@@ -41,6 +42,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   List<Map<String, dynamic>> _existingFiles = [];
   double _uploadProgress = 0;
   String _uploadStatus = '';
+  StreamSubscription? _uploadSubscription;
 
   @override
   void initState() {
@@ -68,7 +70,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
           (widget.assignmentData!['attachments'] as List).map((attachment) => {
             'url': attachment['url'] ?? '',
             'name': attachment['name'] ?? 'Unknown file',
-            'size': attachment['size']?.toString() ?? '0',
+            'size': attachment['size'] is int ? attachment['size'] : int.tryParse(attachment['size']?.toString() ?? '0') ?? 0,
             'uploadedAt': attachment['uploadedAt'] ?? Timestamp.now(),
             'storagePath': attachment['storagePath'] ?? '',
           }),
@@ -83,6 +85,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     _descriptionController.dispose();
     _instructionsController.dispose();
     _pointsController.dispose();
+    _uploadSubscription?.cancel();
     super.dispose();
   }
 
@@ -102,12 +105,14 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         for (var file in result.files) {
           // Check file size
           if (file.size > 10 * 1024 * 1024) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${file.name} exceeds 10MB limit'),
-                backgroundColor: Colors.orange,
-              ),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${file.name} exceeds 10MB limit'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            }
             continue;
           }
 
@@ -134,26 +139,30 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
           validFiles.add(file);
         }
 
-        setState(() {
-          _selectedFiles = validFiles;
-        });
+        if (mounted) {
+          setState(() {
+            _selectedFiles = validFiles;
+          });
 
-        if (validFiles.isEmpty && result.files.isNotEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('No valid files selected. Please try again.'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          if (validFiles.isEmpty && result.files.isNotEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('No valid files selected. Please try again.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error selecting files: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error selecting files: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -171,9 +180,11 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
 
       if (file.bytes != null) {
         try {
-          setState(() {
-            _uploadStatus = 'Uploading ${file.name}...';
-          });
+          if (mounted) {
+            setState(() {
+              _uploadStatus = 'Uploading ${file.name}...';
+            });
+          }
 
           // Create a unique file name
           String fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
@@ -197,11 +208,14 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
           final uploadTask = ref.putData(file.bytes!, metadata);
 
           // Monitor upload progress
-          uploadTask.snapshotEvents.listen(
+          _uploadSubscription?.cancel();
+          _uploadSubscription = uploadTask.snapshotEvents.listen(
                 (TaskSnapshot snapshot) {
-              setState(() {
-                _uploadProgress = (i + snapshot.bytesTransferred / snapshot.totalBytes) / _selectedFiles.length;
-              });
+              if (mounted) {
+                setState(() {
+                  _uploadProgress = (i + snapshot.bytesTransferred / snapshot.totalBytes) / _selectedFiles.length;
+                });
+              }
             },
             onError: (error) {
               // Handle error silently
@@ -216,19 +230,21 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
           uploadedFilesList.add({
             'url': downloadUrl,
             'name': file.name,
-            'size': file.size.toString(),
+            'size': file.size,
             'uploadedAt': Timestamp.now(),
             'storagePath': ref.fullPath,
           });
 
         } catch (e) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to upload ${file.name}: ${e.toString()}'),
-              backgroundColor: Colors.red,
-              duration: Duration(seconds: 5),
-            ),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to upload ${file.name}: ${e.toString()}'),
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
           throw Exception('Failed to upload ${file.name}: $e');
         }
       }
@@ -308,8 +324,8 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         _dueTime?.minute ?? 59,
       );
 
-      // Get organization code
-      final organizationCode = widget.courseData['organizationCode'] ?? widget.courseData['organizationId'];
+      // Get organization code - standardize on 'organizationCode'
+      final organizationCode = widget.courseData['organizationCode'];
 
       if (organizationCode == null) {
         throw Exception('Organization code not found');
@@ -356,12 +372,14 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
             .doc(widget.assignmentId)
             .update(assignmentData);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Assignment updated successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Assignment updated successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       } else {
         // Create new assignment
         await FirebaseFirestore.instance
@@ -372,28 +390,36 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
             .collection('assignments')
             .add(assignmentData);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Assignment created successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Assignment created successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       }
 
       // Navigate back
-      Navigator.pop(context, true);
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error ${widget.editMode ? 'updating' : 'creating'} assignment: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error ${widget.editMode ? 'updating' : 'creating'} assignment: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-        _uploadStatus = '';
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _uploadStatus = '';
+        });
+      }
     }
   }
 
@@ -405,7 +431,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       lastDate: DateTime.now().add(Duration(days: 365)),
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _dueDate = picked;
       });
@@ -418,7 +444,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       initialTime: _dueTime ?? TimeOfDay(hour: 23, minute: 59),
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _dueTime = picked;
       });

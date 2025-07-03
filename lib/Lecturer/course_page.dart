@@ -44,7 +44,9 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
-      setState(() {}); // Rebuild to update FAB visibility
+      if (mounted) {
+        setState(() {}); // Rebuild to update FAB visibility
+      }
     });
     _loadData();
   }
@@ -70,11 +72,13 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         return;
       }
 
-      setState(() {
-        _organizationCode = userData['organizationCode'];
-        _lecturerFacultyId = userData['facultyId'];
-        isLecturer = userData['role'] == 'lecturer' && widget.courseData['lecturerId'] == user.uid;
-      });
+      if (mounted) {
+        setState(() {
+          _organizationCode = userData['organizationCode'];
+          _lecturerFacultyId = userData['facultyId'];
+          isLecturer = userData['role'] == 'lecturer' && widget.courseData['lecturerId'] == user.uid;
+        });
+      }
 
       // Load course content
       await Future.wait([
@@ -84,14 +88,18 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         if (isLecturer) _fetchFacultyStudents(),
       ]);
 
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        errorMessage = 'Error loading data: $e';
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          errorMessage = 'Error loading data: $e';
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -108,14 +116,16 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           .orderBy('createdAt', descending: true)
           .get();
 
-      setState(() {
-        assignments = assignmentQuery.docs.map((doc) {
-          return {
-            'id': doc.id,
-            ...doc.data(),
-          };
-        }).toList();
-      });
+      if (mounted) {
+        setState(() {
+          assignments = assignmentQuery.docs.map((doc) {
+            return {
+              'id': doc.id,
+              ...doc.data(),
+            };
+          }).toList();
+        });
+      }
     } catch (e) {
       print('Error fetching assignments: $e');
     }
@@ -134,14 +144,16 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           .orderBy('createdAt', descending: true)
           .get();
 
-      setState(() {
-        materials = materialQuery.docs.map((doc) {
-          return {
-            'id': doc.id,
-            ...doc.data(),
-          };
-        }).toList();
-      });
+      if (mounted) {
+        setState(() {
+          materials = materialQuery.docs.map((doc) {
+            return {
+              'id': doc.id,
+              ...doc.data(),
+            };
+          }).toList();
+        });
+      }
     } catch (e) {
       print('Error fetching materials: $e');
     }
@@ -178,9 +190,11 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         }
       }
 
-      setState(() {
-        enrolledStudents = students;
-      });
+      if (mounted) {
+        setState(() {
+          enrolledStudents = students;
+        });
+      }
     } catch (e) {
       print('Error fetching enrolled students: $e');
     }
@@ -198,16 +212,18 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           .where('isActive', isEqualTo: true)
           .get();
 
-      setState(() {
-        facultyStudents = studentsQuery.docs.map((doc) {
-          return {
-            'id': doc.id,
-            'fullName': doc.data()['fullName'] ?? 'Unknown Student',
-            'email': doc.data()['email'] ?? 'No email',
-            'studentId': doc.data()['studentId'] ?? '',
-          };
-        }).toList();
-      });
+      if (mounted) {
+        setState(() {
+          facultyStudents = studentsQuery.docs.map((doc) {
+            return {
+              'id': doc.id,
+              'fullName': doc.data()['fullName'] ?? 'Unknown Student',
+              'email': doc.data()['email'] ?? 'No email',
+              'studentId': doc.data()['studentId'] ?? '',
+            };
+          }).toList();
+        });
+      }
     } catch (e) {
       print('Error fetching faculty students: $e');
     }
@@ -231,13 +247,13 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           courseId: widget.courseId,
           courseData: {
             ...widget.courseData,
-            'organizationCode': _organizationCode, // Add this line
+            'organizationCode': _organizationCode,
           },
         ),
       ),
     );
 
-    if (result == true) {
+    if (result == true && mounted) {
       _fetchAssignments();
     }
   }
@@ -254,13 +270,13 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           courseId: widget.courseId,
           courseData: {
             ...widget.courseData,
-            'organizationCode': _organizationCode, // Add this line
+            'organizationCode': _organizationCode,
           },
         ),
       ),
     );
 
-    if (result == true) {
+    if (result == true && mounted) {
       _fetchMaterials();
     }
   }
@@ -360,7 +376,9 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       ),
     ).then((_) {
       // Reload enrolled students after dialog closes
-      _fetchEnrolledStudents();
+      if (mounted) {
+        _fetchEnrolledStudents();
+      }
     });
   }
 
@@ -411,18 +429,18 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                   leading: CircleAvatar(
                     backgroundColor: Colors.purple[100],
                     child: Text(
-                      student['fullName'].substring(0, 1).toUpperCase(),
+                      (student['fullName'] ?? 'S').substring(0, 1).toUpperCase(),
                       style: TextStyle(
                         color: Colors.purple[600],
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
-                  title: Text(student['fullName']),
+                  title: Text(student['fullName'] ?? 'Unknown Student'),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(student['email']),
+                      Text(student['email'] ?? 'No email'),
                       if (student['studentId'].toString().isNotEmpty)
                         Text(
                           'ID: ${student['studentId']}',
@@ -496,9 +514,11 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                       .get();
 
                   if (studentQuery.docs.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Student not found in your organization')),
-                    );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Student not found in your organization')),
+                      );
+                    }
                     return;
                   }
 
@@ -508,9 +528,11 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                   await _enrollStudent(studentId, studentName);
                   emailController.clear();
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: ${e.toString()}')),
-                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: ${e.toString()}')),
+                    );
+                  }
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -541,9 +563,11 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           .get();
 
       if (existingEnrollment.docs.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$studentName is already enrolled in this course')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$studentName is already enrolled in this course')),
+          );
+        }
         return;
       }
 
@@ -570,19 +594,23 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         'enrolledCount': FieldValue.increment(1),
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$studentName enrolled successfully'),
-          backgroundColor: Colors.green[600],
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$studentName enrolled successfully'),
+            backgroundColor: Colors.green[600],
+          ),
+        );
+      }
 
       // Refresh enrolled students
       _fetchEnrolledStudents();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error enrolling student: ${e.toString()}')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error enrolling student: ${e.toString()}')),
+        );
+      }
     }
   }
 
@@ -627,18 +655,22 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                   'enrolledCount': FieldValue.increment(-1),
                 });
 
-                Navigator.pop(context);
-                _fetchEnrolledStudents();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Student removed successfully'),
-                    backgroundColor: Colors.orange,
-                  ),
-                );
+                if (mounted) {
+                  Navigator.pop(context);
+                  _fetchEnrolledStudents();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Student removed successfully'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error removing student: $e')),
-                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error removing student: $e')),
+                  );
+                }
               }
             },
             style: ElevatedButton.styleFrom(
@@ -1258,7 +1290,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         leading: CircleAvatar(
           backgroundColor: Colors.purple[100],
           child: Text(
-            student['fullName'].toString().substring(0, 1).toUpperCase(),
+            (student['fullName'] ?? 'S').substring(0, 1).toUpperCase(),
             style: TextStyle(
               color: Colors.purple[600],
               fontWeight: FontWeight.bold,
@@ -1702,16 +1734,20 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             .delete();
 
         _fetchAssignments();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Assignment deleted'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Assignment deleted'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting assignment: $e')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error deleting assignment: $e')),
+          );
+        }
       }
     }
   }
@@ -1756,16 +1792,20 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             .delete();
 
         _fetchMaterials();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Material deleted'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Material deleted'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting material: $e')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error deleting material: $e')),
+          );
+        }
       }
     }
   }

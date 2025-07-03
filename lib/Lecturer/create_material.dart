@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/custom_widgets.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File, Platform;
+import 'dart:async';
 
 class CreateMaterialPage extends StatefulWidget {
   final String courseId;
@@ -41,6 +42,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   List<Map<String, dynamic>> _existingFiles = [];
   double _uploadProgress = 0;
   String _uploadStatus = '';
+  StreamSubscription? _uploadSubscription;
 
   @override
   void initState() {
@@ -71,7 +73,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           (widget.materialData!['files'] as List).map((file) => {
             'url': file['url'] ?? '',
             'name': file['name'] ?? 'Unknown file',
-            'size': file['size']?.toString() ?? '0',
+            'size': file['size'] is int ? file['size'] : int.tryParse(file['size']?.toString() ?? '0') ?? 0,
             'uploadedAt': file['uploadedAt'] ?? Timestamp.now(),
             'storagePath': file['storagePath'] ?? '',
           }),
@@ -85,6 +87,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
     _titleController.dispose();
     _descriptionController.dispose();
     _instructionsController.dispose();
+    _uploadSubscription?.cancel();
     super.dispose();
   }
 
@@ -104,12 +107,14 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         for (var file in result.files) {
           // Check file size
           if (file.size > 10 * 1024 * 1024) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${file.name} exceeds 10MB limit'),
-                backgroundColor: Colors.orange,
-              ),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${file.name} exceeds 10MB limit'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            }
             continue;
           }
 
@@ -136,26 +141,30 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           validFiles.add(file);
         }
 
-        setState(() {
-          _selectedFiles = validFiles;
-        });
+        if (mounted) {
+          setState(() {
+            _selectedFiles = validFiles;
+          });
 
-        if (validFiles.isEmpty && result.files.isNotEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('No valid files selected. Please try again.'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          if (validFiles.isEmpty && result.files.isNotEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('No valid files selected. Please try again.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error selecting files: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error selecting files: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -173,9 +182,11 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
 
       if (file.bytes != null) {
         try {
-          setState(() {
-            _uploadStatus = 'Uploading ${file.name}...';
-          });
+          if (mounted) {
+            setState(() {
+              _uploadStatus = 'Uploading ${file.name}...';
+            });
+          }
 
           // Create a unique file name
           String fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
@@ -201,11 +212,14 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           final uploadTask = ref.putData(file.bytes!, metadata);
 
           // Monitor upload progress
-          uploadTask.snapshotEvents.listen(
+          _uploadSubscription?.cancel();
+          _uploadSubscription = uploadTask.snapshotEvents.listen(
                 (TaskSnapshot snapshot) {
-              setState(() {
-                _uploadProgress = (i + snapshot.bytesTransferred / snapshot.totalBytes) / _selectedFiles.length;
-              });
+              if (mounted) {
+                setState(() {
+                  _uploadProgress = (i + snapshot.bytesTransferred / snapshot.totalBytes) / _selectedFiles.length;
+                });
+              }
             },
             onError: (error) {
               // Handle error silently
@@ -220,19 +234,21 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           uploadedFilesList.add({
             'url': downloadUrl,
             'name': file.name,
-            'size': file.size.toString(),
+            'size': file.size,
             'uploadedAt': Timestamp.now(),
             'storagePath': ref.fullPath,
           });
 
         } catch (e) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to upload ${file.name}: ${e.toString()}'),
-              backgroundColor: Colors.red,
-              duration: Duration(seconds: 5),
-            ),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to upload ${file.name}: ${e.toString()}'),
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
           throw Exception('Failed to upload ${file.name}: $e');
         }
       }
@@ -352,7 +368,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         materialData['isActive'] = true;
       }
 
-      final organizationCode = widget.courseData['organizationCode'] ?? widget.courseData['organizationId'];
+      // Standardize on organizationCode
+      final organizationCode = widget.courseData['organizationCode'];
 
       if (organizationCode == null) {
         throw Exception('Organization code not found');
@@ -370,12 +387,14 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             .doc(widget.materialId)
             .update(materialData);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Material updated successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Material updated successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       } else {
         // Create new material
         await FirebaseFirestore.instance
@@ -386,28 +405,36 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             .collection('materials')
             .add(materialData);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Material created successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Material created successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       }
 
       // Navigate back
-      Navigator.pop(context, true);
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error ${widget.editMode ? 'updating' : 'creating'} material: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error ${widget.editMode ? 'updating' : 'creating'} material: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-        _uploadStatus = '';
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _uploadStatus = '';
+        });
+      }
     }
   }
 
@@ -419,7 +446,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       lastDate: DateTime.now().add(Duration(days: 365)),
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _dueDate = picked;
       });
@@ -432,7 +459,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       initialTime: _dueTime ?? TimeOfDay(hour: 23, minute: 59),
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _dueTime = picked;
       });
