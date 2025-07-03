@@ -15,6 +15,7 @@ class SilverTreePainter extends CustomPainter {
   final double flowerBloom;
   final double flowerRotation;
   final double leafScale;
+  final double waterDropAnimation;
 
   SilverTreePainter({
     required this.growthLevel,
@@ -22,215 +23,156 @@ class SilverTreePainter extends CustomPainter {
     required this.flowerBloom,
     required this.flowerRotation,
     required this.leafScale,
+    this.waterDropAnimation = 0.0,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final double centerX = size.width / 2;
-    final double groundY = size.height * 0.85;
+    final double groundY = size.height * 0.9;
 
-    // Draw enhanced soil and ground
-    _drawSilverSoilAndGround(canvas, size, centerX, groundY);
+    // Draw water drop animation
+    if (waterDropAnimation > 0) {
+      _drawWaterDropAnimation(canvas, size, centerX, groundY);
+    }
 
-    // Draw enhanced tree roots
-    _drawSilverTreeRoots(canvas, size, centerX, groundY);
+    // Draw ground line only
+    _drawGroundLine(canvas, size, groundY);
 
-    // Draw the premium silver tree
+    // Draw the silver tree
     _drawSilverTree(canvas, size, centerX, groundY);
 
-    // Draw silver leaves on branch endpoints
+    // Draw silver leaves based on growth
     _drawSilverLeavesOnBranches(canvas, size, centerX, groundY);
 
-    // Draw silver flower if 100% complete
+    // Draw silver flowers if 100% complete
     if (totalGrowth >= 1.0) {
-      _drawSilverFlower(canvas, size, centerX, groundY);
+      _drawMultipleSilverFlowers(canvas, size, centerX, groundY);
     }
   }
 
-  void _drawSilverSoilAndGround(Canvas canvas, Size size, double centerX, double groundY) {
-    // Draw premium soil mound with silver tint
-    final Paint soilPaint = Paint()
-      ..color = Color(0xFF696969) // Dim gray with silver hint
+  void _drawWaterDropAnimation(Canvas canvas, Size size, double centerX, double groundY) {
+    double dropY = 30 + (waterDropAnimation * (groundY - 80));
+    double opacity = 1.0 - (waterDropAnimation * 0.7);
+
+    Paint dropPaint = Paint()
+      ..color = Colors.lightBlue[300]!.withOpacity(opacity)
       ..style = PaintingStyle.fill;
 
-    final Path soilPath = Path();
-    double soilWidth = 160; // Even bigger soil base
-    double soilHeight = 35;
+    // Draw water drop with silver tint
+    canvas.drawCircle(Offset(centerX, dropY), 9 * (1 - waterDropAnimation * 0.3), dropPaint);
 
-    // Create enhanced soil mound
-    soilPath.moveTo(centerX - soilWidth/2, groundY);
-    soilPath.quadraticBezierTo(
-        centerX - soilWidth/3, groundY - soilHeight,
-        centerX, groundY - soilHeight/2
-    );
-    soilPath.quadraticBezierTo(
-        centerX + soilWidth/3, groundY - soilHeight,
-        centerX + soilWidth/2, groundY
-    );
-    soilPath.lineTo(centerX + soilWidth/2, groundY + 18);
-    soilPath.lineTo(centerX - soilWidth/2, groundY + 18);
-    soilPath.close();
+    // Draw splash effect with silver sparkles
+    if (waterDropAnimation > 0.8) {
+      double splashRadius = 25 * (waterDropAnimation - 0.8) * 5;
+      Paint splashPaint = Paint()
+        ..color = Colors.lightBlue[200]!.withOpacity(0.4 * (1 - (waterDropAnimation - 0.8) * 5))
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5;
 
-    canvas.drawPath(soilPath, soilPaint);
+      canvas.drawCircle(Offset(centerX, groundY), splashRadius, splashPaint);
 
-    // Add silver-tinted soil texture with sparkles
-    final Paint soilTexturePaint = Paint()
-      ..color = Color(0xFF2F4F4F) // Dark slate gray
-      ..style = PaintingStyle.fill;
+      // Add silver sparkles
+      Paint sparklePaint = Paint()
+        ..color = Color(0xFFC0C0C0).withOpacity(0.6 * (1 - (waterDropAnimation - 0.8) * 5))
+        ..style = PaintingStyle.fill;
 
-    final Paint silverSparkle = Paint()
-      ..color = Color(0xFFC0C0C0) // Silver
-      ..style = PaintingStyle.fill;
-
-    for (int i = 0; i < 15; i++) {
-      double x = centerX - soilWidth/3 + (i * 12);
-      double y = groundY - 10 + (i % 5) * 4;
-      canvas.drawCircle(Offset(x, y), 3, soilTexturePaint);
-
-      // Add silver sparkles in soil
-      if (i % 3 == 0) {
-        canvas.drawCircle(Offset(x + 2, y - 1), 1.5, silverSparkle);
+      for (int i = 0; i < 6; i++) {
+        double angle = i * math.pi / 3;
+        double sparkleDistance = splashRadius * 0.8;
+        double x = centerX + sparkleDistance * math.cos(angle);
+        double y = groundY + sparkleDistance * math.sin(angle);
+        canvas.drawCircle(Offset(x, y), 2, sparklePaint);
       }
     }
+  }
 
-    // Draw premium ground line with silver accent
+  void _drawGroundLine(Canvas canvas, Size size, double groundY) {
+    // Silver-tinted ground
     final Paint groundPaint = Paint()
-      ..color = Color(0xFF708090) // Slate gray
-      ..strokeWidth = 5;
+      ..color = Color(0xFF708090)
+      ..strokeWidth = 4;
+
     canvas.drawLine(
       Offset(0, groundY),
       Offset(size.width, groundY),
       groundPaint,
     );
 
-    // Add silver ground accent line
+    // Add silver accent line
     final Paint silverAccent = Paint()
-      ..color = Color(0xFFC0C0C0) // Silver
+      ..color = Color(0xFFC0C0C0)
       ..strokeWidth = 2;
+
     canvas.drawLine(
       Offset(0, groundY - 2),
       Offset(size.width, groundY - 2),
       silverAccent,
     );
-  }
 
-  void _drawSilverTreeRoots(Canvas canvas, Size size, double centerX, double groundY) {
-    final Paint rootPaint = Paint()
-      ..color = Color(0xFF2F4F4F) // Dark slate gray
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 10; // Even thicker roots
+    // Add enhanced grass with silver tips
+    final Paint grassPaint = Paint()
+      ..color = Colors.green[600]!
+      ..strokeWidth = 2.5;
 
-    // Enhanced main roots
-    List<Offset> rootDirections = [
-      Offset(-1.4, 0.5),  // Left root
-      Offset(1.4, 0.5),   // Right root
-      Offset(-1.0, 0.7),  // Left-center root
-      Offset(1.0, 0.7),   // Right-center root
-      Offset(-0.6, 0.9),  // Additional roots
-      Offset(0.6, 0.9),
-    ];
+    final Paint silverGrassTip = Paint()
+      ..color = Color(0xFFB0C4DE)
+      ..strokeWidth = 1.5;
 
-    for (int i = 0; i < rootDirections.length; i++) {
-      Offset direction = rootDirections[i];
-      _drawSilverSingleRoot(canvas, centerX, groundY, direction, rootPaint);
-    }
+    for (int i = 0; i < size.width.toInt(); i += 12) {
+      double grassHeight = 8 + math.Random(i).nextDouble() * 12;
 
-    // Enhanced secondary roots
-    rootPaint.strokeWidth = 5;
-    List<Offset> smallRootDirections = [
-      Offset(-1.8, 0.4),
-      Offset(1.8, 0.4),
-      Offset(-0.5, 1.0),
-      Offset(0.5, 1.0),
-      Offset(-1.2, 0.8),
-      Offset(1.2, 0.8),
-    ];
+      // Main grass blade
+      canvas.drawLine(
+        Offset(i.toDouble(), groundY),
+        Offset(i.toDouble() + 2, groundY - grassHeight),
+        grassPaint,
+      );
 
-    for (int i = 0; i < smallRootDirections.length; i++) {
-      Offset direction = smallRootDirections[i];
-      _drawSilverSingleRoot(canvas, centerX, groundY, direction, rootPaint, isSmall: true);
-    }
-  }
+      // Silver tip
+      canvas.drawLine(
+        Offset(i.toDouble() + 2, groundY - grassHeight),
+        Offset(i.toDouble() + 2.5, groundY - grassHeight - 3),
+        silverGrassTip,
+      );
 
-  void _drawSilverSingleRoot(Canvas canvas, double startX, double startY, Offset direction, Paint paint, {bool isSmall = false}) {
-    double length = isSmall ? 50 : 80; // Even longer roots
-
-    Path rootPath = Path();
-    rootPath.moveTo(startX, startY);
-
-    // Create curved root
-    double midX = startX + direction.dx * length * 0.5;
-    double midY = startY + direction.dy * length * 0.5;
-    double endX = startX + direction.dx * length;
-    double endY = startY + direction.dy * length;
-
-    rootPath.quadraticBezierTo(midX, midY, endX, endY);
-    canvas.drawPath(rootPath, paint);
-
-    // Add silver root accents
-    Paint silverAccent = Paint()
-      ..color = Color(0xFF778899) // Light slate gray
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = isSmall ? 2 : 3;
-
-    Path accentPath = Path();
-    accentPath.moveTo(startX, startY);
-    accentPath.quadraticBezierTo(midX - 1, midY - 1, endX - 2, endY - 2);
-    canvas.drawPath(accentPath, silverAccent);
-
-    // Add enhanced root branches
-    if (!isSmall) {
-      Paint branchPaint = Paint()
-        ..color = paint.color
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = 4;
-
-      // Enhanced root branches
-      for (int i = 0; i < 4; i++) {
-        double branchAngle = (i - 1.5) * 0.4;
-        double branchLength = 25;
-        double branchStartX = endX - direction.dx * 20;
-        double branchStartY = endY - direction.dy * 20;
-
-        canvas.drawLine(
-          Offset(branchStartX, branchStartY),
-          Offset(
-              branchStartX + branchLength * math.cos(branchAngle),
-              branchStartY + branchLength * math.sin(branchAngle) + 10
-          ),
-          branchPaint,
-        );
-      }
+      // Second blade
+      canvas.drawLine(
+        Offset(i.toDouble() + 4, groundY),
+        Offset(i.toDouble() + 6, groundY - grassHeight * 0.8),
+        grassPaint,
+      );
     }
   }
 
   void _drawSilverTree(Canvas canvas, Size size, double centerX, double groundY) {
-    // Draw premium silver trunk
-    _drawSilverTrunk(canvas, size, centerX, groundY);
+    // Draw trunk based on growth
+    _drawSilverGrowingTrunk(canvas, size, centerX, groundY);
 
-    // Draw premium silver branches
-    _drawSilverBranches(canvas, size, centerX, groundY);
+    // Draw branches based on growth level
+    if (growthLevel > 0) {
+      _drawSilverGrowingBranches(canvas, size, centerX, groundY);
+    }
   }
 
-  void _drawSilverTrunk(Canvas canvas, Size size, double centerX, double groundY) {
+  void _drawSilverGrowingTrunk(Canvas canvas, Size size, double centerX, double groundY) {
     final Paint trunkPaint = Paint()
       ..color = Color(0xFF708090) // Slate gray (silver tone)
       ..style = PaintingStyle.fill;
 
-    double trunkHeight = size.height * 0.52; // Even taller trunk
-    double trunkBase = groundY;
-    double trunkTop = groundY - trunkHeight;
+    // Calculate trunk height based on growth - taller than bronze
+    double maxTrunkHeight = size.height * 0.52;
+    double currentTrunkHeight = maxTrunkHeight * math.min(1.0, (growthLevel + 8) / 25.0);
 
-    // Create premium silver trunk
+    double trunkBase = groundY;
+    double trunkTop = groundY - currentTrunkHeight;
+
+    // Create trunk shape that grows - wider than bronze
     final Path trunkPath = Path();
 
-    double baseWidth = 35; // Even wider trunk
-    double topWidth = 28;
+    double baseWidth = 30 * math.min(1.0, (growthLevel + 3) / 15.0);
+    double topWidth = 24 * math.min(1.0, (growthLevel + 3) / 15.0);
 
-    // Create trunk with silver characteristics
     trunkPath.moveTo(centerX - baseWidth/2, trunkBase);
     trunkPath.lineTo(centerX - topWidth/2, trunkTop);
     trunkPath.lineTo(centerX + topWidth/2, trunkTop);
@@ -240,283 +182,224 @@ class SilverTreePainter extends CustomPainter {
     canvas.drawPath(trunkPath, trunkPaint);
 
     // Add silver highlights
-    final Paint silverHighlight = Paint()
-      ..color = Color(0xFFC0C0C0) // Silver
-      ..style = PaintingStyle.fill;
+    if (growthLevel > 3) {
+      final Paint silverHighlight = Paint()
+        ..color = Color(0xFFC0C0C0)
+        ..style = PaintingStyle.fill;
 
-    final Path highlightPath = Path();
-    highlightPath.moveTo(centerX - baseWidth/2 + 3, trunkBase);
-    highlightPath.lineTo(centerX - topWidth/2 + 2, trunkTop);
-    highlightPath.lineTo(centerX - topWidth/2 + 8, trunkTop);
-    highlightPath.lineTo(centerX - baseWidth/2 + 9, trunkBase);
-    highlightPath.close();
+      final Path highlightPath = Path();
+      highlightPath.moveTo(centerX - baseWidth/2 + 3, trunkBase);
+      highlightPath.lineTo(centerX - topWidth/2 + 2, trunkTop);
+      highlightPath.lineTo(centerX - topWidth/2 + 8, trunkTop);
+      highlightPath.lineTo(centerX - baseWidth/2 + 9, trunkBase);
+      highlightPath.close();
 
-    canvas.drawPath(highlightPath, silverHighlight);
+      canvas.drawPath(highlightPath, silverHighlight);
+    }
 
-    // Add premium silver bark texture
-    _drawSilverBarkTexture(canvas, centerX, groundY, trunkHeight, baseWidth, topWidth);
+    // Add silver bark texture if trunk is developed enough
+    if (growthLevel > 8) {
+      _drawSilverBarkTexture(canvas, centerX, groundY, currentTrunkHeight, baseWidth, topWidth);
+    }
   }
 
   void _drawSilverBarkTexture(Canvas canvas, double centerX, double groundY, double trunkHeight, double baseWidth, double topWidth) {
-    // Premium silver bark lines
     final Paint darkBarkPaint = Paint()
-      ..color = Color(0xFF2F4F4F) // Dark slate gray
-      ..strokeWidth = 3
+      ..color = Color(0xFF2F4F4F)
+      ..strokeWidth = 2.5
       ..style = PaintingStyle.stroke;
 
-    final Paint lightBarkPaint = Paint()
-      ..color = Color(0xFFC0C0C0) // Silver
-      ..strokeWidth = 2
+    final Paint silverBarkPaint = Paint()
+      ..color = Color(0xFFC0C0C0)
+      ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke;
 
-    // Enhanced vertical bark ridges
-    for (int i = 0; i < 12; i++) {
-      double x = centerX - 18 + (i * 3.5);
-      double topY = groundY - trunkHeight + 25;
-      double bottomY = groundY - 10;
+    // Enhanced bark lines
+    int numLines = math.min(12, growthLevel ~/ 2);
+    for (int i = 0; i < numLines; i++) {
+      double x = centerX - baseWidth/2 + 3 + (i * (baseWidth - 6) / 12);
+      double topY = groundY - trunkHeight + 20;
+      double bottomY = groundY - 5;
 
-      // Create premium bark lines
       Path barkLine = Path();
       barkLine.moveTo(x, bottomY);
 
-      int segments = 18;
+      int segments = 12;
       for (int j = 1; j <= segments; j++) {
         double segmentY = bottomY - (bottomY - topY) * (j / segments);
-        double offset = 3 * math.sin(j * 1.0 + i * 0.7) * (1 - j/segments);
+        double offset = 2 * math.sin(j * 1.0 + i * 0.6) * (1 - j/segments);
         barkLine.lineTo(x + offset, segmentY);
       }
 
       canvas.drawPath(barkLine, darkBarkPaint);
 
-      // Add silver highlights
-      Path lightLine = Path();
-      lightLine.moveTo(x + 2.5, bottomY);
-      for (int j = 1; j <= segments; j++) {
-        double segmentY = bottomY - (bottomY - topY) * (j / segments);
-        double offset = 2.5 * math.sin(j * 0.8 + i * 0.5) * (1 - j/segments);
-        lightLine.lineTo(x + 2.5 + offset, segmentY);
-      }
-      canvas.drawPath(lightLine, lightBarkPaint);
-    }
-
-    // Premium silver bark rings
-    final Paint ringPaint = Paint()
-      ..color = Color(0xFF696969) // Dim gray
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
-
-    final Paint silverRingPaint = Paint()
-      ..color = Color(0xFFB0C4DE) // Light steel blue
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-
-    for (int i = 0; i < 15; i++) {
-      double y = groundY - (trunkHeight * 0.07 * i) - 25;
-      double width = baseWidth - (baseWidth - topWidth) * (i / 15.0);
-
-      // Create silver bark rings
-      Path ringPath = Path();
-      ringPath.moveTo(centerX - width/2 + 4, y);
-
-      int ringSegments = 24;
-      for (int j = 1; j <= ringSegments; j++) {
-        double angle = (j / ringSegments) * math.pi;
-        double radius = width/2 - 4;
-        double x = centerX + radius * math.cos(angle - math.pi/2);
-        double ringY = y + 4 * math.sin(j * 0.6);
-        ringPath.lineTo(x, ringY);
-      }
-
-      canvas.drawPath(ringPath, ringPaint);
-
-      // Add silver accent rings
+      // Add silver accent
       if (i % 2 == 0) {
-        Path silverRing = Path();
-        silverRing.moveTo(centerX - width/2 + 6, y + 1);
-        for (int j = 1; j <= ringSegments; j++) {
-          double angle = (j / ringSegments) * math.pi;
-          double radius = width/2 - 6;
-          double x = centerX + radius * math.cos(angle - math.pi/2);
-          double ringY = y + 1 + 2 * math.sin(j * 0.4);
-          silverRing.lineTo(x, ringY);
+        Path silverLine = Path();
+        silverLine.moveTo(x + 1, bottomY);
+        for (int j = 1; j <= segments; j++) {
+          double segmentY = bottomY - (bottomY - topY) * (j / segments);
+          double offset = 1.5 * math.sin(j * 0.8 + i * 0.4) * (1 - j/segments);
+          silverLine.lineTo(x + 1 + offset, segmentY);
         }
-        canvas.drawPath(silverRing, silverRingPaint);
+        canvas.drawPath(silverLine, silverBarkPaint);
       }
     }
   }
 
-  void _drawSilverBranches(Canvas canvas, Size size, double centerX, double groundY) {
-    double trunkHeight = size.height * 0.52;
-    double trunkTop = groundY - trunkHeight;
+  void _drawSilverGrowingBranches(Canvas canvas, Size size, double centerX, double groundY) {
+    double maxTrunkHeight = size.height * 0.52;
+    double currentTrunkHeight = maxTrunkHeight * math.min(1.0, (growthLevel + 8) / 25.0);
+    double trunkTop = groundY - currentTrunkHeight;
 
-    final Paint mainBranchPaint = Paint()
-      ..color = Color(0xFF708090) // Slate gray
+    final Paint branchPaint = Paint()
+      ..color = Color(0xFF708090)
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
-    // Draw premium silver branches based on growth level
-    if (growthLevel >= 5) _drawSilverMainBranches(canvas, centerX, trunkTop, mainBranchPaint);
-    if (growthLevel >= 15) _drawSilverSecondaryBranches(canvas, centerX, trunkTop, mainBranchPaint);
-    if (growthLevel >= 25) _drawSilverDetailBranches(canvas, centerX, trunkTop, mainBranchPaint);
-    if (growthLevel >= 35) _drawSilverFineBranches(canvas, centerX, trunkTop, mainBranchPaint);
+    // Draw branches progressively - more elaborate than bronze
+    if (growthLevel >= 3) _drawSilverMainBranches(canvas, centerX, trunkTop, branchPaint, growthLevel);
+    if (growthLevel >= 12) _drawSilverSecondaryBranches(canvas, centerX, trunkTop, branchPaint, growthLevel);
+    if (growthLevel >= 22) _drawSilverDetailBranches(canvas, centerX, trunkTop, branchPaint, growthLevel);
+    if (growthLevel >= 32) _drawSilverFineBranches(canvas, centerX, trunkTop, branchPaint, growthLevel);
   }
 
-  void _drawSilverMainBranches(Canvas canvas, double centerX, double trunkTop, Paint paint) {
-    paint.strokeWidth = 14; // Even thicker main branches
+  void _drawSilverMainBranches(Canvas canvas, double centerX, double trunkTop, Paint paint, int growth) {
+    paint.strokeWidth = 10; // Thicker than bronze
 
-    // Premium main silver branches
-    _drawSilverBranchPath(canvas, paint, [
-      Offset(centerX - 5, trunkTop + 35),
-      Offset(centerX - 30, trunkTop + 10),
-      Offset(centerX - 65, trunkTop - 20),
-      Offset(centerX - 100, trunkTop - 45),
-      Offset(centerX - 130, trunkTop - 55),
-    ]);
+    List<List<Offset>> mainBranches = [];
 
-    _drawSilverBranchPath(canvas, paint, [
-      Offset(centerX + 5, trunkTop + 30),
-      Offset(centerX + 35, trunkTop + 5),
-      Offset(centerX + 70, trunkTop - 28),
-      Offset(centerX + 105, trunkTop - 45),
-      Offset(centerX + 140, trunkTop - 55),
-    ]);
+    // Early main branches
+    if (growth >= 3) {
+      mainBranches.addAll([
+        [Offset(centerX - 4, trunkTop + 20), Offset(centerX - 20, trunkTop + 8), Offset(centerX - 40, trunkTop - 12)],
+        [Offset(centerX + 4, trunkTop + 20), Offset(centerX + 20, trunkTop + 8), Offset(centerX + 40, trunkTop - 12)],
+      ]);
+    }
 
-    // Enhanced upper main branches
-    _drawSilverBranchPath(canvas, paint, [
-      Offset(centerX - 4, trunkTop + 18),
-      Offset(centerX - 25, trunkTop - 20),
-      Offset(centerX - 55, trunkTop - 50),
-      Offset(centerX - 80, trunkTop - 85),
-    ]);
+    if (growth >= 6) {
+      mainBranches.addAll([
+        [Offset(centerX - 40, trunkTop - 12), Offset(centerX - 60, trunkTop - 25), Offset(centerX - 80, trunkTop - 35)],
+        [Offset(centerX + 40, trunkTop - 12), Offset(centerX + 60, trunkTop - 25), Offset(centerX + 80, trunkTop - 35)],
+      ]);
+    }
 
-    _drawSilverBranchPath(canvas, paint, [
-      Offset(centerX + 4, trunkTop + 10),
-      Offset(centerX + 28, trunkTop - 15),
-      Offset(centerX + 60, trunkTop - 45),
-      Offset(centerX + 85, trunkTop - 80),
-    ]);
+    if (growth >= 9) {
+      mainBranches.addAll([
+        [Offset(centerX - 3, trunkTop + 8), Offset(centerX - 15, trunkTop - 20), Offset(centerX - 30, trunkTop - 45)],
+        [Offset(centerX + 3, trunkTop + 8), Offset(centerX + 15, trunkTop - 20), Offset(centerX + 30, trunkTop - 45)],
+        [Offset(centerX, trunkTop), Offset(centerX - 5, trunkTop - 30), Offset(centerX - 10, trunkTop - 60)],
+        [Offset(centerX, trunkTop), Offset(centerX + 5, trunkTop - 30), Offset(centerX + 10, trunkTop - 60)],
+      ]);
+    }
 
-    // Premium central branches
-    _drawSilverBranchPath(canvas, paint, [
-      Offset(centerX - 3, trunkTop + 5),
-      Offset(centerX - 15, trunkTop - 35),
-      Offset(centerX - 25, trunkTop - 70),
-      Offset(centerX - 30, trunkTop - 100),
-    ]);
-
-    _drawSilverBranchPath(canvas, paint, [
-      Offset(centerX + 3, trunkTop - 5),
-      Offset(centerX + 18, trunkTop - 40),
-      Offset(centerX + 28, trunkTop - 75),
-      Offset(centerX + 35, trunkTop - 105),
-    ]);
+    for (var branch in mainBranches) {
+      _drawSilverBranchPath(canvas, paint, branch);
+    }
   }
 
-  void _drawSilverSecondaryBranches(Canvas canvas, double centerX, double trunkTop, Paint paint) {
-    paint.strokeWidth = 10; // Enhanced secondary branches
+  void _drawSilverSecondaryBranches(Canvas canvas, double centerX, double trunkTop, Paint paint, int growth) {
+    paint.strokeWidth = 7;
 
-    // Premium secondary branches with more detail
-    List<List<Offset>> secondaryBranches = [
-      // Left side enhanced
-      [Offset(centerX - 65, trunkTop - 20), Offset(centerX - 85, trunkTop - 32), Offset(centerX - 105, trunkTop - 25)],
-      [Offset(centerX - 100, trunkTop - 45), Offset(centerX - 125, trunkTop - 32), Offset(centerX - 150, trunkTop - 40)],
-      [Offset(centerX - 130, trunkTop - 55), Offset(centerX - 150, trunkTop - 45), Offset(centerX - 175, trunkTop - 50)],
+    List<List<Offset>> secondaryBranches = [];
 
-      // Right side enhanced
-      [Offset(centerX + 70, trunkTop - 28), Offset(centerX + 90, trunkTop - 40), Offset(centerX + 115, trunkTop - 32)],
-      [Offset(centerX + 105, trunkTop - 45), Offset(centerX + 130, trunkTop - 32), Offset(centerX + 155, trunkTop - 40)],
-      [Offset(centerX + 140, trunkTop - 55), Offset(centerX + 165, trunkTop - 45), Offset(centerX + 185, trunkTop - 50)],
+    if (growth >= 12) {
+      secondaryBranches.addAll([
+        [Offset(centerX - 60, trunkTop - 25), Offset(centerX - 75, trunkTop - 35), Offset(centerX - 90, trunkTop - 40)],
+        [Offset(centerX + 60, trunkTop - 25), Offset(centerX + 75, trunkTop - 35), Offset(centerX + 90, trunkTop - 40)],
+      ]);
+    }
 
-      // Premium upper branches
-      [Offset(centerX - 55, trunkTop - 50), Offset(centerX - 70, trunkTop - 68), Offset(centerX - 60, trunkTop - 90)],
-      [Offset(centerX - 80, trunkTop - 85), Offset(centerX - 100, trunkTop - 98), Offset(centerX - 105, trunkTop - 120)],
-      [Offset(centerX + 60, trunkTop - 45), Offset(centerX + 75, trunkTop - 63), Offset(centerX + 65, trunkTop - 85)],
-      [Offset(centerX + 85, trunkTop - 80), Offset(centerX + 105, trunkTop - 93), Offset(centerX + 110, trunkTop - 115)],
-    ];
+    if (growth >= 16) {
+      secondaryBranches.addAll([
+        [Offset(centerX - 80, trunkTop - 35), Offset(centerX - 95, trunkTop - 30), Offset(centerX - 110, trunkTop - 25)],
+        [Offset(centerX + 80, trunkTop - 35), Offset(centerX + 95, trunkTop - 30), Offset(centerX + 110, trunkTop - 25)],
+        [Offset(centerX - 30, trunkTop - 45), Offset(centerX - 45, trunkTop - 55), Offset(centerX - 55, trunkTop - 65)],
+        [Offset(centerX + 30, trunkTop - 45), Offset(centerX + 45, trunkTop - 55), Offset(centerX + 55, trunkTop - 65)],
+      ]);
+    }
+
+    if (growth >= 20) {
+      secondaryBranches.addAll([
+        [Offset(centerX - 10, trunkTop - 60), Offset(centerX - 20, trunkTop - 70), Offset(centerX - 25, trunkTop - 80)],
+        [Offset(centerX + 10, trunkTop - 60), Offset(centerX + 20, trunkTop - 70), Offset(centerX + 25, trunkTop - 80)],
+      ]);
+    }
 
     for (var branch in secondaryBranches) {
       _drawSilverBranchPath(canvas, paint, branch);
     }
   }
 
-  void _drawSilverDetailBranches(Canvas canvas, double centerX, double trunkTop, Paint paint) {
-    paint.strokeWidth = 6; // Premium detail branches
+  void _drawSilverDetailBranches(Canvas canvas, double centerX, double trunkTop, Paint paint, int growth) {
+    paint.strokeWidth = 4;
 
-    // Enhanced detail branches for luxury appearance
-    List<List<Offset>> detailBranches = [
-      // Left side premium details
-      [Offset(centerX - 85, trunkTop - 32), Offset(centerX - 95, trunkTop - 22), Offset(centerX - 110, trunkTop - 15)],
-      [Offset(centerX - 105, trunkTop - 25), Offset(centerX - 120, trunkTop - 18), Offset(centerX - 135, trunkTop - 10)],
-      [Offset(centerX - 125, trunkTop - 32), Offset(centerX - 140, trunkTop - 42), Offset(centerX - 150, trunkTop - 55)],
-      [Offset(centerX - 150, trunkTop - 40), Offset(centerX - 165, trunkTop - 30), Offset(centerX - 180, trunkTop - 35)],
+    List<List<Offset>> detailBranches = [];
 
-      // Right side premium details
-      [Offset(centerX + 90, trunkTop - 40), Offset(centerX + 105, trunkTop - 30), Offset(centerX + 120, trunkTop - 22)],
-      [Offset(centerX + 115, trunkTop - 32), Offset(centerX + 130, trunkTop - 22), Offset(centerX + 145, trunkTop - 15)],
-      [Offset(centerX + 130, trunkTop - 32), Offset(centerX + 145, trunkTop - 42), Offset(centerX + 160, trunkTop - 55)],
-      [Offset(centerX + 155, trunkTop - 40), Offset(centerX + 170, trunkTop - 30), Offset(centerX + 185, trunkTop - 35)],
+    if (growth >= 22) {
+      detailBranches.addAll([
+        [Offset(centerX - 90, trunkTop - 40), Offset(centerX - 100, trunkTop - 45), Offset(centerX - 105, trunkTop - 50)],
+        [Offset(centerX + 90, trunkTop - 40), Offset(centerX + 100, trunkTop - 45), Offset(centerX + 105, trunkTop - 50)],
+      ]);
+    }
 
-      // Premium upper details
-      [Offset(centerX - 70, trunkTop - 68), Offset(centerX - 55, trunkTop - 80), Offset(centerX - 45, trunkTop - 95)],
-      [Offset(centerX - 60, trunkTop - 90), Offset(centerX - 75, trunkTop - 105), Offset(centerX - 80, trunkTop - 125)],
-      [Offset(centerX - 30, trunkTop - 100), Offset(centerX - 45, trunkTop - 115), Offset(centerX - 50, trunkTop - 135)],
-      [Offset(centerX + 75, trunkTop - 63), Offset(centerX + 60, trunkTop - 75), Offset(centerX + 50, trunkTop - 90)],
-      [Offset(centerX + 65, trunkTop - 85), Offset(centerX + 80, trunkTop - 100), Offset(centerX + 85, trunkTop - 120)],
-      [Offset(centerX + 35, trunkTop - 105), Offset(centerX + 50, trunkTop - 120), Offset(centerX + 55, trunkTop - 140)],
-    ];
+    if (growth >= 27) {
+      detailBranches.addAll([
+        [Offset(centerX - 110, trunkTop - 25), Offset(centerX - 120, trunkTop - 20), Offset(centerX - 130, trunkTop - 18)],
+        [Offset(centerX + 110, trunkTop - 25), Offset(centerX + 120, trunkTop - 20), Offset(centerX + 130, trunkTop - 18)],
+        [Offset(centerX - 55, trunkTop - 65), Offset(centerX - 65, trunkTop - 70), Offset(centerX - 70, trunkTop - 75)],
+        [Offset(centerX + 55, trunkTop - 65), Offset(centerX + 65, trunkTop - 70), Offset(centerX + 70, trunkTop - 75)],
+        [Offset(centerX - 25, trunkTop - 80), Offset(centerX - 35, trunkTop - 85), Offset(centerX - 40, trunkTop - 90)],
+        [Offset(centerX + 25, trunkTop - 80), Offset(centerX + 35, trunkTop - 85), Offset(centerX + 40, trunkTop - 90)],
+      ]);
+    }
 
     for (var branch in detailBranches) {
       _drawSilverBranchPath(canvas, paint, branch);
     }
   }
 
-  void _drawSilverFineBranches(Canvas canvas, double centerX, double trunkTop, Paint paint) {
-    paint.strokeWidth = 4; // Premium fine branches
+  void _drawSilverFineBranches(Canvas canvas, double centerX, double trunkTop, Paint paint, int growth) {
+    paint.strokeWidth = 2.5;
 
-    // Generate premium fine branches based on growth level
     List<Offset> endpoints = [
-      // Left side premium endpoints
-      Offset(centerX - 110, trunkTop - 15), Offset(centerX - 135, trunkTop - 10), Offset(centerX - 150, trunkTop - 55),
-      Offset(centerX - 180, trunkTop - 35), Offset(centerX - 165, trunkTop - 30), Offset(centerX - 45, trunkTop - 95),
-      Offset(centerX - 80, trunkTop - 125), Offset(centerX - 50, trunkTop - 135), Offset(centerX - 105, trunkTop - 120),
-
-      // Right side premium endpoints
-      Offset(centerX + 120, trunkTop - 22), Offset(centerX + 145, trunkTop - 15), Offset(centerX + 160, trunkTop - 55),
-      Offset(centerX + 185, trunkTop - 35), Offset(centerX + 170, trunkTop - 30), Offset(centerX + 50, trunkTop - 90),
-      Offset(centerX + 85, trunkTop - 120), Offset(centerX + 55, trunkTop - 140), Offset(centerX + 110, trunkTop - 115),
-
-      // Additional premium endpoints for fuller coverage
-      Offset(centerX - 140, trunkTop - 42), Offset(centerX - 120, trunkTop - 18), Offset(centerX + 145, trunkTop - 42),
-      Offset(centerX + 125, trunkTop - 22), Offset(centerX - 45, trunkTop - 115), Offset(centerX + 50, trunkTop - 120),
+      Offset(centerX - 105, trunkTop - 50),
+      Offset(centerX - 130, trunkTop - 18),
+      Offset(centerX - 70, trunkTop - 75),
+      Offset(centerX - 40, trunkTop - 90),
+      Offset(centerX + 105, trunkTop - 50),
+      Offset(centerX + 130, trunkTop - 18),
+      Offset(centerX + 70, trunkTop - 75),
+      Offset(centerX + 40, trunkTop - 90),
     ];
 
-    for (int i = 0; i < endpoints.length && i < (growthLevel - 30); i++) {
-      if (i >= 0) {
-        Offset endpoint = endpoints[i];
+    int numTwigs = math.min(endpoints.length, (growth - 31) * 2);
 
-        // Draw 4-5 premium twigs from each endpoint
-        for (int j = 0; j < 5; j++) {
-          double angle = (j - 2) * 0.4 + (i * 0.15);
-          double length = 18 + j * 5;
+    for (int i = 0; i < numTwigs && i < endpoints.length; i++) {
+      Offset endpoint = endpoints[i];
 
-          Offset twigEnd = Offset(
-            endpoint.dx + length * math.cos(angle),
-            endpoint.dy + length * math.sin(angle) - 12,
-          );
+      // Draw more elaborate twigs
+      for (int j = 0; j < 4; j++) {
+        double angle = (j - 1.5) * 0.4;
+        double length = 12 + j * 3;
 
-          canvas.drawLine(endpoint, twigEnd, paint);
+        Offset twigEnd = Offset(
+          endpoint.dx + length * math.cos(angle),
+          endpoint.dy + length * math.sin(angle) - 8,
+        );
 
-          // Add premium sub-twigs with silver accents
-          if (j == 1 || j == 2 || j == 3) {
-            for (int k = 0; k < 3; k++) {
-              double subAngle = angle + (k - 1) * 0.3;
-              double subLength = 10;
-              Offset subTwigEnd = Offset(
-                twigEnd.dx + subLength * math.cos(subAngle),
-                twigEnd.dy + subLength * math.sin(subAngle),
-              );
-              canvas.drawLine(twigEnd, subTwigEnd, paint);
-            }
+        canvas.drawLine(endpoint, twigEnd, paint);
+
+        // Add sub-twigs
+        if (j == 1 || j == 2) {
+          for (int k = 0; k < 2; k++) {
+            double subAngle = angle + (k == 0 ? 0.3 : -0.3);
+            double subLength = 6;
+            Offset subTwigEnd = Offset(
+              twigEnd.dx + subLength * math.cos(subAngle),
+              twigEnd.dy + subLength * math.sin(subAngle),
+            );
+            canvas.drawLine(twigEnd, subTwigEnd, paint);
           }
         }
       }
@@ -548,7 +431,7 @@ class SilverTreePainter extends CustomPainter {
 
     // Add silver highlight
     Paint silverHighlight = Paint()
-      ..color = Color(0xFFB0C4DE) // Light steel blue
+      ..color = Color(0xFFB0C4DE)
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeWidth = paint.strokeWidth * 0.3;
@@ -576,25 +459,55 @@ class SilverTreePainter extends CustomPainter {
   List<BranchPoint> _getSilverBranchEndpoints(double centerX, double trunkTop) {
     List<BranchPoint> endpoints = [];
 
-    List<Offset> allEndpoints = [
-      // Premium left side branch endpoints
-      Offset(centerX - 110, trunkTop - 15), Offset(centerX - 135, trunkTop - 10), Offset(centerX - 150, trunkTop - 55),
-      Offset(centerX - 180, trunkTop - 35), Offset(centerX - 165, trunkTop - 30), Offset(centerX - 45, trunkTop - 95),
-      Offset(centerX - 80, trunkTop - 125), Offset(centerX - 50, trunkTop - 135), Offset(centerX - 105, trunkTop - 120),
-      Offset(centerX - 140, trunkTop - 42), Offset(centerX - 120, trunkTop - 18), Offset(centerX - 45, trunkTop - 115),
+    // Enhanced leaf positions for silver tree
+    List<Offset> leafPositions = [
+      // Early leaves (growth 1-10)
+      Offset(centerX - 40, trunkTop - 12),
+      Offset(centerX + 40, trunkTop - 12),
+      Offset(centerX - 60, trunkTop - 25),
+      Offset(centerX + 60, trunkTop - 25),
+      Offset(centerX - 30, trunkTop - 45),
+      Offset(centerX + 30, trunkTop - 45),
+      Offset(centerX - 10, trunkTop - 60),
+      Offset(centerX + 10, trunkTop - 60),
 
-      // Premium right side branch endpoints
-      Offset(centerX + 120, trunkTop - 22), Offset(centerX + 145, trunkTop - 15), Offset(centerX + 160, trunkTop - 55),
-      Offset(centerX + 185, trunkTop - 35), Offset(centerX + 170, trunkTop - 30), Offset(centerX + 50, trunkTop - 90),
-      Offset(centerX + 85, trunkTop - 120), Offset(centerX + 55, trunkTop - 140), Offset(centerX + 110, trunkTop - 115),
-      Offset(centerX + 145, trunkTop - 42), Offset(centerX + 125, trunkTop - 22), Offset(centerX + 50, trunkTop - 120),
+      // Mid leaves (growth 11-25)
+      Offset(centerX - 80, trunkTop - 35),
+      Offset(centerX + 80, trunkTop - 35),
+      Offset(centerX - 90, trunkTop - 40),
+      Offset(centerX + 90, trunkTop - 40),
+      Offset(centerX - 110, trunkTop - 25),
+      Offset(centerX + 110, trunkTop - 25),
+      Offset(centerX - 55, trunkTop - 65),
+      Offset(centerX + 55, trunkTop - 65),
+      Offset(centerX - 25, trunkTop - 80),
+      Offset(centerX + 25, trunkTop - 80),
+      Offset(centerX - 45, trunkTop - 55),
+      Offset(centerX + 45, trunkTop - 55),
 
-      // Additional premium endpoints
-      Offset(centerX - 105, trunkTop - 25), Offset(centerX + 115, trunkTop - 32),
+      // Late leaves (growth 26-49)
+      Offset(centerX - 100, trunkTop - 45),
+      Offset(centerX + 100, trunkTop - 45),
+      Offset(centerX - 105, trunkTop - 50),
+      Offset(centerX + 105, trunkTop - 50),
+      Offset(centerX - 120, trunkTop - 20),
+      Offset(centerX + 120, trunkTop - 20),
+      Offset(centerX - 130, trunkTop - 18),
+      Offset(centerX + 130, trunkTop - 18),
+      Offset(centerX - 70, trunkTop - 75),
+      Offset(centerX + 70, trunkTop - 75),
+      Offset(centerX - 40, trunkTop - 90),
+      Offset(centerX + 40, trunkTop - 90),
+      Offset(centerX - 75, trunkTop - 35),
+      Offset(centerX + 75, trunkTop - 35),
+      Offset(centerX - 95, trunkTop - 30),
+      Offset(centerX + 95, trunkTop - 30),
     ];
 
-    for (int i = 0; i < allEndpoints.length && i < 35; i++) {
-      Offset point = allEndpoints[i];
+    int numEndpoints = math.min(growthLevel, leafPositions.length);
+
+    for (int i = 0; i < numEndpoints; i++) {
+      Offset point = leafPositions[i];
       double angle = math.atan2(point.dy - trunkTop, point.dx - centerX);
       endpoints.add(BranchPoint(point.dx, point.dy, angle));
     }
@@ -603,16 +516,15 @@ class SilverTreePainter extends CustomPainter {
   }
 
   void _drawSilverLeavesOnBranches(Canvas canvas, Size size, double centerX, double groundY) {
-    if (growthLevel <= 10) return; // Start showing leaves after basic growth
+    if (growthLevel == 0) return;
 
-    double trunkHeight = size.height * 0.52;
-    double trunkTop = groundY - trunkHeight;
+    double maxTrunkHeight = size.height * 0.52;
+    double currentTrunkHeight = maxTrunkHeight * math.min(1.0, (growthLevel + 8) / 25.0);
+    double trunkTop = groundY - currentTrunkHeight;
 
     List<BranchPoint> branchEndpoints = _getSilverBranchEndpoints(centerX, trunkTop);
 
-    // Draw premium silver leaves based on growth level
-    int leavesToShow = math.min(growthLevel - 10, branchEndpoints.length);
-    for (int i = 0; i < leavesToShow; i++) {
+    for (int i = 0; i < branchEndpoints.length; i++) {
       BranchPoint point = branchEndpoints[i];
       _drawSilverLeafAtPoint(canvas, point, i);
     }
@@ -621,24 +533,30 @@ class SilverTreePainter extends CustomPainter {
   void _drawSilverLeafAtPoint(Canvas canvas, BranchPoint point, int index) {
     canvas.save();
     canvas.translate(point.x, point.y);
-    canvas.scale(leafScale);
 
-    // Premium silver-themed leaf colors
-    Color leafColor = index % 7 == 0 ? Color(0xFF228B22) : // Forest green
-    index % 7 == 1 ? Color(0xFF32CD32) : // Lime green
-    index % 7 == 2 ? Color(0xFF90EE90) : // Light green
-    index % 7 == 3 ? Color(0xFF006400) : // Dark green
-    index % 7 == 4 ? Color(0xFF9ACD32) : // Yellow green
-    index % 7 == 5 ? Color(0xFF8FBC8F) : // Dark sea green
-    Color(0xFF98FB98); // Pale green
+    // Animate newest leaf
+    double scale = leafScale;
+    if (index == growthLevel - 1) {
+      scale = leafScale * 0.8 + 0.2;
+    }
+    canvas.scale(scale);
+
+    // Silver-themed leaf colors
+    Color leafColor = index % 7 == 0 ? Color(0xFF228B22) :
+    index % 7 == 1 ? Color(0xFF32CD32) :
+    index % 7 == 2 ? Color(0xFF90EE90) :
+    index % 7 == 3 ? Color(0xFF006400) :
+    index % 7 == 4 ? Color(0xFF9ACD32) :
+    index % 7 == 5 ? Color(0xFF8FBC8F) :
+    Color(0xFF98FB98);
 
     Paint leafPaint = Paint()
       ..color = leafColor
       ..style = PaintingStyle.fill;
 
-    double leafSize = 13 + (index % 6) * 2; // Bigger premium leaves
+    double leafSize = 14 + (index % 4) * 2; // Bigger than bronze
 
-    // Draw premium silver-style leaf shape
+    // Draw enhanced leaf shape
     Path leafPath = Path();
     leafPath.moveTo(0, -leafSize);
     leafPath.quadraticBezierTo(leafSize * 1.0, -leafSize * 0.7, leafSize * 0.6, 0);
@@ -648,9 +566,9 @@ class SilverTreePainter extends CustomPainter {
 
     canvas.drawPath(leafPath, leafPaint);
 
-    // Add silver shimmer effect
+    // Add silver shimmer
     Paint shimmerPaint = Paint()
-      ..color = Color(0xFFE6E6FA).withOpacity(0.4) // Lavender shimmer
+      ..color = Color(0xFFE6E6FA).withOpacity(0.4)
       ..style = PaintingStyle.fill;
 
     Path shimmerPath = Path();
@@ -662,65 +580,70 @@ class SilverTreePainter extends CustomPainter {
 
     canvas.drawPath(shimmerPath, shimmerPaint);
 
-    // Add premium silver-style leaf veins
+    // Enhanced veins
     Paint veinPaint = Paint()
-      ..color = Color(0xFF2F4F4F) // Dark slate gray veins
-      ..strokeWidth = 1.6;
+      ..color = Color(0xFF2F4F4F)
+      ..strokeWidth = 1.2;
 
-    // Main center vein
     canvas.drawLine(
       Offset(0, -leafSize * 1.0),
       Offset(0, leafSize * 0.5),
       veinPaint,
     );
 
-    // Enhanced side veins
-    veinPaint.strokeWidth = 1.2;
-    for (int i = 0; i < 5; i++) {
-      double veinY = -leafSize * 0.8 + (i * leafSize * 0.3);
-      double veinLength = leafSize * 0.5 * (1 - i * 0.12);
+    // Side veins
+    for (int i = 0; i < 4; i++) {
+      double veinY = -leafSize * 0.8 + (i * leafSize * 0.35);
+      double veinLength = leafSize * 0.5 * (1 - i * 0.15);
 
-      // Left side vein
       canvas.drawLine(
         Offset(0, veinY),
-        Offset(-veinLength, veinY + veinLength * 0.5),
+        Offset(-veinLength, veinY + veinLength * 0.4),
         veinPaint,
       );
-
-      // Right side vein
       canvas.drawLine(
         Offset(0, veinY),
-        Offset(veinLength, veinY + veinLength * 0.5),
+        Offset(veinLength, veinY + veinLength * 0.4),
         veinPaint,
       );
     }
 
-    // Add silver vein highlights
-    Paint silverVein = Paint()
-      ..color = Color(0xFFC0C0C0) // Silver
-      ..strokeWidth = 0.8;
-
-    canvas.drawLine(
-      Offset(1, -leafSize * 0.9),
-      Offset(1, leafSize * 0.4),
-      silverVein,
-    );
-
     canvas.restore();
   }
 
-  void _drawSilverFlower(Canvas canvas, Size size, double centerX, double groundY) {
-    double trunkHeight = size.height * 0.52;
-    double trunkTop = groundY - trunkHeight;
-    double flowerCenterX = centerX + 20;
-    double flowerCenterY = trunkTop - 100;
+  void _drawMultipleSilverFlowers(Canvas canvas, Size size, double centerX, double groundY) {
+    double maxTrunkHeight = size.height * 0.52;
+    double currentTrunkHeight = maxTrunkHeight * math.min(1.0, (growthLevel + 8) / 25.0);
+    double trunkTop = groundY - currentTrunkHeight;
 
-    // Premium silver flower center
-    final Paint centerPaint = Paint()
-      ..color = Color(0xFFC0C0C0) // Silver
-      ..style = PaintingStyle.fill;
+    // Get branch endpoints for flower positions
+    List<BranchPoint> branchEndpoints = _getSilverBranchEndpoints(centerX, trunkTop);
 
-    // Premium silver flower petals
+    // Select 6 branch endpoints for flowers (increased from 4)
+    List<int> flowerIndices = [
+      branchEndpoints.length - 1,   // Top branch
+      branchEndpoints.length - 3,   // Upper left
+      branchEndpoints.length - 5,   // Upper right
+      branchEndpoints.length - 7,   // Mid left
+      branchEndpoints.length - 9,   // Mid right
+      branchEndpoints.length - 11,  // Lower center
+    ];
+
+    // Draw each flower at branch endpoints
+    for (int i = 0; i < flowerIndices.length; i++) {
+      if (flowerIndices[i] >= 0 && flowerIndices[i] < branchEndpoints.length) {
+        BranchPoint branch = branchEndpoints[flowerIndices[i]];
+        double individualRotation = flowerRotation + (i * 0.6);
+        _drawSilverFlowerAtPosition(canvas, Offset(branch.x, branch.y), individualRotation, i);
+      }
+    }
+  }
+
+  void _drawSilverFlowerAtPosition(Canvas canvas, Offset position, double rotation, int flowerIndex) {
+    double flowerCenterX = position.dx;
+    double flowerCenterY = position.dy;
+
+    // Silver flower colors
     final Paint petalPaint = Paint()
       ..color = Color(0xFFE6E6FA) // Lavender
       ..style = PaintingStyle.fill;
@@ -728,19 +651,18 @@ class SilverTreePainter extends CustomPainter {
     final Paint petalOutlinePaint = Paint()
       ..color = Color(0xFF9370DB) // Medium purple
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5;
+      ..strokeWidth = 2;
 
-    // Draw premium silver petals
+    // Draw 10 petals for silver
     for (int i = 0; i < 10; i++) {
-      double angle = (i * 2 * math.pi / 10) + flowerRotation * 0.12;
-      double petalLength = 26 * flowerBloom;
-      double petalWidth = 18 * flowerBloom;
+      double angle = (i * 2 * math.pi / 10) + rotation * 0.12;
+      double petalLength = 20 * flowerBloom;
+      double petalWidth = 14 * flowerBloom;
 
       canvas.save();
       canvas.translate(flowerCenterX, flowerCenterY);
       canvas.rotate(angle);
 
-      // Draw premium petal shape
       final Path petalPath = Path();
       petalPath.moveTo(0, 0);
       petalPath.quadraticBezierTo(petalWidth/2, -petalLength/3, petalWidth/3, -petalLength);
@@ -750,7 +672,7 @@ class SilverTreePainter extends CustomPainter {
       canvas.drawPath(petalPath, petalPaint);
       canvas.drawPath(petalPath, petalOutlinePaint);
 
-      // Add silver petal highlights
+      // Add white highlights
       final Paint petalHighlight = Paint()
         ..color = Colors.white.withOpacity(0.4)
         ..style = PaintingStyle.fill;
@@ -765,68 +687,51 @@ class SilverTreePainter extends CustomPainter {
       canvas.restore();
     }
 
-    // Draw premium silver flower center
-    canvas.drawCircle(Offset(flowerCenterX, flowerCenterY), 14 * flowerBloom, centerPaint);
+    // Silver flower center
+    final Paint centerPaint = Paint()
+      ..color = Color(0xFFC0C0C0)
+      ..style = PaintingStyle.fill;
 
-    // Inner premium center detail
+    canvas.drawCircle(Offset(flowerCenterX, flowerCenterY), 10 * flowerBloom, centerPaint);
+
+    // Inner center
     canvas.drawCircle(
         Offset(flowerCenterX, flowerCenterY),
-        10 * flowerBloom,
+        7 * flowerBloom,
         Paint()
-          ..color = Color(0xFF9370DB) // Medium purple
+          ..color = Color(0xFF9370DB)
           ..style = PaintingStyle.fill
     );
 
-    // Premium silver center dots
-    final Paint dotPaint = Paint()
-      ..color = Color(0xFF2F4F4F) // Dark slate gray
-      ..style = PaintingStyle.fill;
-
-    for (int i = 0; i < 8; i++) {
-      double dotAngle = i * 2 * math.pi / 8;
-      double dotDistance = 5 * flowerBloom;
-      canvas.drawCircle(
-        Offset(
-            flowerCenterX + dotDistance * math.cos(dotAngle),
-            flowerCenterY + dotDistance * math.sin(dotAngle)
-        ),
-        2 * flowerBloom,
-        dotPaint,
-      );
-    }
-
-    // Add premium silver sparkle effect
+    // Add sparkle effect
     if (flowerBloom > 0.8) {
-      _drawSilverSparkles(canvas, flowerCenterX, flowerCenterY);
+      _drawSilverSparkles(canvas, flowerCenterX, flowerCenterY, rotation);
     }
   }
 
-  void _drawSilverSparkles(Canvas canvas, double centerX, double centerY) {
+  void _drawSilverSparkles(Canvas canvas, double centerX, double centerY, double rotation) {
     final Paint sparklePaint = Paint()
-      ..color = Color(0xFFE6E6FA) // Lavender sparkles
-      ..strokeWidth = 4
-      ..strokeCap = StrokeCap.round;
-
-    final Paint silverSparklePaint = Paint()
-      ..color = Color(0xFFC0C0C0) // Silver sparkles
+      ..color = Color(0xFFE6E6FA)
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
 
+    final Paint silverSparklePaint = Paint()
+      ..color = Color(0xFFC0C0C0)
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+
     for (int i = 0; i < 8; i++) {
-      double angle = i * math.pi / 4 + flowerRotation;
-      double distance = 40 + 8 * math.sin(flowerRotation * 2.5);
+      double angle = i * math.pi / 4 + rotation;
+      double distance = 35 + 6 * math.sin(rotation * 2.5);
       double x = centerX + distance * math.cos(angle);
       double y = centerY + distance * math.sin(angle);
 
-      // Draw premium sparkle stars
       Paint currentPaint = i % 2 == 0 ? sparklePaint : silverSparklePaint;
 
-      canvas.drawLine(Offset(x - 6, y), Offset(x + 6, y), currentPaint);
-      canvas.drawLine(Offset(x, y - 6), Offset(x, y + 6), currentPaint);
-
-      // Add diagonal lines for premium star effect
-      canvas.drawLine(Offset(x - 5, y - 5), Offset(x + 5, y + 5), currentPaint);
-      canvas.drawLine(Offset(x - 5, y + 5), Offset(x + 5, y - 5), currentPaint);
+      canvas.drawLine(Offset(x - 5, y), Offset(x + 5, y), currentPaint);
+      canvas.drawLine(Offset(x, y - 5), Offset(x, y + 5), currentPaint);
+      canvas.drawLine(Offset(x - 4, y - 4), Offset(x + 4, y + 4), currentPaint);
+      canvas.drawLine(Offset(x - 4, y + 4), Offset(x + 4, y - 4), currentPaint);
     }
   }
 
@@ -837,6 +742,7 @@ class SilverTreePainter extends CustomPainter {
             oldDelegate.totalGrowth != totalGrowth ||
             oldDelegate.flowerBloom != flowerBloom ||
             oldDelegate.flowerRotation != flowerRotation ||
-            oldDelegate.leafScale != leafScale);
+            oldDelegate.leafScale != leafScale ||
+            oldDelegate.waterDropAnimation != waterDropAnimation);
   }
 }
