@@ -37,6 +37,11 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    compileSdkVersion 33
+    defaultConfig {
+        minSdkVersion 21  // Required for Google Sign In
+    }
 }
 
 flutter {
