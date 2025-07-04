@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "my.tarc.edu.study_hub"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -24,10 +24,10 @@ android {
 
     defaultConfig {
         applicationId = "my.tarc.edu.study_hub"
-        minSdk = 23
-        targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        minSdk = 23  // Using the higher value since Google Sign In requires API 21+
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
     }
 
     buildTypes {
@@ -36,11 +36,6 @@ android {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
-    }
-
-    compileSdkVersion 33
-    defaultConfig {
-        minSdkVersion 21  // Required for Google Sign In
     }
 }
 
