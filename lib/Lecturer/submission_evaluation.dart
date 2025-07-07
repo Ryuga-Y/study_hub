@@ -272,6 +272,75 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
     }
   }
 
+  // Add ability to clear/reset evaluation
+  Future<void> _clearEvaluation() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Clear Evaluation'),
+        content: Text(
+          'This will remove the grade and feedback. '
+              'The student will need to wait for re-evaluation. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+            ),
+            child: Text('Clear'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        // Delete evaluation
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .collection('submissions')
+            .doc(widget.submissionId)
+            .collection('evaluations')
+            .doc('current')
+            .delete();
+
+        // Update submission status
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .collection('submissions')
+            .doc(widget.submissionId)
+            .update({
+          'grade': null,
+          'feedback': null,
+          'gradedAt': null,
+          'gradedBy': null,
+          'status': 'submitted',
+        });
+
+        Navigator.pop(context, true);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {

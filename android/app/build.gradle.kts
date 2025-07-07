@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "my.tarc.edu.study_hub"
-    compileSdk = 35
+    compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -24,10 +24,10 @@ android {
 
     defaultConfig {
         applicationId = "my.tarc.edu.study_hub"
-        minSdk = 23  // Using the higher value since Google Sign In requires API 21+
-        targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        minSdk = 23  // Required for Firebase Auth 23.2.0
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
     }
 
     buildTypes {

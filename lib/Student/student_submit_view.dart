@@ -39,11 +39,23 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
 
   Future<void> _loadData() async {
     try {
-      final user = _authService.currentUser;
-      if (user == null) return;
+      setState(() {
+        isLoading = true;
+      });
 
-      // Load submission history
-      final submissionsSnapshot = await FirebaseFirestore.instance
+      final user = _authService.currentUser;
+      if (user == null) {
+        print('No authenticated user found');
+        setState(() {
+          isLoading = false;
+        });
+        return;
+      }
+
+      print('Loading data for user: ${user.uid}');
+
+      // Load submission history without orderBy
+      final submissionsQuery = FirebaseFirestore.instance
           .collection('organizations')
           .doc(widget.organizationCode)
           .collection('courses')
@@ -51,59 +63,95 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           .collection('assignments')
           .doc(widget.assignmentId)
           .collection('submissions')
-          .where('studentId', isEqualTo: user.uid)
-          .orderBy('submittedAt', descending: true)
-          .get();
+          .where('studentId', isEqualTo: user.uid);
+
+      print('Query path: organizations/${widget.organizationCode}/courses/${widget.courseId}/assignments/${widget.assignmentId}/submissions');
+
+      final submissionsSnapshot = await submissionsQuery.get();
+
+      print('Found ${submissionsSnapshot.docs.length} submissions');
 
       if (submissionsSnapshot.docs.isNotEmpty) {
+        // Sort by submittedAt manually
+        final sortedDocs = submissionsSnapshot.docs.toList()
+          ..sort((a, b) {
+            final aTime = a.data()['submittedAt'] as Timestamp?;
+            final bTime = b.data()['submittedAt'] as Timestamp?;
+            if (aTime == null && bTime == null) return 0;
+            if (aTime == null) return 1;
+            if (bTime == null) return -1;
+            return bTime.compareTo(aTime); // Descending order
+          });
+
         // Get latest submission
-        final latestDoc = submissionsSnapshot.docs.first;
+        final latestDoc = sortedDocs.first;
         latestSubmission = {
           'id': latestDoc.id,
           ...latestDoc.data(),
         };
 
+        print('Latest submission ID: ${latestSubmission!['id']}');
+
         // Get all submissions for history
-        submissionHistory = submissionsSnapshot.docs.map((doc) => {
+        submissionHistory = sortedDocs.map((doc) => {
           'id': doc.id,
           ...doc.data(),
         }).toList();
 
         // Load evaluation for latest submission
-        final evalDoc = await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(widget.organizationCode)
-            .collection('courses')
-            .doc(widget.courseId)
-            .collection('assignments')
-            .doc(widget.assignmentId)
-            .collection('submissions')
-            .doc(latestDoc.id)
-            .collection('evaluations')
-            .doc('current')
-            .get();
+        try {
+          final evalDoc = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(widget.organizationCode)
+              .collection('courses')
+              .doc(widget.courseId)
+              .collection('assignments')
+              .doc(widget.assignmentId)
+              .collection('submissions')
+              .doc(latestDoc.id)
+              .collection('evaluations')
+              .doc('current')
+              .get();
 
-        if (evalDoc.exists) {
-          evaluation = evalDoc.data();
+          if (evalDoc.exists) {
+            evaluation = evalDoc.data();
+            print('Found evaluation for submission');
 
-          // Load rubric if evaluation used one
-          if (evaluation!['rubricUsed'] == true) {
-            final rubricDoc = await FirebaseFirestore.instance
-                .collection('organizations')
-                .doc(widget.organizationCode)
-                .collection('courses')
-                .doc(widget.courseId)
-                .collection('assignments')
-                .doc(widget.assignmentId)
-                .collection('rubric')
-                .doc('main')
-                .get();
+            // Load rubric if evaluation used one
+            if (evaluation!['rubricUsed'] == true) {
+              final rubricDoc = await FirebaseFirestore.instance
+                  .collection('organizations')
+                  .doc(widget.organizationCode)
+                  .collection('courses')
+                  .doc(widget.courseId)
+                  .collection('assignments')
+                  .doc(widget.assignmentId)
+                  .collection('rubric')
+                  .doc('main')
+                  .get();
 
-            if (rubricDoc.exists) {
-              rubric = rubricDoc.data();
+              if (rubricDoc.exists) {
+                rubric = rubricDoc.data();
+                print('Loaded rubric data');
+              }
             }
           }
+        } catch (evalError) {
+          print('Error loading evaluation: $evalError');
+          // Continue without evaluation data
         }
+
+        // Also check if grade exists in submission document
+        if (latestSubmission!['grade'] != null && evaluation == null) {
+          // Create a synthetic evaluation object from submission data
+          evaluation = {
+            'grade': latestSubmission!['grade'],
+            'feedback': latestSubmission!['feedback'],
+            'evaluatedAt': latestSubmission!['gradedAt'] ?? latestSubmission!['submittedAt'],
+          };
+        }
+      } else {
+        print('No submissions found for user: ${user.uid}');
       }
 
       setState(() {
@@ -111,10 +159,15 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
       });
     } catch (e) {
       print('Error loading data: $e');
+      print('Stack trace: ${StackTrace.current}');
       setState(() {
         isLoading = false;
       });
     }
+  }
+
+  Future<void> _refreshData() async {
+    await _loadData();
   }
 
   Future<void> _launchUrl(String url) async {
@@ -124,6 +177,11 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
         SnackBar(content: Text('Could not open file')),
       );
     }
+  }
+
+  Future<void> _navigateToResubmit() async {
+    // Navigate back to assignment details for resubmission
+    Navigator.pop(context);
   }
 
   @override
@@ -157,31 +215,40 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          TextButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => FeedbackHistoryPage(
-                    courseId: widget.courseId,
-                    organizationCode: widget.organizationCode,
-                    studentId: _authService.currentUser?.uid,
-                    isStudent: true,
-                  ),
-                ),
-              );
-            },
-            icon: Icon(Icons.history),
-            label: Text('All Feedback'),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.purple[600],
-            ),
+          IconButton(
+            icon: Icon(Icons.refresh, color: Colors.purple[600]),
+            onPressed: _refreshData,
           ),
+          if (submissionHistory.length > 1)
+            TextButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => FeedbackHistoryPage(
+                      courseId: widget.courseId,
+                      organizationCode: widget.organizationCode,
+                      studentId: _authService.currentUser?.uid,
+                      isStudent: true,
+                    ),
+                  ),
+                );
+              },
+              icon: Icon(Icons.history),
+              label: Text('All Feedback'),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.purple[600],
+              ),
+            ),
         ],
       ),
-      body: latestSubmission == null
-          ? _buildNoSubmissionState()
-          : _buildSubmissionContent(),
+      body: RefreshIndicator(
+        onRefresh: _refreshData,
+        color: Colors.purple[400],
+        child: latestSubmission == null
+            ? _buildNoSubmissionState()
+            : _buildSubmissionContent(),
+      ),
     );
   }
 
@@ -211,13 +278,29 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
               color: Colors.grey[600],
             ),
           ),
+          SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context),
+            icon: Icon(Icons.arrow_back, color: Colors.white),
+            label: Text(
+              'Go Back to Submit',
+              style: TextStyle(color: Colors.white),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange[600],
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildSubmissionContent() {
-    final isGraded = evaluation != null;
+    final isGraded = evaluation != null || latestSubmission!['grade'] != null;
     final grade = latestSubmission!['grade'] ?? evaluation?['grade'];
     final maxPoints = widget.assignmentData['points'] ?? 100;
 
@@ -274,7 +357,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           SizedBox(height: 16),
 
           // Grade Card (if graded)
-          if (isGraded)
+          if (isGraded && grade != null)
             Container(
               padding: EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -345,6 +428,52 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 ],
               ),
             ),
+
+          if (!isGraded)
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.orange[300]!),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.pending, color: Colors.orange[600], size: 32),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Pending Evaluation',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange[700],
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Your submission is being reviewed',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           SizedBox(height: 16),
 
           // Rubric Evaluation (if available)
@@ -352,7 +481,8 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
             _buildRubricEvaluation(),
 
           // Feedback Card
-          if (evaluation != null && evaluation!['feedback'] != null)
+          if ((evaluation != null && evaluation!['feedback'] != null) ||
+              (latestSubmission!['feedback'] != null))
             Container(
               margin: EdgeInsets.only(bottom: 16),
               padding: EdgeInsets.all(20),
@@ -392,14 +522,14 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                       border: Border.all(color: Colors.blue[200]!),
                     ),
                     child: Text(
-                      evaluation!['feedback'],
+                      evaluation?['feedback'] ?? latestSubmission!['feedback'] ?? '',
                       style: TextStyle(
                         color: Colors.blue[900],
                         height: 1.5,
                       ),
                     ),
                   ),
-                  if (evaluation!['allowResubmission'] == true) ...[
+                  if ((evaluation?['allowResubmission'] ?? false) == true) ...[
                     SizedBox(height: 16),
                     Container(
                       padding: EdgeInsets.all(12),
@@ -412,11 +542,20 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                         children: [
                           Icon(Icons.info_outline, color: Colors.green[700], size: 20),
                           SizedBox(width: 8),
-                          Text(
-                            'Resubmission is allowed for this assignment',
-                            style: TextStyle(
-                              color: Colors.green[700],
-                              fontWeight: FontWeight.w500,
+                          Expanded(
+                            child: Text(
+                              'Resubmission is allowed for this assignment',
+                              style: TextStyle(
+                                color: Colors.green[700],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _navigateToResubmit,
+                            child: Text('Resubmit'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.green[700],
                             ),
                           ),
                         ],
@@ -470,12 +609,19 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                   Icons.access_time,
                   Colors.blue,
                 ),
-                if (isGraded && evaluation!['evaluatedAt'] != null)
+                if (isGraded && (evaluation?['evaluatedAt'] != null || latestSubmission!['gradedAt'] != null))
                   _buildDetailRow(
                     'Graded',
-                    _formatDateTime(evaluation!['evaluatedAt']),
+                    _formatDateTime(evaluation?['evaluatedAt'] ?? latestSubmission!['gradedAt']),
                     Icons.grade,
                     Colors.purple,
+                  ),
+                if (latestSubmission!['isLate'] == true)
+                  _buildDetailRow(
+                    'Submission',
+                    'Late Submission',
+                    Icons.warning,
+                    Colors.red,
                   ),
                 if (latestSubmission!['fileName'] != null)
                   InkWell(
@@ -830,9 +976,9 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
     String dateStr = '${date.day}/${date.month}/${date.year}';
     String timeStr = '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
 
-    if (difference.inDays == 0) {
+    if (difference.inDays == 0 && date.day == now.day) {
       return 'Today at $timeStr';
-    } else if (difference.inDays == 1) {
+    } else if (difference.inDays == 1 || (difference.inDays == 0 && date.day != now.day)) {
       return 'Yesterday at $timeStr';
     } else {
       return '$dateStr at $timeStr';
