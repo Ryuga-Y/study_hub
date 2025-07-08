@@ -3,10 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
 import 'student_course.dart';
+import 'calendar.dart'; // Import the calendar page
 
 class StudentHomePage extends StatefulWidget {
+  const StudentHomePage({Key? key}) : super(key: key);
+
   @override
-  _StudentHomePageState createState() => _StudentHomePageState();
+  State<StudentHomePage> createState() => _StudentHomePageState();
 }
 
 class _StudentHomePageState extends State<StudentHomePage> {
@@ -72,7 +75,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
       await _loadEnrolledCourses(orgCode, user.uid);
       await _loadAssignmentStats(orgCode, user.uid);
     } catch (e) {
-      print('Error loading data: $e');
+      debugPrint('Error loading data: $e');
       setState(() {
         _errorMessage = 'Error loading data: $e';
       });
@@ -126,7 +129,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
         _enrolledCourses = coursesList;
       });
     } catch (e) {
-      print('Error loading enrolled courses: $e');
+      debugPrint('Error loading enrolled courses: $e');
       setState(() {
         _errorMessage = 'Error loading courses: $e';
       });
@@ -185,7 +188,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
         _missedAssignments = missed;
       });
     } catch (e) {
-      print('Error loading assignment stats: $e');
+      debugPrint('Error loading assignment stats: $e');
     }
   }
 
@@ -196,12 +199,12 @@ class _StudentHomePageState extends State<StudentHomePage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: Text('Confirm Logout'),
-        content: Text('Are you sure you want to logout?'),
+        title: const Text('Confirm Logout'),
+        content: const Text('Are you sure you want to logout?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel'),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -211,7 +214,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 borderRadius: BorderRadius.circular(8),
               ),
             ),
-            child: Text('Logout', style: TextStyle(color: Colors.white)),
+            child: const Text('Logout', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -219,8 +222,19 @@ class _StudentHomePageState extends State<StudentHomePage> {
 
     if (confirm == true) {
       await _authService.signOut();
-      Navigator.pushReplacementNamed(context, '/');
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/');
+      }
     }
+  }
+
+  void _navigateToCalendar() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CalendarPage(),
+      ),
+    );
   }
 
   @override
@@ -241,19 +255,19 @@ class _StudentHomePageState extends State<StudentHomePage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.error_outline, size: 64, color: Colors.red),
-              SizedBox(height: 16),
-              Text(
+              const Icon(Icons.error_outline, size: 64, color: Colors.red),
+              const SizedBox(height: 16),
+              const Text(
                 'Error',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               Text(
                 _errorMessage!,
                 style: TextStyle(color: Colors.grey[600]),
                 textAlign: TextAlign.center,
               ),
-              SizedBox(height: 24),
+              const SizedBox(height: 24),
               CustomButton(
                 text: 'Retry',
                 onPressed: () {
@@ -298,8 +312,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
               size: 32,
             ),
           ),
-          SizedBox(width: 12),
-          Text(
+          const SizedBox(width: 12),
+          const Text(
             'Study Hub',
             style: TextStyle(
               color: Colors.black87,
@@ -310,12 +324,12 @@ class _StudentHomePageState extends State<StudentHomePage> {
         ],
       ),
       leading: IconButton(
-        icon: Icon(Icons.menu, color: Colors.black87),
+        icon: const Icon(Icons.menu, color: Colors.black87),
         onPressed: () => _scaffoldKey.currentState?.openDrawer(),
       ),
       actions: [
         IconButton(
-          icon: Icon(Icons.notifications_outlined, color: Colors.black87),
+          icon: const Icon(Icons.notifications_outlined, color: Colors.black87),
           onPressed: () {
             // TODO: Implement notifications
           },
@@ -354,10 +368,10 @@ class _StudentHomePageState extends State<StudentHomePage> {
                       ),
                     ),
                   ),
-                  SizedBox(height: 12),
+                  const SizedBox(height: 12),
                   Text(
                     _userData?['fullName'] ?? 'Student',
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -374,49 +388,49 @@ class _StudentHomePageState extends State<StudentHomePage> {
               ),
             ),
             ListTile(
-              leading: Icon(Icons.person_outline),
-              title: Text('Profile'),
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Profile'),
               onTap: () {
                 Navigator.pop(context);
                 // TODO: Navigate to profile page
               },
             ),
             ListTile(
-              leading: Icon(Icons.calendar_today),
-              title: Text('Calendar'),
+              leading: const Icon(Icons.calendar_today),
+              title: const Text('Calendar'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Navigate to calendar page
+                _navigateToCalendar(); // Navigate to calendar page
               },
             ),
             ListTile(
-              leading: Icon(Icons.settings),
-              title: Text('Settings'),
+              leading: const Icon(Icons.settings),
+              title: const Text('Settings'),
               onTap: () {
                 Navigator.pop(context);
                 // TODO: Navigate to settings page
               },
             ),
-            Divider(),
+            const Divider(),
             ListTile(
-              leading: Icon(Icons.business),
-              title: Text('Organization'),
+              leading: const Icon(Icons.business),
+              title: const Text('Organization'),
               subtitle: Text(_organizationData?['name'] ?? ''),
             ),
             ListTile(
-              leading: Icon(Icons.code),
-              title: Text('Organization Code'),
+              leading: const Icon(Icons.code),
+              title: const Text('Organization Code'),
               subtitle: Text(_organizationData?['code'] ?? ''),
             ),
             ListTile(
-              leading: Icon(Icons.badge),
-              title: Text('Student ID'),
+              leading: const Icon(Icons.badge),
+              title: const Text('Student ID'),
               subtitle: Text(_userData?['studentId'] ?? 'N/A'),
             ),
-            Divider(),
+            const Divider(),
             ListTile(
-              leading: Icon(Icons.logout, color: Colors.red),
-              title: Text('Logout', style: TextStyle(color: Colors.red)),
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('Logout', style: TextStyle(color: Colors.red)),
               onTap: _handleLogout,
             ),
           ],
@@ -427,15 +441,15 @@ class _StudentHomePageState extends State<StudentHomePage> {
 
   Widget _buildBody() {
     return SingleChildScrollView(
-      physics: AlwaysScrollableScrollPhysics(),
-      padding: EdgeInsets.all(16),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Welcome Section
           Container(
             width: double.infinity,
-            padding: EdgeInsets.all(20),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [Colors.purple[600]!, Colors.purple[400]!],
@@ -447,7 +461,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 BoxShadow(
                   color: Colors.purple.withValues(alpha: 0.3),
                   blurRadius: 10,
-                  offset: Offset(0, 5),
+                  offset: const Offset(0, 5),
                 ),
               ],
             ),
@@ -456,13 +470,13 @@ class _StudentHomePageState extends State<StudentHomePage> {
               children: [
                 Text(
                   'Welcome back, ${_userData?['fullName']?.split(' ').first ?? 'Student'}!',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                   ),
                 ),
-                SizedBox(height: 8),
+                const SizedBox(height: 8),
                 Text(
                   'You have ${_enrolledCourses.length} enrolled course${_enrolledCourses.length == 1 ? '' : 's'}',
                   style: TextStyle(
@@ -473,12 +487,12 @@ class _StudentHomePageState extends State<StudentHomePage> {
               ],
             ),
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
 
           // To Do Section
           Container(
             width: double.infinity,
-            padding: EdgeInsets.all(20),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(16),
@@ -486,7 +500,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 BoxShadow(
                   color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 10,
-                  offset: Offset(0, 5),
+                  offset: const Offset(0, 5),
                 ),
               ],
             ),
@@ -508,7 +522,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                       onPressed: () {
                         // TODO: Navigate to assignment history
                       },
-                      child: Text(
+                      child: const Text(
                         'View History',
                         style: TextStyle(
                           color: Colors.cyan,
@@ -518,7 +532,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                     ),
                   ],
                 ),
-                SizedBox(height: 16),
+                const SizedBox(height: 16),
                 Row(
                   children: [
                     Expanded(
@@ -533,7 +547,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                               color: Colors.purple[400],
                             ),
                           ),
-                          SizedBox(width: 12),
+                          const SizedBox(width: 12),
                           Text(
                             'Work',
                             style: TextStyle(
@@ -561,7 +575,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                               color: Colors.purple[400],
                             ),
                           ),
-                          SizedBox(width: 12),
+                          const SizedBox(width: 12),
                           Text(
                             'Missed',
                             style: TextStyle(
@@ -577,13 +591,13 @@ class _StudentHomePageState extends State<StudentHomePage> {
               ],
             ),
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
 
           // Courses Section
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
+              const Text(
                 'Your Courses',
                 style: TextStyle(
                   fontSize: 20,
@@ -601,13 +615,13 @@ class _StudentHomePageState extends State<StudentHomePage> {
               ),
             ],
           ),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
 
           // Courses List
           if (_enrolledCourses.isEmpty)
             Container(
               width: double.infinity,
-              padding: EdgeInsets.all(40),
+              padding: const EdgeInsets.all(40),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
@@ -620,7 +634,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                     size: 64,
                     color: Colors.grey[400],
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Text(
                     'No courses enrolled yet',
                     style: TextStyle(
@@ -629,7 +643,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                       color: Colors.grey[700],
                     ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'Contact your lecturer to get enrolled in courses',
                     style: TextStyle(
@@ -651,7 +665,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
 
   Widget _buildCourseCard(Map<String, dynamic> course) {
     return Container(
-      margin: EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -659,7 +673,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
           BoxShadow(
             color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 5,
-            offset: Offset(0, 2),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -677,7 +691,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
         },
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: EdgeInsets.all(16),
+          padding: const EdgeInsets.all(16),
           child: Row(
             children: [
               Container(
@@ -689,7 +703,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 ),
                 child: Center(
                   child: Padding(
-                    padding: EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(8),
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
@@ -704,19 +718,19 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   ),
                 ),
               ),
-              SizedBox(width: 16),
+              const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      course['title'] ?? 'Untitled Lecturer',
-                      style: TextStyle(
+                      course['title'] ?? 'Untitled Course',
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    SizedBox(height: 4),
+                    const SizedBox(height: 4),
                     Text(
                       course['description'] ?? 'No description',
                       style: TextStyle(
@@ -726,11 +740,11 @@ class _StudentHomePageState extends State<StudentHomePage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
                         Icon(Icons.person_outline, size: 16, color: Colors.grey[600]),
-                        SizedBox(width: 4),
+                        const SizedBox(width: 4),
                         Expanded(
                           child: Text(
                             course['lecturerName'] ?? 'Unknown Lecturer',
@@ -742,9 +756,9 @@ class _StudentHomePageState extends State<StudentHomePage> {
                             maxLines: 1,
                           ),
                         ),
-                        SizedBox(width: 16),
+                        const SizedBox(width: 16),
                         Icon(Icons.school_outlined, size: 16, color: Colors.grey[600]),
-                        SizedBox(width: 4),
+                        const SizedBox(width: 4),
                         Expanded(
                           child: Text(
                             course['facultyName'] ?? 'Faculty',
@@ -793,7 +807,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
           // TODO: Navigate to chat
             break;
           case 3:
-          // TODO: Navigate to calendar
+          // Navigate to calendar
+            _navigateToCalendar();
             break;
           case 4:
           // TODO: Navigate to profile
@@ -803,7 +818,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
       selectedItemColor: Colors.purple[400],
       unselectedItemColor: Colors.grey[600],
       type: BottomNavigationBarType.fixed,
-      items: [
+      items: const [
         BottomNavigationBarItem(
           icon: Icon(Icons.library_books),
           label: 'Courses',
