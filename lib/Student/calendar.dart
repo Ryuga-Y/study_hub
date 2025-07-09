@@ -20,11 +20,21 @@ class _CalendarPageState extends State<CalendarPage> {
   List<String> _enabledCalendars = ['personal', 'work', 'family'];
   bool _isLoading = true;
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+  List<CalendarEvent> _searchResults = [];
+  bool _isSearching = false;
 
   @override
   void initState() {
     super.initState();
     _loadEvents();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadEvents() async {
@@ -90,6 +100,39 @@ class _CalendarPageState extends State<CalendarPage> {
       print('Error loading events: $e');
       setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _searchEvents(String query) async {
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+      });
+      return;
+    }
+
+    setState(() => _isSearching = true);
+
+    List<CalendarEvent> results = [];
+    final lowerQuery = query.toLowerCase();
+
+    // Search through all events
+    _events.forEach((date, eventList) {
+      for (var event in eventList) {
+        if (event.title.toLowerCase().contains(lowerQuery) ||
+            event.description.toLowerCase().contains(lowerQuery) ||
+            event.location.toLowerCase().contains(lowerQuery)) {
+          results.add(event);
+        }
+      }
+    });
+
+    // Sort results by date (upcoming first)
+    results.sort((a, b) => a.startTime.compareTo(b.startTime));
+
+    setState(() {
+      _searchResults = results;
+    });
   }
 
   List<CalendarEvent> _generateRecurringEvents(CalendarEvent event) {
@@ -247,16 +290,18 @@ class _CalendarPageState extends State<CalendarPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: _buildAppBar(),
-      drawer: _buildDrawer(),
       body: Column(
         children: [
-          _buildViewSelector(),
-          _buildDateNavigation(),
-          Expanded(child: _buildCurrentView()),
+          if (_isSearching) _buildSearchResults(),
+          if (!_isSearching) ...[
+            _buildViewSelector(),
+            _buildDateNavigation(),
+            Expanded(child: _buildCurrentView()),
+          ],
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showQuickEventDialog(),
+        onPressed: () => _showNoteDialog(),
         backgroundColor: Colors.blue[600],
         child: Icon(Icons.add, color: Colors.white),
       ),
@@ -267,6 +312,10 @@ class _CalendarPageState extends State<CalendarPage> {
     return AppBar(
       backgroundColor: Colors.white,
       elevation: 1,
+      leading: IconButton(
+        icon: Icon(Icons.arrow_back, color: Colors.grey[700]),
+        onPressed: () => Navigator.pop(context),
+      ),
       title: Row(
         children: [
           Icon(
@@ -290,69 +339,127 @@ class _CalendarPageState extends State<CalendarPage> {
           icon: Icon(Icons.search, color: Colors.grey[700]),
           onPressed: () => _showSearchDialog(),
         ),
-        IconButton(
-          icon: Icon(Icons.more_vert, color: Colors.grey[700]),
-          onPressed: () => _showMoreOptions(),
-        ),
       ],
     );
   }
 
-  Widget _buildDrawer() {
-    return Drawer(
-      child: ListView(
-        padding: EdgeInsets.zero,
+  Widget _buildSearchResults() {
+    return Expanded(
+      child: Column(
         children: [
-          DrawerHeader(
-            decoration: BoxDecoration(color: Colors.blue[600]),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Container(
+            padding: EdgeInsets.all(16),
+            child: Row(
               children: [
-                CircleAvatar(
-                  radius: 25,
-                  backgroundColor: Colors.white,
-                  child: Icon(Icons.person, color: Colors.blue[600]),
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search notes...',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onChanged: _searchEvents,
+                    autofocus: true,
+                  ),
                 ),
-                SizedBox(height: 10),
-                Text(
-                  'My Calendars',
-                  style: TextStyle(color: Colors.white, fontSize: 18),
+                SizedBox(width: 8),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _isSearching = false;
+                      _searchResults = [];
+                    });
+                    _searchController.clear();
+                  },
+                  child: Text('Cancel'),
                 ),
               ],
             ),
           ),
-          ...['Personal', 'Work', 'Family'].map((calendar) {
-            final isEnabled = _enabledCalendars.contains(calendar.toLowerCase());
-            return CheckboxListTile(
-              title: Text(calendar),
-              value: isEnabled,
-              activeColor: _getCalendarColor(calendar.toLowerCase()),
-              onChanged: (bool? value) {
-                setState(() {
-                  if (value == true) {
-                    _enabledCalendars.add(calendar.toLowerCase());
-                  } else {
-                    _enabledCalendars.remove(calendar.toLowerCase());
-                  }
-                });
-              },
-              secondary: Container(
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: _getCalendarColor(calendar.toLowerCase()),
-                  shape: BoxShape.circle,
-                ),
+          Expanded(
+            child: _searchResults.isEmpty
+                ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.search, size: 64, color: Colors.grey[400]),
+                  SizedBox(height: 16),
+                  Text(
+                    _searchController.text.isEmpty
+                        ? 'Type to search notes'
+                        : 'No notes found',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
               ),
-            );
-          }).toList(),
-          Divider(),
-          ListTile(
-            leading: Icon(Icons.settings),
-            title: Text('Settings'),
-            onTap: () {},
+            )
+                : ListView.builder(
+              padding: EdgeInsets.all(16),
+              itemCount: _searchResults.length,
+              itemBuilder: (context, index) {
+                return _buildSearchResultCard(_searchResults[index]);
+              },
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSearchResultCard(CalendarEvent event) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 1,
+            blurRadius: 3,
+            offset: Offset(0, 1),
+          ),
+        ],
+      ),
+      child: ListTile(
+        leading: Container(
+          width: 4,
+          height: 40,
+          decoration: BoxDecoration(
+            color: event.color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        title: Text(
+          event.title,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${_getMonthName(event.startTime.month)} ${event.startTime.day}, ${event.startTime.year}',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+            if (event.description.isNotEmpty)
+              Text(
+                event.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+          ],
+        ),
+        onTap: () => _showEventDetails(event),
       ),
     );
   }
@@ -405,7 +512,7 @@ class _CalendarPageState extends State<CalendarPage> {
         title = '${_getDayName(_focusedDate.weekday)}, ${_getMonthName(_focusedDate.month)} ${_focusedDate.day}';
         break;
       case CalendarView.agenda:
-        title = 'Agenda';
+        title = 'Agenda (Next 2 Weeks)';
         break;
     }
 
@@ -473,32 +580,29 @@ class _CalendarPageState extends State<CalendarPage> {
     List<Widget> dayWidgets = [];
 
     // Week headers
-    final weekHeaders = Row(
-      children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-          .map((day) => Expanded(
-        child: Container(
-          padding: EdgeInsets.symmetric(vertical: 8),
-          child: Center(
-            child: Text(
-              day,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[600],
+    final weekHeaders = Container(
+      height: 40,
+      child: Row(
+        children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+            .map((day) => Expanded(
+          child: Container(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Center(
+              child: Text(
+                day,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
+                ),
               ),
             ),
           ),
-        ),
-      ))
-          .toList(),
+        ))
+            .toList(),
+      ),
     );
 
-    // Add empty cells for days before the first day of the month
-    for (int i = 1; i < firstWeekday; i++) {
-      dayWidgets.add(Container());
-    }
-
-    // Add day cells
     for (int day = 1; day <= daysInMonth; day++) {
       final date = DateTime(_focusedDate.year, _focusedDate.month, day);
       final events = _getEventsForDay(date);
@@ -522,10 +626,13 @@ class _CalendarPageState extends State<CalendarPage> {
               borderRadius: BorderRadius.circular(4),
             ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                // Day number - Fixed height
                 Container(
                   width: 32,
                   height: 32,
+                  margin: EdgeInsets.only(top: 4),
                   decoration: BoxDecoration(
                     color: isToday ? Colors.blue[600] : Colors.transparent,
                     shape: BoxShape.circle,
@@ -541,43 +648,57 @@ class _CalendarPageState extends State<CalendarPage> {
                     ),
                   ),
                 ),
-                Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    child: Column(
-                      children: events.take(3).map((event) {
-                        return Container(
-                          width: double.infinity,
-                          height: 16,
-                          margin: EdgeInsets.symmetric(vertical: 1, horizontal: 2),
-                          decoration: BoxDecoration(
-                            color: event.color,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                          child: Center(
-                            child: Text(
-                              event.title,
+                // Events section
+                if (events.isNotEmpty)
+                  Expanded(
+                    child: Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.symmetric(horizontal: 2),
+                      child: Column(
+                        children: [
+                          SizedBox(height: 2),
+                          // Show up to 3 events
+                          ...events.take(3).map((event) {
+                            return Container(
+                              width: double.infinity,
+                              height: 12,
+                              margin: EdgeInsets.only(bottom: 1),
+                              decoration: BoxDecoration(
+                                color: event.color,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 2),
+                                child: Text(
+                                  event.title,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                          // Show more indicator if there are more than 3 events
+                          if (events.length > 3)
+                            Text(
+                              '+${events.length - 3} more',
                               style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
+                                fontSize: 8,
+                                color: Colors.grey[600],
                                 fontWeight: FontWeight.w500,
                               ),
-                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                        );
-                      }).toList(),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                if (events.length > 3)
-                  Text(
-                    '+${events.length - 3} more',
-                    style: TextStyle(
-                      fontSize: 8,
-                      color: Colors.grey[600],
-                    ),
-                  ),
+                // Add spacer if no events to maintain consistent height
+                if (events.isEmpty)
+                  Expanded(child: SizedBox()),
               ],
             ),
           ),
@@ -585,24 +706,38 @@ class _CalendarPageState extends State<CalendarPage> {
       );
     }
 
-    // Group into weeks
+    // Group into weeks with equal heights
     List<Widget> weeks = [weekHeaders];
-    for (int i = 0; i < dayWidgets.length; i += 7) {
-      final weekWidgets = dayWidgets.skip(i).take(7).toList();
-      while (weekWidgets.length < 7) {
-        weekWidgets.add(Container());
-      }
 
-      weeks.add(
-        Expanded(
-          child: Row(
-            children: weekWidgets.map((widget) => Expanded(child: widget)).toList(),
-          ),
-        ),
-      );
-    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final headerHeight = 40.0;
+        final availableHeight = constraints.maxHeight - headerHeight;
+        final weekCount = ((firstWeekday - 1 + daysInMonth) / 7).ceil();
+        final weekHeight = availableHeight / weekCount;
 
-    return Column(children: weeks);
+        for (int i = 0; i < dayWidgets.length; i += 7) {
+          final weekWidgets = dayWidgets.skip(i).take(7).toList();
+          while (weekWidgets.length < 7) {
+            weekWidgets.add(Container());
+          }
+
+          weeks.add(
+            Container(
+              height: weekHeight,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: weekWidgets.map((widget) => Expanded(child: widget)).toList(),
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          children: weeks,
+        );
+      },
+    );
   }
 
   Widget _buildWeekView() {
@@ -780,9 +915,10 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _buildAgendaView() {
+    // Show events for next 2 weeks
     final upcomingEvents = _getEventsForDateRange(
       DateTime.now(),
-      DateTime.now().add(Duration(days: 30)),
+      DateTime.now().add(Duration(days: 14)), // 2 weeks
     );
 
     if (upcomingEvents.isEmpty) {
@@ -793,7 +929,7 @@ class _CalendarPageState extends State<CalendarPage> {
             Icon(Icons.event_note, size: 64, color: Colors.grey[400]),
             SizedBox(height: 16),
             Text(
-              'No upcoming events',
+              'No upcoming notes in the next 2 weeks',
               style: TextStyle(
                 fontSize: 18,
                 color: Colors.grey[600],
@@ -894,7 +1030,7 @@ class _CalendarPageState extends State<CalendarPage> {
         trailing: PopupMenuButton(
           onSelected: (value) {
             if (value == 'edit') {
-              _showEditEventDialog(event);
+              _showEditNoteDialog(event);
             } else if (value == 'delete') {
               _showDeleteEventDialog(event);
             }
@@ -944,20 +1080,20 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
-  void _showQuickEventDialog() {
+  void _showNoteDialog() {
     showDialog(
       context: context,
-      builder: (context) => QuickEventDialog(
+      builder: (context) => NoteDialog(
         selectedDate: _selectedDate,
         onSave: (event) => _addEvent(event),
       ),
     );
   }
 
-  void _showEditEventDialog(CalendarEvent event) {
+  void _showEditNoteDialog(CalendarEvent event) {
     showDialog(
       context: context,
-      builder: (context) => EventDialog(
+      builder: (context) => NoteDialog(
         selectedDate: _selectedDate,
         event: event,
         onSave: (updatedEvent) => _updateEvent(updatedEvent),
@@ -969,7 +1105,7 @@ class _CalendarPageState extends State<CalendarPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete Event'),
+        title: Text('Delete Note'),
         content: Text('Are you sure you want to delete "${event.title}"?'),
         actions: [
           TextButton(
@@ -995,31 +1131,16 @@ class _CalendarPageState extends State<CalendarPage> {
       context: context,
       builder: (context) => EventDetailsDialog(
         event: event,
-        onEdit: () => _showEditEventDialog(event),
+        onEdit: () => _showEditNoteDialog(event),
         onDelete: () => _showDeleteEventDialog(event),
       ),
     );
   }
 
   void _showSearchDialog() {
-    // Implement search functionality
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Search Events'),
-        content: TextField(
-          decoration: InputDecoration(hintText: 'Enter search term...'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context), child: Text('Search')),
-        ],
-      ),
-    );
-  }
-
-  void _showMoreOptions() {
-    // Implement more options
+    setState(() {
+      _isSearching = true;
+    });
   }
 
   Color _getCalendarColor(String calendar) {
@@ -1120,98 +1241,27 @@ class CalendarEvent {
   }
 }
 
-class QuickEventDialog extends StatefulWidget {
-  final DateTime selectedDate;
-  final Function(CalendarEvent) onSave;
-
-  QuickEventDialog({required this.selectedDate, required this.onSave});
-
-  @override
-  _QuickEventDialogState createState() => _QuickEventDialogState();
-}
-
-class _QuickEventDialogState extends State<QuickEventDialog> {
-  final _titleController = TextEditingController();
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('Quick Add Event'),
-      content: TextField(
-        controller: _titleController,
-        decoration: InputDecoration(
-          hintText: 'Event title',
-          border: OutlineInputBorder(),
-        ),
-        autofocus: true,
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            if (_titleController.text.isNotEmpty) {
-              final event = CalendarEvent(
-                id: '',
-                title: _titleController.text,
-                description: '',
-                startTime: DateTime(
-                  widget.selectedDate.year,
-                  widget.selectedDate.month,
-                  widget.selectedDate.day,
-                  9,
-                  0,
-                ),
-                endTime: DateTime(
-                  widget.selectedDate.year,
-                  widget.selectedDate.month,
-                  widget.selectedDate.day,
-                  10,
-                  0,
-                ),
-                color: Colors.blue,
-              );
-              widget.onSave(event);
-              Navigator.pop(context);
-            }
-          },
-          child: Text('Save'),
-        ),
-      ],
-    );
-  }
-}
-
-class EventDialog extends StatefulWidget {
+class NoteDialog extends StatefulWidget {
   final DateTime selectedDate;
   final CalendarEvent? event;
   final Function(CalendarEvent) onSave;
 
-  EventDialog({
+  NoteDialog({
     required this.selectedDate,
     this.event,
     required this.onSave,
   });
 
   @override
-  _EventDialogState createState() => _EventDialogState();
+  _NoteDialogState createState() => _NoteDialogState();
 }
 
-class _EventDialogState extends State<EventDialog> {
+class _NoteDialogState extends State<NoteDialog> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _locationController = TextEditingController();
-  DateTime _startDate = DateTime.now();
-  TimeOfDay _startTime = TimeOfDay.now();
-  DateTime _endDate = DateTime.now();
-  TimeOfDay _endTime = TimeOfDay.now();
+  DateTime _selectedDate = DateTime.now();
+  TimeOfDay _selectedTime = TimeOfDay.now();
   Color _selectedColor = Colors.blue;
-  String _selectedCalendar = 'personal';
-  EventType _eventType = EventType.normal;
-  RecurrenceType _recurrenceType = RecurrenceType.none;
-  int _reminderMinutes = 15;
 
   final List<Color> _colors = [
     Colors.blue,
@@ -1222,250 +1272,141 @@ class _EventDialogState extends State<EventDialog> {
     Colors.pink,
     Colors.teal,
     Colors.indigo,
+    Colors.cyan,
+    Colors.amber,
   ];
 
   @override
   void initState() {
     super.initState();
-    _startDate = widget.selectedDate;
-    _endDate = widget.selectedDate;
+    _selectedDate = widget.selectedDate;
 
     if (widget.event != null) {
       _titleController.text = widget.event!.title;
       _descriptionController.text = widget.event!.description;
-      _locationController.text = widget.event!.location;
-      _startDate = widget.event!.startTime;
-      _startTime = TimeOfDay.fromDateTime(widget.event!.startTime);
-      _endDate = widget.event!.endTime;
-      _endTime = TimeOfDay.fromDateTime(widget.event!.endTime);
+      _selectedDate = widget.event!.startTime;
+      _selectedTime = TimeOfDay.fromDateTime(widget.event!.startTime);
       _selectedColor = widget.event!.color;
-      _selectedCalendar = widget.event!.calendar;
-      _eventType = widget.event!.eventType;
-      _recurrenceType = widget.event!.recurrenceType;
-      _reminderMinutes = widget.event!.reminderMinutes;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.event == null ? 'Add Event' : 'Edit Event'),
+      title: Text(widget.event == null ? 'Add Note' : 'Edit Note'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             TextField(
               controller: _titleController,
               decoration: InputDecoration(
-                labelText: 'Event Title',
-                border: OutlineInputBorder(),
+                labelText: 'Note Title',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                prefixIcon: Icon(Icons.title),
               ),
+              autofocus: true,
             ),
             SizedBox(height: 16),
             TextField(
               controller: _descriptionController,
               decoration: InputDecoration(
-                labelText: 'Description',
-                border: OutlineInputBorder(),
+                labelText: 'Note Description',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                prefixIcon: Icon(Icons.description),
               ),
               maxLines: 3,
             ),
             SizedBox(height: 16),
-            TextField(
-              controller: _locationController,
-              decoration: InputDecoration(
-                labelText: 'Location',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.location_on),
-              ),
-            ),
-            SizedBox(height: 16),
-            DropdownButtonFormField<EventType>(
-              value: _eventType,
-              decoration: InputDecoration(
-                labelText: 'Event Type',
-                border: OutlineInputBorder(),
-              ),
-              items: EventType.values.map((type) {
-                String name = type.toString().split('.').last;
-                return DropdownMenuItem(
-                  value: type,
-                  child: Text(name == 'allDay' ? 'All Day' : name.toUpperCase()),
-                );
-              }).toList(),
-              onChanged: (value) => setState(() => _eventType = value!),
-            ),
-            if (_eventType != EventType.allDay) ...[
-              SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: () async {
-                        final date = await showDatePicker(
-                          context: context,
-                          initialDate: _startDate,
-                          firstDate: DateTime.now().subtract(Duration(days: 365)),
-                          lastDate: DateTime.now().add(Duration(days: 365)),
-                        );
-                        if (date != null) {
-                          setState(() => _startDate = date);
-                        }
-                      },
-                      child: InputDecorator(
-                        decoration: InputDecoration(
-                          labelText: 'Start Date',
-                          border: OutlineInputBorder(),
-                        ),
-                        child: Text('${_startDate.day}/${_startDate.month}/${_startDate.year}'),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 16),
-                  Expanded(
-                    child: InkWell(
-                      onTap: () async {
-                        final time = await showTimePicker(
-                          context: context,
-                          initialTime: _startTime,
-                        );
-                        if (time != null) {
-                          setState(() => _startTime = time);
-                        }
-                      },
-                      child: InputDecorator(
-                        decoration: InputDecoration(
-                          labelText: 'Start Time',
-                          border: OutlineInputBorder(),
-                        ),
-                        child: Text(_startTime.format(context)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: () async {
-                        final date = await showDatePicker(
-                          context: context,
-                          initialDate: _endDate,
-                          firstDate: DateTime.now().subtract(Duration(days: 365)),
-                          lastDate: DateTime.now().add(Duration(days: 365)),
-                        );
-                        if (date != null) {
-                          setState(() => _endDate = date);
-                        }
-                      },
-                      child: InputDecorator(
-                        decoration: InputDecoration(
-                          labelText: 'End Date',
-                          border: OutlineInputBorder(),
-                        ),
-                        child: Text('${_endDate.day}/${_endDate.month}/${_endDate.year}'),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 16),
-                  Expanded(
-                    child: InkWell(
-                      onTap: () async {
-                        final time = await showTimePicker(
-                          context: context,
-                          initialTime: _endTime,
-                        );
-                        if (time != null) {
-                          setState(() => _endTime = time);
-                        }
-                      },
-                      child: InputDecorator(
-                        decoration: InputDecoration(
-                          labelText: 'End Time',
-                          border: OutlineInputBorder(),
-                        ),
-                        child: Text(_endTime.format(context)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            SizedBox(height: 16),
-            DropdownButtonFormField<RecurrenceType>(
-              value: _recurrenceType,
-              decoration: InputDecoration(
-                labelText: 'Repeat',
-                border: OutlineInputBorder(),
-              ),
-              items: RecurrenceType.values.map((type) {
-                String name = type.toString().split('.').last;
-                return DropdownMenuItem(
-                  value: type,
-                  child: Text(name == 'none' ? 'Does not repeat' : name.toUpperCase()),
-                );
-              }).toList(),
-              onChanged: (value) => setState(() => _recurrenceType = value!),
-            ),
-            SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _selectedCalendar,
-              decoration: InputDecoration(
-                labelText: 'Calendar',
-                border: OutlineInputBorder(),
-              ),
-              items: ['personal', 'work', 'family'].map((calendar) {
-                return DropdownMenuItem(
-                  value: calendar,
-                  child: Text(calendar.toUpperCase()),
-                );
-              }).toList(),
-              onChanged: (value) => setState(() => _selectedCalendar = value!),
-            ),
-            SizedBox(height: 16),
-            DropdownButtonFormField<int>(
-              value: _reminderMinutes,
-              decoration: InputDecoration(
-                labelText: 'Reminder',
-                border: OutlineInputBorder(),
-              ),
-              items: [0, 5, 10, 15, 30, 60].map((minutes) {
-                return DropdownMenuItem(
-                  value: minutes,
-                  child: Text(minutes == 0 ? 'No reminder' : '$minutes minutes before'),
-                );
-              }).toList(),
-              onChanged: (value) => setState(() => _reminderMinutes = value!),
-            ),
-            SizedBox(height: 16),
             Row(
               children: [
-                Text('Color: '),
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: _selectedDate,
+                        firstDate: DateTime.now().subtract(Duration(days: 365)),
+                        lastDate: DateTime.now().add(Duration(days: 365)),
+                      );
+                      if (date != null) {
+                        setState(() => _selectedDate = date);
+                      }
+                    },
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'Date',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        prefixIcon: Icon(Icons.calendar_today),
+                      ),
+                      child: Text('${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}'),
+                    ),
+                  ),
+                ),
                 SizedBox(width: 16),
                 Expanded(
-                  child: Wrap(
-                    spacing: 8,
-                    children: _colors.map((color) {
-                      return GestureDetector(
-                        onTap: () => setState(() => _selectedColor = color),
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
-                            border: _selectedColor == color
-                                ? Border.all(color: Colors.black, width: 2)
-                                : null,
-                          ),
-                        ),
+                  child: InkWell(
+                    onTap: () async {
+                      final time = await showTimePicker(
+                        context: context,
+                        initialTime: _selectedTime,
                       );
-                    }).toList(),
+                      if (time != null) {
+                        setState(() => _selectedTime = time);
+                      }
+                    },
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'Time',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        prefixIcon: Icon(Icons.access_time),
+                      ),
+                      child: Text(_selectedTime.format(context)),
+                    ),
                   ),
                 ),
               ],
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Choose Color:',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _colors.map((color) {
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedColor = color),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: _selectedColor == color
+                          ? Border.all(color: Colors.black, width: 3)
+                          : Border.all(color: Colors.grey[300]!, width: 1),
+                    ),
+                    child: _selectedColor == color
+                        ? Icon(Icons.check, color: Colors.white, size: 20)
+                        : null,
+                  ),
+                );
+              }).toList(),
             ),
           ],
         ),
@@ -1478,27 +1419,15 @@ class _EventDialogState extends State<EventDialog> {
         ElevatedButton(
           onPressed: () {
             if (_titleController.text.isNotEmpty) {
-              DateTime startDateTime, endDateTime;
+              final startDateTime = DateTime(
+                _selectedDate.year,
+                _selectedDate.month,
+                _selectedDate.day,
+                _selectedTime.hour,
+                _selectedTime.minute,
+              );
 
-              if (_eventType == EventType.allDay) {
-                startDateTime = DateTime(_startDate.year, _startDate.month, _startDate.day);
-                endDateTime = DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59);
-              } else {
-                startDateTime = DateTime(
-                  _startDate.year,
-                  _startDate.month,
-                  _startDate.day,
-                  _startTime.hour,
-                  _startTime.minute,
-                );
-                endDateTime = DateTime(
-                  _endDate.year,
-                  _endDate.month,
-                  _endDate.day,
-                  _endTime.hour,
-                  _endTime.minute,
-                );
-              }
+              final endDateTime = startDateTime.add(Duration(hours: 1));
 
               final event = CalendarEvent(
                 id: widget.event?.id ?? '',
@@ -1507,18 +1436,24 @@ class _EventDialogState extends State<EventDialog> {
                 startTime: startDateTime,
                 endTime: endDateTime,
                 color: _selectedColor,
-                calendar: _selectedCalendar,
-                eventType: _eventType,
-                recurrenceType: _recurrenceType,
-                reminderMinutes: _reminderMinutes,
-                location: _locationController.text,
+                calendar: 'personal',
+                eventType: EventType.normal,
+                recurrenceType: RecurrenceType.none,
+                reminderMinutes: 15,
+                location: '',
               );
 
               widget.onSave(event);
               Navigator.pop(context);
             }
           },
-          child: Text('Save'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue[600],
+          ),
+          child: Text(
+            'Save Note',
+            style: TextStyle(color: Colors.white),
+          ),
         ),
       ],
     );
@@ -1539,7 +1474,25 @@ class EventDetailsDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(event.title),
+      title: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 20,
+            decoration: BoxDecoration(
+              color: event.color,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              event.title,
+              style: TextStyle(fontSize: 18),
+            ),
+          ),
+        ],
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1549,23 +1502,20 @@ class EventDetailsDialog extends StatelessWidget {
             Text(event.description),
             SizedBox(height: 16),
           ],
-          Text('Time:', style: TextStyle(fontWeight: FontWeight.bold)),
-          Text(event.eventType == EventType.allDay
-              ? 'All day'
-              : '${TimeOfDay.fromDateTime(event.startTime).format(context)} - ${TimeOfDay.fromDateTime(event.endTime).format(context)}'),
+          Text('Date & Time:', style: TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            '${event.startTime.day}/${event.startTime.month}/${event.startTime.year} at ${TimeOfDay.fromDateTime(event.startTime).format(context)}',
+          ),
           SizedBox(height: 16),
-          if (event.location.isNotEmpty) ...[
-            Text('Location:', style: TextStyle(fontWeight: FontWeight.bold)),
-            Text(event.location),
-            SizedBox(height: 16),
-          ],
-          Text('Calendar:', style: TextStyle(fontWeight: FontWeight.bold)),
-          Text(event.calendar.toUpperCase()),
-          if (event.recurrenceType != RecurrenceType.none) ...[
-            SizedBox(height: 16),
-            Text('Repeat:', style: TextStyle(fontWeight: FontWeight.bold)),
-            Text(event.recurrenceType.toString().split('.').last.toUpperCase()),
-          ],
+          Text('Color:', style: TextStyle(fontWeight: FontWeight.bold)),
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: event.color,
+              shape: BoxShape.circle,
+            ),
+          ),
         ],
       ),
       actions: [
