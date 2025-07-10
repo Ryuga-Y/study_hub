@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../Authentication/custom_widgets.dart';
 
 class SubmissionEvaluationPage extends StatefulWidget {
   final String courseId;
@@ -127,27 +126,64 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
 
   Future<void> _loadSubmissionHistory() async {
     try {
-      final historySnapshot = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(widget.organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('assignments')
-          .doc(widget.assignmentId)
-          .collection('submissions')
-          .where('studentId', isEqualTo: widget.submissionData['studentId'])
-          .orderBy('submittedAt', descending: true)
-          .get();
+      // First try with orderBy
+      try {
+        final historySnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .collection('submissions')
+            .where('studentId', isEqualTo: widget.submissionData['studentId'])
+            .orderBy('submittedAt', descending: true)
+            .get();
 
-      if (mounted) {
-        setState(() {
-          submissionHistory = historySnapshot.docs.map((doc) {
-            return {
-              'id': doc.id,
-              ...doc.data(),
-            };
-          }).toList();
+        if (mounted) {
+          setState(() {
+            submissionHistory = historySnapshot.docs.map((doc) {
+              return {
+                'id': doc.id,
+                ...doc.data(),
+              };
+            }).toList();
+          });
+        }
+      } catch (e) {
+        // If orderBy fails, try without it and sort manually
+        print('OrderBy failed, trying without ordering: $e');
+        final historySnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .collection('submissions')
+            .where('studentId', isEqualTo: widget.submissionData['studentId'])
+            .get();
+
+        final docs = historySnapshot.docs.map((doc) {
+          return {
+            'id': doc.id,
+            ...doc.data(),
+          };
+        }).toList();
+
+        // Sort manually
+        docs.sort((a, b) {
+          final aTime = a['submittedAt'] as Timestamp?;
+          final bTime = b['submittedAt'] as Timestamp?;
+          if (aTime == null || bTime == null) return 0;
+          return bTime.compareTo(aTime);
         });
+
+        if (mounted) {
+          setState(() {
+            submissionHistory = docs;
+          });
+        }
       }
     } catch (e) {
       print('Error loading submission history: $e');
@@ -277,10 +313,82 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Clear Evaluation'),
-        content: Text(
-          'This will remove the grade and feedback. '
-              'The student will need to wait for re-evaluation. Continue?',
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange, size: 24),
+            SizedBox(width: 8),
+            Text('Clear Evaluation'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to clear this evaluation?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'This action will:',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+            SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('• ', style: TextStyle(fontSize: 16)),
+                Expanded(
+                  child: Text('Remove the grade (${existingEvaluation?['grade'] ?? 0}/${widget.assignmentData['points'] ?? 100})'),
+                ),
+              ],
+            ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('• ', style: TextStyle(fontSize: 16)),
+                Expanded(
+                  child: Text('Delete all feedback and rubric scores'),
+                ),
+              ],
+            ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('• ', style: TextStyle(fontSize: 16)),
+                Expanded(
+                  child: Text('Reset submission status to "Submitted"'),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange[200]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'The student will need to wait for re-evaluation.',
+                      style: TextStyle(
+                        color: Colors.orange[800],
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -291,14 +399,21 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.orange,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: Text('Clear'),
+            child: Text('Clear Evaluation', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
 
     if (confirm == true) {
+      setState(() {
+        isLoading = true;
+      });
+
       try {
         // Delete evaluation
         await FirebaseFirestore.instance
@@ -332,11 +447,25 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
           'status': 'submitted',
         });
 
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Evaluation cleared successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
         Navigator.pop(context, true);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(
+            content: Text('Error clearing evaluation: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
+      } finally {
+        setState(() {
+          isLoading = false;
+        });
       }
     }
   }
@@ -384,6 +513,27 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               foregroundColor: Colors.purple[600],
             ),
           ),
+          // Show clear button only if evaluation exists
+          if (existingEvaluation != null)
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'clear') {
+                  _clearEvaluation();
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'clear',
+                  child: Row(
+                    children: [
+                      Icon(Icons.clear, color: Colors.orange, size: 20),
+                      SizedBox(width: 8),
+                      Text('Clear Evaluation'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
       body: Column(
@@ -419,7 +569,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                         ),
                       ),
                       Text(
-                        'ID: ${widget.submissionData['studentId'] ?? 'N/A'} • ${widget.submissionData['studentEmail'] ?? 'No email'}',
+                        'Email: ${widget.submissionData['studentEmail'] ?? 'No email'}',
                         style: TextStyle(
                           color: Colors.grey[600],
                           fontSize: 14,

@@ -6,7 +6,6 @@ import '../Authentication/auth_services.dart';
 import 'evaluation_rubric.dart';
 import 'feedback.dart';
 import 'submission_evaluation.dart';
-
 import 'evaluation_analytics.dart';
 
 class AssignmentDetailPage extends StatefulWidget {
@@ -62,10 +61,18 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       final user = _authService.currentUser;
       if (user == null) return;
 
-      final userData = await _authService.getUserData(user.uid);
-      if (userData == null) return;
+      // Get organization code from courseData first, fallback to user data
+      organizationCode = widget.courseData['organizationCode'];
 
-      organizationCode = userData['organizationCode'];
+      if (organizationCode == null || organizationCode!.isEmpty) {
+        final userData = await _authService.getUserData(user.uid);
+        if (userData == null) return;
+        organizationCode = userData['organizationCode'];
+      }
+
+      print('Loading data with organizationCode: $organizationCode');
+      print('Assignment ID: ${assignmentData['id']}');
+      print('Course ID: ${widget.courseId}');
 
       // Load latest assignment data from Firestore
       await _reloadAssignmentData();
@@ -124,30 +131,69 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     if (organizationCode == null) return;
 
     try {
-      final submissionsSnapshot = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('assignments')
-          .doc(assignmentData['id'])
-          .collection('submissions')
-          .orderBy('submittedAt', descending: true)
-          .get();
+      print('Loading submissions from path: organizations/$organizationCode/courses/${widget.courseId}/assignments/${assignmentData['id']}/submissions');
+
+      // First try without orderBy to avoid index issues
+      QuerySnapshot submissionsSnapshot;
+      try {
+        submissionsSnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(assignmentData['id'])
+            .collection('submissions')
+            .orderBy('submittedAt', descending: true)
+            .get();
+      } catch (e) {
+        print('OrderBy failed, trying without ordering: $e');
+        // If orderBy fails, get all documents and sort manually
+        submissionsSnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(assignmentData['id'])
+            .collection('submissions')
+            .get();
+      }
+
+      print('Found ${submissionsSnapshot.docs.length} submissions');
 
       List<Map<String, dynamic>> loadedSubmissions = [];
 
       for (var doc in submissionsSnapshot.docs) {
-        final submissionData = doc.data();
+        final submissionData = doc.data() as Map<String, dynamic>;
+        print('Processing submission: ${doc.id} from student: ${submissionData['studentId']}');
 
         // Get student details
-        final studentDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(submissionData['studentId'])
-            .get();
+        String studentName = 'Unknown Student';
+        String studentEmail = '';
+        String studentIdNumber = '';
 
-        if (studentDoc.exists) {
-          // Check if evaluation exists
+        try {
+          final studentDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(submissionData['studentId'])
+              .get();
+
+          if (studentDoc.exists) {
+            final studentData = studentDoc.data()!;
+            studentName = studentData['fullName'] ?? 'Unknown Student';
+            studentEmail = studentData['email'] ?? '';
+            studentIdNumber = studentData['studentId'] ?? '';
+          }
+        } catch (e) {
+          print('Error fetching student data: $e');
+        }
+
+        // Check if evaluation exists
+        Map<String, dynamic>? evaluationData;
+        bool hasEvaluation = false;
+
+        try {
           final evalDoc = await FirebaseFirestore.instance
               .collection('organizations')
               .doc(organizationCode)
@@ -161,17 +207,32 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
               .doc('current')
               .get();
 
-          loadedSubmissions.add({
-            'id': doc.id,
-            ...submissionData,
-            'studentName': studentDoc.data()?['fullName'] ?? 'Unknown Student',
-            'studentEmail': studentDoc.data()?['email'] ?? '',
-            'studentId': studentDoc.data()?['studentId'] ?? '',
-            'hasEvaluation': evalDoc.exists,
-            'evaluationData': evalDoc.exists ? evalDoc.data() : null,
-          });
+          hasEvaluation = evalDoc.exists;
+          if (evalDoc.exists) {
+            evaluationData = evalDoc.data();
+          }
+        } catch (e) {
+          print('Error checking evaluation: $e');
         }
+
+        loadedSubmissions.add({
+          'id': doc.id,
+          ...submissionData,
+          'studentName': studentName,
+          'studentEmail': studentEmail,
+          'studentId': studentIdNumber,
+          'hasEvaluation': hasEvaluation,
+          'evaluationData': evaluationData,
+        });
       }
+
+      // Sort manually if we couldn't use orderBy
+      loadedSubmissions.sort((a, b) {
+        final aTime = a['submittedAt'] as Timestamp?;
+        final bTime = b['submittedAt'] as Timestamp?;
+        if (aTime == null || bTime == null) return 0;
+        return bTime.compareTo(aTime);
+      });
 
       if (mounted) {
         setState(() {
@@ -180,6 +241,16 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       }
     } catch (e) {
       print('Error loading submissions: $e');
+      print('Stack trace: ${StackTrace.current}');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading submissions: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -201,9 +272,8 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     );
 
     if (result == true && mounted) {
-      // Reload assignment data
-      await _reloadAssignmentData();
-      await _loadSubmissions();
+      // Reload all data
+      await _loadData();
     }
   }
 
@@ -388,6 +458,14 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     }
   }
 
+  // Add refresh functionality
+  Future<void> _refreshData() async {
+    setState(() {
+      isLoading = true;
+    });
+    await _loadData();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -423,6 +501,12 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
         ),
         actions: [
           if (widget.isLecturer) ...[
+            IconButton(
+              icon: Icon(Icons.refresh),
+              color: Colors.purple[600],
+              onPressed: _refreshData,
+              tooltip: 'Refresh',
+            ),
             IconButton(
               icon: Icon(Icons.analytics_outlined),
               color: Colors.purple[600],
@@ -500,173 +584,177 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           ],
         ],
       ),
-      body: Column(
-        children: [
-          // Assignment Header
-          Container(
-            width: double.infinity,
-            margin: EdgeInsets.all(16),
-            padding: EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.orange[600]!, Colors.orange[400]!],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.orange.withValues(alpha: 0.3),
-                  blurRadius: 10,
-                  offset: Offset(0, 5),
+      body: RefreshIndicator(
+        onRefresh: _refreshData,
+        color: Colors.purple[400],
+        child: Column(
+          children: [
+            // Assignment Header
+            Container(
+              width: double.infinity,
+              margin: EdgeInsets.all(16),
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.orange[600]!, Colors.orange[400]!],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.assignment, size: 16, color: Colors.white),
-                          SizedBox(width: 4),
-                          Text(
-                            'Assignment',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (isOverdue) ...[
-                      SizedBox(width: 8),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.orange.withValues(alpha: 0.3),
+                    blurRadius: 10,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
                       Container(
                         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.3),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          'Overdue',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (hasRubric) ...[
-                      SizedBox(width: 8),
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.purple.withValues(alpha: 0.3),
+                          color: Colors.white.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.rule, size: 16, color: Colors.white),
+                            Icon(Icons.assignment, size: 16, color: Colors.white),
                             SizedBox(width: 4),
                             Text(
-                              'Rubric',
+                              'Assignment',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 12,
+                                fontSize: 14,
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ],
-                  ],
-                ),
-                SizedBox(height: 12),
-                Text(
-                  assignmentData['title'] ?? 'Assignment',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(Icons.library_books, color: Colors.white.withValues(alpha: 0.9), size: 18),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${widget.courseData['code'] ?? ''} - ${widget.courseData['title'] ?? widget.courseData['name'] ?? ''}',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.white.withValues(alpha: 0.9),
+                      if (isOverdue) ...[
+                        SizedBox(width: 8),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            'Overdue',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
                         ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
+                      ],
+                      if (hasRubric) ...[
+                        SizedBox(width: 8),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.rule, size: 16, color: Colors.white),
+                              SizedBox(width: 4),
+                              Text(
+                                'Rubric',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    assignmentData['title'] ?? 'Assignment',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.library_books, color: Colors.white.withValues(alpha: 0.9), size: 18),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${widget.courseData['code'] ?? ''} - ${widget.courseData['title'] ?? widget.courseData['name'] ?? ''}',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.white.withValues(alpha: 0.9),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
                       ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Tab Bar
+            if (widget.isLecturer)
+              Container(
+                margin: EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withValues(alpha: 0.1),
+                      blurRadius: 5,
+                      offset: Offset(0, 2),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-
-          // Tab Bar
-          if (widget.isLecturer)
-            Container(
-              margin: EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withValues(alpha: 0.1),
-                    blurRadius: 5,
-                    offset: Offset(0, 2),
-                  ),
-                ],
+                child: TabBar(
+                  controller: _tabController,
+                  indicatorColor: Colors.orange[400],
+                  indicatorWeight: 3,
+                  labelColor: Colors.orange[600],
+                  unselectedLabelColor: Colors.grey[600],
+                  labelStyle: TextStyle(fontWeight: FontWeight.bold),
+                  tabs: [
+                    Tab(text: 'Details'),
+                    Tab(text: 'Submissions (${submissions.length})'),
+                  ],
+                ),
               ),
-              child: TabBar(
+
+            // Tab Content
+            Expanded(
+              child: widget.isLecturer
+                  ? TabBarView(
                 controller: _tabController,
-                indicatorColor: Colors.orange[400],
-                indicatorWeight: 3,
-                labelColor: Colors.orange[600],
-                unselectedLabelColor: Colors.grey[600],
-                labelStyle: TextStyle(fontWeight: FontWeight.bold),
-                tabs: [
-                  Tab(text: 'Details'),
-                  Tab(text: 'Submissions (${submissions.length})'),
+                children: [
+                  _buildDetailsTab(),
+                  _buildSubmissionsTab(),
                 ],
-              ),
+              )
+                  : _buildDetailsTab(),
             ),
-
-          // Tab Content
-          Expanded(
-            child: widget.isLecturer
-                ? TabBarView(
-              controller: _tabController,
-              children: [
-                _buildDetailsTab(),
-                _buildSubmissionsTab(),
-              ],
-            )
-                : _buildDetailsTab(),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -676,6 +764,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     final attachments = assignmentData['attachments'] as List<dynamic>? ?? [];
 
     return SingleChildScrollView(
+      physics: AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -788,7 +877,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           ),
           SizedBox(height: 16),
 
-          // Rubric Card - NEW SECTION
+          // Rubric Card
           if (hasRubric && rubricData != null) ...[
             Container(
               padding: EdgeInsets.all(20),
@@ -1071,8 +1160,6 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                 ],
               ),
             ),
-
-
         ],
       ),
     );
@@ -1105,18 +1192,35 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                 color: Colors.grey[600],
               ),
             ),
+            SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _refreshData,
+              icon: Icon(Icons.refresh, color: Colors.white),
+              label: Text('Refresh', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple[400],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
           ],
         ),
       );
     }
 
-    return ListView.builder(
-      padding: EdgeInsets.all(16),
-      itemCount: submissions.length,
-      itemBuilder: (context, index) {
-        final submission = submissions[index];
-        return _buildSubmissionCard(submission);
-      },
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      color: Colors.purple[400],
+      child: ListView.builder(
+        physics: AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.all(16),
+        itemCount: submissions.length,
+        itemBuilder: (context, index) {
+          final submission = submissions[index];
+          return _buildSubmissionCard(submission);
+        },
+      ),
     );
   }
 
@@ -1171,7 +1275,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                           ),
                         ),
                         Text(
-                          'ID: ${submission['studentId']}',
+                          submission['studentEmail'] ?? 'No email',
                           style: TextStyle(
                             color: Colors.grey[600],
                             fontSize: 14,
@@ -1347,10 +1451,6 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       ),
     );
   }
-
-
-
-
 
   IconData _getFileIcon(String fileName) {
     final extension = fileName.split('.').last.toLowerCase();
