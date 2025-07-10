@@ -424,11 +424,24 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   }
 
   Future<void> _selectDueDate() async {
+    // Determine the first selectable date based on edit mode
+    DateTime firstSelectableDate;
+
+    if (widget.editMode && _dueDate != null) {
+      // In edit mode, allow selecting from the original due date or 1 year ago, whichever is earlier
+      firstSelectableDate = _dueDate!.isBefore(DateTime.now().subtract(Duration(days: 365)))
+          ? _dueDate!
+          : DateTime.now().subtract(Duration(days: 365));
+    } else {
+      // For new assignments, only allow future dates
+      firstSelectableDate = DateTime.now();
+    }
+
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: _dueDate ?? DateTime.now().add(Duration(days: 7)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(Duration(days: 365)),
+      firstDate: firstSelectableDate,
+      lastDate: DateTime.now().add(Duration(days: 365)),  // Up to 1 year in the future
     );
 
     if (picked != null && mounted) {
@@ -700,7 +713,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                       children: [
                         Expanded(
                           child: InkWell(
-                            onTap: _selectDueDate,
+                            onTap: _selectDueDate,  // Always clickable
                             child: InputDecorator(
                               decoration: InputDecoration(
                                 labelText: 'Due Date',
