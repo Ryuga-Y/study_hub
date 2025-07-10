@@ -36,7 +36,6 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
   // Feedback data
   final _feedbackController = TextEditingController();
   final _privateNotesController = TextEditingController();
-  bool _allowResubmission = false;
 
   // Submission history
   List<Map<String, dynamic>> submissionHistory = [];
@@ -95,7 +94,6 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         existingEvaluation = evalDoc.data();
         _feedbackController.text = existingEvaluation!['feedback'] ?? '';
         _privateNotesController.text = existingEvaluation!['privateNotes'] ?? '';
-        _allowResubmission = existingEvaluation!['allowResubmission'] ?? false;
 
         // Load existing scores
         if (existingEvaluation!['criteriaScores'] != null) {
@@ -233,7 +231,6 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         'criteriaScores': criteriaScores,
         'feedback': _feedbackController.text.trim(),
         'privateNotes': _privateNotesController.text.trim(),
-        'allowResubmission': _allowResubmission,
         'rubricUsed': rubric != null,
       };
 
@@ -538,7 +535,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
       ),
       body: Column(
         children: [
-          // Student Info Header
+          // Student Info Header with Submission Timing Info
           Container(
             margin: EdgeInsets.all(16),
             padding: EdgeInsets.all(16),
@@ -547,56 +544,131 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.purple[200]!),
             ),
-            child: Row(
+            child: Column(
               children: [
-                CircleAvatar(
-                  backgroundColor: Colors.purple[400],
-                  child: Text(
-                    studentInitial,
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        studentName,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: Colors.purple[400],
+                      child: Text(
+                        studentInitial,
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                       ),
-                      Text(
-                        'Email: ${widget.submissionData['studentEmail'] ?? 'No email'}',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 14,
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            studentName,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          Text(
+                            'Email: ${widget.submissionData['studentEmail'] ?? 'No email'}',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          'Current Score',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
                         ),
+                        Text(
+                          '${_calculateTotalScore().toStringAsFixed(1)}%',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                SizedBox(height: 16),
+                // Submission Timing Information
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.purple[300]!),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.info_outline, color: Colors.purple[600], size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Submission Information',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.purple[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInfoChip(
+                              'Version',
+                              '${widget.submissionData['submissionVersion'] ?? _getSubmissionVersionNumber()} of ${submissionHistory.length}',
+                              Icons.layers,
+                              Colors.blue,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: _buildInfoChip(
+                              'Status',
+                              widget.submissionData['isLate'] == true ? 'Late' : 'On Time',
+                              widget.submissionData['isLate'] == true ? Icons.warning : Icons.check_circle,
+                              widget.submissionData['isLate'] == true ? Colors.red : Colors.green,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInfoChip(
+                              'Submitted',
+                              _formatDateTime(widget.submissionData['submittedAt']),
+                              Icons.access_time,
+                              Colors.orange,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: _buildInfoChip(
+                              'Due Date',
+                              _formatDateTime(widget.assignmentData['dueDate']),
+                              Icons.calendar_today,
+                              Colors.grey,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'Current Score',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 12,
-                      ),
-                    ),
-                    Text(
-                      '${_calculateTotalScore().toStringAsFixed(1)}%',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.purple[600],
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -645,6 +717,55 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         ],
       ),
     );
+  }
+
+  Widget _buildInfoChip(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: color),
+              SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[800],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  int _getSubmissionVersionNumber() {
+    // Find the position of current submission in sorted history
+    for (int i = 0; i < submissionHistory.length; i++) {
+      if (submissionHistory[i]['id'] == widget.submissionId) {
+        return submissionHistory.length - i;
+      }
+    }
+    return 1;
   }
 
   Widget _buildRubricTab() {
@@ -966,47 +1087,6 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               ],
             ),
           ),
-          SizedBox(height: 16),
-
-          // Options
-          Container(
-            padding: EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.1),
-                  blurRadius: 10,
-                  offset: Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Options',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(height: 16),
-                CheckboxListTile(
-                  title: Text('Allow Resubmission'),
-                  subtitle: Text('Student can submit an updated version'),
-                  value: _allowResubmission,
-                  onChanged: (value) {
-                    setState(() {
-                      _allowResubmission = value ?? false;
-                    });
-                  },
-                  activeColor: Colors.purple[400],
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -1059,9 +1139,21 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                 ),
                 _buildDetailRow(
                   'Version',
-                  'Version ${submissionHistory.indexOf(submissionHistory.firstWhere((s) => s['id'] == widget.submissionId, orElse: () => {'id': ''})) + 1} of ${submissionHistory.length}',
+                  'Version ${widget.submissionData['submissionVersion'] ?? _getSubmissionVersionNumber()} of ${submissionHistory.length}',
                   Icons.history,
                 ),
+                if (widget.submissionData['isLate'] == true)
+                  _buildDetailRow(
+                    'Status',
+                    'Late Submission',
+                    Icons.warning,
+                  ),
+                if (widget.submissionData['isResubmission'] == true)
+                  _buildDetailRow(
+                    'Type',
+                    'Resubmission',
+                    Icons.refresh,
+                  ),
                 if (fileUrl != null)
                   InkWell(
                     onTap: () => _launchUrl(fileUrl),
@@ -1126,7 +1218,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                     Icon(Icons.history, color: Colors.blue[600], size: 24),
                     SizedBox(width: 12),
                     Text(
-                      'Submission History',
+                      'Submission History (${submissionHistory.length} total)',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -1137,6 +1229,9 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                 SizedBox(height: 16),
                 ...submissionHistory.map((submission) {
                   final isCurrent = submission['id'] == widget.submissionId;
+                  final isLate = submission['isLate'] == true;
+                  final isResubmission = submission['isResubmission'] == true;
+
                   return Container(
                     margin: EdgeInsets.only(bottom: 8),
                     padding: EdgeInsets.all(12),
@@ -1158,7 +1253,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                           ),
                           child: Center(
                             child: Text(
-                              '${submissionHistory.indexOf(submission) + 1}',
+                              '${submission['submissionVersion'] ?? (submissionHistory.length - submissionHistory.indexOf(submission))}',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -1171,11 +1266,51 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                _formatDateTime(submission['submittedAt']),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w500,
-                                ),
+                              Row(
+                                children: [
+                                  Text(
+                                    _formatDateTime(submission['submittedAt']),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  if (isLate) ...[
+                                    SizedBox(width: 8),
+                                    Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red[100],
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        'LATE',
+                                        style: TextStyle(
+                                          color: Colors.red[700],
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  if (isResubmission) ...[
+                                    SizedBox(width: 8),
+                                    Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue[100],
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        'RESUBMIT',
+                                        style: TextStyle(
+                                          color: Colors.blue[700],
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                               if (submission['grade'] != null)
                                 Text(

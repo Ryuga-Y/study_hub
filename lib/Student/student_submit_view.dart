@@ -203,7 +203,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
         backgroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          'My Submission',
+          'My Submissions',
           style: TextStyle(
             color: Colors.black87,
             fontSize: 20,
@@ -349,7 +349,83 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                         fontSize: 16,
                       ),
                     ),
+                    Spacer(),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${submissionHistory.length} submission${submissionHistory.length > 1 ? 's' : ''}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   ],
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 16),
+
+          // Resubmit Option - Always Available
+          Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.blue[300]!),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  blurRadius: 10,
+                  offset: Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.refresh, color: Colors.blue[600], size: 24),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Submit New Version',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'You can always submit an updated version of your work',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: _navigateToResubmit,
+                  child: Text(
+                    'Resubmit',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[600],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -374,7 +450,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
               child: Column(
                 children: [
                   Text(
-                    'Your Grade',
+                    'Latest Grade',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -529,39 +605,6 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                       ),
                     ),
                   ),
-                  if ((evaluation?['allowResubmission'] ?? false) == true) ...[
-                    SizedBox(height: 16),
-                    Container(
-                      padding: EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.green[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.green[300]!),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.info_outline, color: Colors.green[700], size: 20),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Resubmission is allowed for this assignment',
-                              style: TextStyle(
-                                color: Colors.green[700],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: _navigateToResubmit,
-                            child: Text('Resubmit'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.green[700],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -588,7 +631,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                     Icon(Icons.info_outline, color: Colors.purple[600], size: 24),
                     SizedBox(width: 12),
                     Text(
-                      'Submission Details',
+                      'Latest Submission Details',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -602,6 +645,12 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                   isGraded ? 'Graded' : 'Submitted',
                   isGraded ? Icons.check_circle : Icons.pending,
                   isGraded ? Colors.green : Colors.orange,
+                ),
+                _buildDetailRow(
+                  'Version',
+                  'Version ${latestSubmission!['submissionVersion'] ?? 1} of ${submissionHistory.length}',
+                  Icons.layers,
+                  Colors.blue,
                 ),
                 _buildDetailRow(
                   'Submitted',
@@ -731,7 +780,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                             ),
                             child: Center(
                               child: Text(
-                                '${submissionHistory.length - index}',
+                                '${submission['submissionVersion'] ?? (submissionHistory.length - index)}',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
@@ -756,6 +805,15 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                                     style: TextStyle(
                                       color: Colors.grey[600],
                                       fontSize: 12,
+                                    ),
+                                  ),
+                                if (submission['isLate'] == true)
+                                  Text(
+                                    'Late submission',
+                                    style: TextStyle(
+                                      color: Colors.red[600],
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                               ],

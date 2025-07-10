@@ -31,6 +31,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
   Map<String, dynamic>? rubricData;
   Map<String, dynamic>? latestSubmission;
   bool hasSubmitted = false;
+  int submissionCount = 0;
 
   // Upload state
   bool isUploading = false;
@@ -118,6 +119,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
 
         setState(() {
           hasSubmitted = true;
+          submissionCount = sortedDocs.length;
           latestSubmission = {
             'id': sortedDocs.first.id,
             ...sortedDocs.first.data(),
@@ -134,8 +136,84 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
     if (user == null) return;
 
     final dueDate = widget.assignment['dueDate'] as Timestamp?;
-    if (dueDate != null && dueDate.toDate().isBefore(DateTime.now())) {
-      final confirm = await showDialog<bool>(
+    final isLate = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
+
+    // Show confirmation dialog for resubmission or late submission
+    bool shouldContinue = true;
+
+    if (hasSubmitted) {
+      shouldContinue = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(Icons.refresh, color: Colors.blue, size: 24),
+              SizedBox(width: 8),
+              Text('Resubmit Assignment'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'You have already submitted this assignment ${submissionCount} time${submissionCount > 1 ? 's' : ''}.',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 12),
+              Text('This will create a new submission (Version ${submissionCount + 1}).'),
+              if (isLate) ...[
+                SizedBox(height: 12),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[300]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.warning, color: Colors.orange[700], size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This assignment is past due.',
+                          style: TextStyle(
+                            color: Colors.orange[800],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isLate ? Colors.orange : Colors.blue,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text(
+                hasSubmitted ? 'Resubmit' : (isLate ? 'Submit Late' : 'Submit'),
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ) ?? false;
+    } else if (isLate) {
+      shouldContinue = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -158,10 +236,10 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
             ),
           ],
         ),
-      );
-
-      if (confirm != true) return;
+      ) ?? false;
     }
+
+    if (!shouldContinue) return;
 
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -249,6 +327,8 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
           'grade': null,
           'feedback': null,
           'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
+          'isResubmission': hasSubmitted,
+          'submissionVersion': submissionCount + 1,
         });
 
         // Wait for the submission to be written
@@ -263,6 +343,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
 
         setState(() {
           hasSubmitted = true;
+          submissionCount = submissionCount + 1;
           latestSubmission = submissionData;
           isUploading = false;
           uploadProgress = 0.0;
@@ -271,7 +352,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Assignment submitted successfully'),
+            content: Text(hasSubmitted ? 'Assignment resubmitted successfully' : 'Assignment submitted successfully'),
             backgroundColor: Colors.green,
           ),
         );
@@ -380,7 +461,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                 });
               },
               icon: Icon(Icons.assignment_turned_in),
-              label: Text('View Submission'),
+              label: Text('View Submissions'),
               style: TextButton.styleFrom(
                 foregroundColor: Colors.purple[600],
               ),
@@ -468,7 +549,9 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              latestSubmission?['grade'] != null ? 'Graded' : 'Submitted',
+                              latestSubmission?['grade'] != null
+                                  ? 'Graded (v$submissionCount)'
+                                  : 'Submitted (v$submissionCount)',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -510,135 +593,140 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                 ),
               ),
 
-              // Quick Actions
-              if (!hasSubmitted || (latestSubmission?['grade'] == null))
-                Container(
-                  margin: EdgeInsets.symmetric(horizontal: 16),
-                  padding: EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
-                        blurRadius: 5,
-                        offset: Offset(0, 2),
+              // Submit/Resubmit Actions
+              Container(
+                margin: EdgeInsets.symmetric(horizontal: 16),
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withOpacity(0.1),
+                      blurRadius: 5,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    // Submit/Resubmit Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: isUploading ? null : _submitAssignment,
+                        icon: Icon(
+                            hasSubmitted ? Icons.refresh : Icons.upload_file,
+                            color: Colors.white
+                        ),
+                        label: Text(
+                          hasSubmitted ? 'Resubmit Assignment' : 'Submit Assignment',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: hasSubmitted ? Colors.blue[600] : Colors.orange[600],
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      if (!hasSubmitted) ...[
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: isUploading ? null : _submitAssignment,
-                            icon: Icon(Icons.upload_file, color: Colors.white),
-                            label: Text(
-                              'Submit Assignment',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange[600],
-                              padding: EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ] else ...[
-                        Container(
-                          padding: EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[300]!),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.check_circle, color: Colors.green[700], size: 20),
-                              SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Assignment Submitted',
-                                      style: TextStyle(
-                                        color: Colors.green[700],
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    if (latestSubmission != null) ...[
-                                      SizedBox(height: 4),
-                                      Text(
-                                        'Submitted: ${_formatDateTime(latestSubmission!['submittedAt'])}',
-                                        style: TextStyle(
-                                          color: Colors.green[600],
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => StudentSubmissionView(
-                                        courseId: widget.courseId,
-                                        assignmentId: widget.assignment['id'],
-                                        assignmentData: widget.assignment,
-                                        organizationCode: widget.organizationCode,
-                                      ),
-                                    ),
-                                  ).then((_) {
-                                    _loadData();
-                                  });
-                                },
-                                child: Text('View'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: Colors.green[700],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                    ),
 
-                      // Upload Progress
-                      if (isUploading) ...[
-                        SizedBox(height: 16),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    // Current submission status
+                    if (hasSubmitted) ...[
+                      SizedBox(height: 16),
+                      Container(
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.green[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green[300]!),
+                        ),
+                        child: Row(
                           children: [
-                            Text(
-                              uploadStatus,
-                              style: TextStyle(
-                                color: Colors.grey[700],
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                            Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Current Submission (Version $submissionCount)',
+                                    style: TextStyle(
+                                      color: Colors.green[700],
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  if (latestSubmission != null) ...[
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Last submitted: ${_formatDateTime(latestSubmission!['submittedAt'])}',
+                                      style: TextStyle(
+                                        color: Colors.green[600],
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
-                            SizedBox(height: 8),
-                            LinearProgressIndicator(
-                              value: uploadProgress,
-                              backgroundColor: Colors.grey[200],
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[600]!),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => StudentSubmissionView(
+                                      courseId: widget.courseId,
+                                      assignmentId: widget.assignment['id'],
+                                      assignmentData: widget.assignment,
+                                      organizationCode: widget.organizationCode,
+                                    ),
+                                  ),
+                                ).then((_) {
+                                  _loadData();
+                                });
+                              },
+                              child: Text('View All'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.green[700],
+                              ),
                             ),
                           ],
                         ),
-                      ],
+                      ),
                     ],
-                  ),
+
+                    // Upload Progress
+                    if (isUploading) ...[
+                      SizedBox(height: 16),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            uploadStatus,
+                            style: TextStyle(
+                              color: Colors.grey[700],
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          LinearProgressIndicator(
+                            value: uploadProgress,
+                            backgroundColor: Colors.grey[200],
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[600]!),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
                 ),
+              ),
 
               // Assignment Details
               Container(
