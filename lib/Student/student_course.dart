@@ -257,6 +257,79 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     final user = _authService.currentUser;
     if (user == null) return;
 
+    // Check if assignment has been graded - if so, prevent submission
+    final submission = submissions[assignment['id']];
+    if (submission != null && submission['grade'] != null) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(Icons.block, color: Colors.red, size: 24),
+              SizedBox(width: 8),
+              Text('Submission Not Allowed'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This assignment has already been graded.',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 12),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.grade, color: Colors.green[700], size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Grade: ${submission['grade']}/${assignment['points'] ?? 100}',
+                        style: TextStyle(
+                          color: Colors.green[800],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'No further submissions are allowed once an assignment has been graded.',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     final dueDate = assignment['dueDate'] as Timestamp?;
     if (dueDate != null && dueDate.toDate().isBefore(DateTime.now())) {
       final confirm = await showDialog<bool>(
@@ -1372,25 +1445,37 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                       overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 8),
-                    Row(
+
+                    // Enhanced status and grade display
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
                       children: [
-                        if (dueDate != null) ...[
-                          Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
-                          SizedBox(width: 4),
-                          Text(
-                            'Due: ${_formatDate(dueDate)}',
-                            style: TextStyle(
-                              color: isDuePassed ? Colors.red : Colors.grey[600],
-                              fontSize: 12,
-                            ),
+                        // Due date info
+                        if (dueDate != null)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
+                              SizedBox(width: 4),
+                              Text(
+                                'Due: ${_formatDate(dueDate)}',
+                                style: TextStyle(
+                                  color: isDuePassed ? Colors.red : Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
-                          SizedBox(width: 16),
-                        ],
+
+                        // Status badge
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: hasSubmitted
+                                ? (submission?['grade'] != null
                                 ? Colors.green.withValues(alpha: 0.1)
+                                : Colors.blue.withValues(alpha: 0.1))
                                 : (isDuePassed
                                 ? Colors.red.withValues(alpha: 0.1)
                                 : Colors.orange.withValues(alpha: 0.1)),
@@ -1398,37 +1483,29 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                           ),
                           child: Text(
                             hasSubmitted
-                                ? 'Submitted'
+                                ? (submission?['grade'] != null ? 'Completed' : 'Submitted')
                                 : (isDuePassed ? 'Missing' : 'Pending'),
                             style: TextStyle(
                               color: hasSubmitted
-                                  ? Colors.green
+                                  ? (submission?['grade'] != null ? Colors.green : Colors.blue)
                                   : (isDuePassed ? Colors.red : Colors.orange),
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
-                        if (hasSubmitted && submission?['grade'] != null) ...[
-                          SizedBox(width: 8),
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.purple.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              'Grade: ${submission!['grade']}/${assignment['points'] ?? 100}',
-                              style: TextStyle(
-                                color: Colors.purple,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
+
+                    // Grade display with letter grade
+                    if (hasSubmitted && submission?['grade'] != null) ...[
+                      SizedBox(height: 8),
+                      _buildGradeDisplay(
+                        grade: submission!['grade'],
+                        letterGrade: submission['letterGrade'],
+                        maxPoints: assignment['points'] ?? 100,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1438,6 +1515,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       ),
     );
   }
+
 
   Widget _buildMaterialCard(Map<String, dynamic> material) {
     final isTutorial = material['materialType'] == 'tutorial';
@@ -1681,8 +1759,9 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
   }
 
   Widget _buildOverviewTab() {
-    final completedAssignments = assignments.where((a) => submissions.containsKey(a['id'])).length;
-    final pendingAssignments = assignments.length - completedAssignments;
+    final submittedAssignments = assignments.where((a) => submissions.containsKey(a['id'])).length;
+    final completedAssignments = submissions.values.where((s) => s['grade'] != null).length;
+    final pendingAssignments = assignments.length - submittedAssignments;
 
     final tutorials = materials.where((m) => m['materialType'] == 'tutorial').toList();
     final completedTutorials = tutorials.where((t) => tutorialSubmissions.containsKey(t['id'])).length;
@@ -1806,13 +1885,13 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                   ),
                   SizedBox(height: 8),
                   LinearProgressIndicator(
-                    value: completedAssignments / assignments.length,
+                    value: submittedAssignments / assignments.length,
                     backgroundColor: Colors.grey[200],
                     valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
                   ),
                   SizedBox(height: 4),
                   Text(
-                    '${(completedAssignments / assignments.length * 100).toStringAsFixed(0)}% completed',
+                    '${(submittedAssignments / assignments.length * 100).toStringAsFixed(0)}% submitted',
                     style: TextStyle(
                       color: Colors.grey[600],
                       fontSize: 12,
@@ -1857,6 +1936,94 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         ],
       ),
     );
+  }
+
+  Widget _buildGradeDisplay({
+    required int? grade,
+    required String? letterGrade,
+    required int maxPoints,
+    double fontSize = 12,
+  }) {
+    if (grade == null) return SizedBox.shrink();
+
+    // Calculate letter grade if not provided (backwards compatibility)
+    String displayLetterGrade = letterGrade ?? '';
+    if (displayLetterGrade.isEmpty) {
+      final percentage = (grade / maxPoints) * 100;
+      displayLetterGrade = _calculateLetterGrade(percentage);
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.purple.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            'Grade: $grade/$maxPoints',
+            style: TextStyle(
+              color: Colors.purple,
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        SizedBox(width: 8),
+        Container(
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: _getLetterGradeColor(displayLetterGrade),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            displayLetterGrade,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+// Add these helper methods to the StudentCoursePage class:
+  String _calculateLetterGrade(double percentage) {
+    if (percentage >= 90) return 'A+';
+    if (percentage >= 80) return 'A';
+    if (percentage >= 75) return 'A-';
+    if (percentage >= 70) return 'B+';
+    if (percentage >= 65) return 'B';
+    if (percentage >= 60) return 'B-';
+    if (percentage >= 55) return 'C+';
+    if (percentage >= 50) return 'C';
+    return 'F'; // Below 50 is F
+  }
+
+  Color _getLetterGradeColor(String? letterGrade) {
+    if (letterGrade == null) return Colors.grey[600]!;
+
+    switch (letterGrade) {
+      case 'A+':
+      case 'A':
+      case 'A-':
+        return Colors.green[600]!;
+      case 'B+':
+      case 'B':
+      case 'B-':
+        return Colors.blue[600]!;
+      case 'C+':
+      case 'C':
+        return Colors.orange[600]!;
+      case 'F':
+        return Colors.red[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
   }
 
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {

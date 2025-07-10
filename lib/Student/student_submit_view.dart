@@ -37,6 +37,42 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
     _loadData();
   }
 
+  // Letter grade color function (same as evaluation page)
+  Color _getGradeColor(String? letterGrade) {
+    if (letterGrade == null) return Colors.grey[600]!;
+
+    switch (letterGrade) {
+      case 'A+':
+      case 'A':
+      case 'A-':
+        return Colors.green[600]!;
+      case 'B+':
+      case 'B':
+      case 'B-':
+        return Colors.blue[600]!;
+      case 'C+':
+      case 'C':
+        return Colors.orange[600]!;
+      case 'F':
+        return Colors.red[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
+  }
+
+  // Convert percentage to letter grade for backwards compatibility
+  String _calculateLetterGrade(double percentage) {
+    if (percentage >= 90) return 'A+';
+    if (percentage >= 80) return 'A';
+    if (percentage >= 75) return 'A-';
+    if (percentage >= 70) return 'B+';
+    if (percentage >= 65) return 'B';
+    if (percentage >= 60) return 'B-';
+    if (percentage >= 55) return 'C+';
+    if (percentage >= 50) return 'C';
+    return 'F'; // Below 50 is F
+  }
+
   Future<void> _loadData() async {
     try {
       setState(() {
@@ -146,6 +182,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           // Create a synthetic evaluation object from submission data
           evaluation = {
             'grade': latestSubmission!['grade'],
+            'letterGrade': latestSubmission!['letterGrade'],
             'feedback': latestSubmission!['feedback'],
             'evaluatedAt': latestSubmission!['gradedAt'] ?? latestSubmission!['submittedAt'],
           };
@@ -302,7 +339,15 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
   Widget _buildSubmissionContent() {
     final isGraded = evaluation != null || latestSubmission!['grade'] != null;
     final grade = latestSubmission!['grade'] ?? evaluation?['grade'];
+    final letterGrade = latestSubmission!['letterGrade'] ?? evaluation?['letterGrade'];
     final maxPoints = widget.assignmentData['points'] ?? 100;
+
+    // Calculate letter grade if not provided (for backwards compatibility)
+    String displayLetterGrade = letterGrade ?? '';
+    if (displayLetterGrade.isEmpty && grade != null) {
+      final percentage = (grade / maxPoints) * 100;
+      displayLetterGrade = _calculateLetterGrade(percentage);
+    }
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
@@ -372,67 +417,127 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           ),
           SizedBox(height: 16),
 
-          // Resubmit Option - Always Available
-          Container(
-            padding: EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue[300]!),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.refresh, color: Colors.blue[600], size: 24),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Submit New Version',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue[700],
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'You can always submit an updated version of your work',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
+          // Resubmit Option - Only if not graded
+          if (latestSubmission?['grade'] == null)
+            Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue[300]!),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 5),
                   ),
-                ),
-                ElevatedButton(
-                  onPressed: _navigateToResubmit,
-                  child: Text(
-                    'Resubmit',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[600],
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.refresh, color: Colors.blue[600], size: 24),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Submit New Version',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'You can submit an updated version until graded',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ],
+                  ElevatedButton(
+                    onPressed: _navigateToResubmit,
+                    child: Text(
+                      'Resubmit',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue[600],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ) else
+            Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green[300]!),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.lock, color: Colors.green[600], size: 24),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Assignment Completed',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[700],
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'This assignment has been graded. No further submissions allowed.',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.green[100],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Final',
+                      style: TextStyle(
+                        color: Colors.green[700],
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
           SizedBox(height: 16),
 
-          // Grade Card (if graded)
+          // Grade Card (if graded) - Enhanced with letter grade
           if (isGraded && grade != null)
             Container(
               padding: EdgeInsets.all(24),
@@ -450,7 +555,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
               child: Column(
                 children: [
                   Text(
-                    'Latest Grade',
+                    'Final Grade',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -458,39 +563,68 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                     ),
                   ),
                   SizedBox(height: 16),
-                  Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _getGradeColor(grade / maxPoints * 100).withOpacity(0.1),
-                      border: Border.all(
-                        color: _getGradeColor(grade / maxPoints * 100),
-                        width: 4,
-                      ),
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '$grade',
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // Letter Grade
+                      Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _getGradeColor(displayLetterGrade).withOpacity(0.1),
+                          border: Border.all(
+                            color: _getGradeColor(displayLetterGrade),
+                            width: 4,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            displayLetterGrade,
                             style: TextStyle(
-                              fontSize: 36,
+                              fontSize: 32,
                               fontWeight: FontWeight.bold,
-                              color: _getGradeColor(grade / maxPoints * 100),
+                              color: _getGradeColor(displayLetterGrade),
                             ),
                           ),
-                          Text(
-                            'out of $maxPoints',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                      // Points
+                      Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _getGradeColor(displayLetterGrade).withOpacity(0.1),
+                          border: Border.all(
+                            color: _getGradeColor(displayLetterGrade),
+                            width: 4,
+                          ),
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                '$grade',
+                                style: TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  color: _getGradeColor(displayLetterGrade),
+                                ),
+                              ),
+                              Text(
+                                'out of $maxPoints',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   SizedBox(height: 16),
                   Text(
@@ -498,7 +632,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: _getGradeColor(grade / maxPoints * 100),
+                      color: _getGradeColor(displayLetterGrade),
                     ),
                   ),
                 ],
@@ -642,7 +776,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 SizedBox(height: 16),
                 _buildDetailRow(
                   'Status',
-                  isGraded ? 'Graded' : 'Submitted',
+                  isGraded ? 'Completed' : 'Submitted',
                   isGraded ? Icons.check_circle : Icons.pending,
                   isGraded ? Colors.green : Colors.orange,
                 ),
@@ -660,7 +794,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 ),
                 if (isGraded && (evaluation?['evaluatedAt'] != null || latestSubmission!['gradedAt'] != null))
                   _buildDetailRow(
-                    'Graded',
+                    'Completed',
                     _formatDateTime(evaluation?['evaluatedAt'] ?? latestSubmission!['gradedAt']),
                     Icons.grade,
                     Colors.purple,
@@ -714,7 +848,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           ),
           SizedBox(height: 16),
 
-          // Submission History
+          // Submission History - Enhanced with letter grades
           if (submissionHistory.length > 1)
             Container(
               padding: EdgeInsets.all(20),
@@ -758,6 +892,15 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                     final index = entry.key;
                     final submission = entry.value;
                     final isCurrent = index == 0;
+                    final submissionGrade = submission['grade'];
+                    final submissionLetterGrade = submission['letterGrade'];
+
+                    // Calculate letter grade if not provided (backwards compatibility)
+                    String displayLetter = submissionLetterGrade ?? '';
+                    if (displayLetter.isEmpty && submissionGrade != null) {
+                      final percentage = (submissionGrade / maxPoints) * 100;
+                      displayLetter = _calculateLetterGrade(percentage);
+                    }
 
                     return Container(
                       margin: EdgeInsets.only(bottom: 8),
@@ -799,13 +942,35 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
-                                if (submission['grade'] != null)
-                                  Text(
-                                    'Grade: ${submission['grade']}/$maxPoints',
-                                    style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 12,
-                                    ),
+                                if (submissionGrade != null)
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'Grade: $submissionGrade/$maxPoints',
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      if (displayLetter.isNotEmpty) ...[
+                                        SizedBox(width: 8),
+                                        Container(
+                                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: _getGradeColor(displayLetter),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            displayLetter,
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 if (submission['isLate'] == true)
                                   Text(
@@ -980,14 +1145,6 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
         ],
       ),
     );
-  }
-
-  Color _getGradeColor(double percentage) {
-    if (percentage >= 90) return Colors.green[600]!;
-    if (percentage >= 80) return Colors.blue[600]!;
-    if (percentage >= 70) return Colors.orange[600]!;
-    if (percentage >= 60) return Colors.deepOrange[600]!;
-    return Colors.red[600]!;
   }
 
   IconData _getFileIcon(String fileName) {
