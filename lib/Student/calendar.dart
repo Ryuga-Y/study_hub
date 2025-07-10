@@ -878,7 +878,7 @@ class _CalendarPageState extends State<CalendarPage> {
               Text(
                 '${_selectedDate.day}',
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize: 19,
                   fontWeight: FontWeight.w500,
                   color: Colors.black87,
                 ),
