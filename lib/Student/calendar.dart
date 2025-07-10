@@ -42,13 +42,24 @@ class _CalendarPageState extends State<CalendarPage> {
       setState(() => _isLoading = true);
 
       final user = _authService.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        print('No user found');
+        return;
+      }
 
       final userData = await _authService.getUserData(user.uid);
-      if (userData == null) return;
+      if (userData == null) {
+        print('No user data found');
+        return;
+      }
 
       final orgCode = userData['organizationCode'];
-      if (orgCode == null) return;
+      if (orgCode == null) {
+        print('No organization code found');
+        return;
+      }
+
+      print('Loading events for user: ${user.uid}, org: $orgCode');
 
       final eventsSnapshot = await FirebaseFirestore.instance
           .collection('organizations')
@@ -58,38 +69,56 @@ class _CalendarPageState extends State<CalendarPage> {
           .collection('calendar_events')
           .get();
 
+      print('Found ${eventsSnapshot.docs.length} event documents');
+
       Map<DateTime, List<CalendarEvent>> events = {};
 
       for (var doc in eventsSnapshot.docs) {
         final data = doc.data();
-        final event = CalendarEvent.fromMap(doc.id, data);
+        print('Processing event document: ${doc.id}');
+        print('Event data: $data');
 
-        // Handle recurring events
-        if (event.recurrenceType != RecurrenceType.none) {
-          final recurringEvents = _generateRecurringEvents(event);
-          for (var recurringEvent in recurringEvents) {
+        try {
+          final event = CalendarEvent.fromMap(doc.id, data);
+          print('Created event: ${event.title} for ${event.startTime}');
+
+          // Handle recurring events
+          if (event.recurrenceType != RecurrenceType.none) {
+            final recurringEvents = _generateRecurringEvents(event);
+            for (var recurringEvent in recurringEvents) {
+              final eventDate = DateTime(
+                recurringEvent.startTime.year,
+                recurringEvent.startTime.month,
+                recurringEvent.startTime.day,
+              );
+              events[eventDate] = events[eventDate] ?? [];
+              events[eventDate]!.add(recurringEvent);
+              print('Added recurring event for date: $eventDate');
+            }
+          } else {
+            // IMPORTANT: Normalize the date properly
             final eventDate = DateTime(
-              recurringEvent.startTime.year,
-              recurringEvent.startTime.month,
-              recurringEvent.startTime.day,
+              event.startTime.year,
+              event.startTime.month,
+              event.startTime.day,
             );
             events[eventDate] = events[eventDate] ?? [];
-            events[eventDate]!.add(recurringEvent);
+            events[eventDate]!.add(event);
+            print('Added event for date: $eventDate');
           }
-        } else {
-          final eventDate = DateTime(
-            event.startTime.year,
-            event.startTime.month,
-            event.startTime.day,
-          );
-          events[eventDate] = events[eventDate] ?? [];
-          events[eventDate]!.add(event);
+        } catch (e) {
+          print('Error processing event ${doc.id}: $e');
         }
       }
 
       // Sort events by start time for each date
       events.forEach((date, eventList) {
         eventList.sort((a, b) => a.startTime.compareTo(b.startTime));
+      });
+
+      print('Final events map has ${events.length} dates');
+      events.forEach((date, eventList) {
+        print('Date $date has ${eventList.length} events');
       });
 
       setState(() {
@@ -179,8 +208,18 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   List<CalendarEvent> _getEventsForDay(DateTime day) {
+    // Normalize the day to remove time component
     final normalizedDay = DateTime(day.year, day.month, day.day);
     final events = _events[normalizedDay] ?? [];
+
+    // Debug print to check if events are being found
+    print('Getting events for $normalizedDay: found ${events.length} events');
+    if (events.isNotEmpty) {
+      for (var event in events) {
+        print('  - Event: ${event.title} at ${event.startTime}');
+      }
+    }
+
     return events.where((event) => _enabledCalendars.contains(event.calendar)).toList();
   }
 
@@ -579,30 +618,12 @@ class _CalendarPageState extends State<CalendarPage> {
 
     List<Widget> dayWidgets = [];
 
-    // Week headers
-    final weekHeaders = Container(
-      height: 40,
-      child: Row(
-        children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-            .map((day) => Expanded(
-          child: Container(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Center(
-              child: Text(
-                day,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ),
-          ),
-        ))
-            .toList(),
-      ),
-    );
+    // Add empty cells for days before the first day of the month
+    for (int i = 1; i < firstWeekday; i++) {
+      dayWidgets.add(Container());
+    }
 
+    // Add all days of the month
     for (int day = 1; day <= daysInMonth; day++) {
       final date = DateTime(_focusedDate.year, _focusedDate.month, day);
       final events = _getEventsForDay(date);
@@ -648,57 +669,59 @@ class _CalendarPageState extends State<CalendarPage> {
                     ),
                   ),
                 ),
-                // Events section
+                // Events section with fixed constraints
                 if (events.isNotEmpty)
-                  Expanded(
-                    child: Container(
-                      width: double.infinity,
-                      padding: EdgeInsets.symmetric(horizontal: 2),
-                      child: Column(
-                        children: [
-                          SizedBox(height: 2),
-                          // Show up to 3 events
-                          ...events.take(3).map((event) {
-                            return Container(
-                              width: double.infinity,
-                              height: 12,
-                              margin: EdgeInsets.only(bottom: 1),
-                              decoration: BoxDecoration(
-                                color: event.color,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 2),
-                                child: Text(
-                                  event.title,
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
+                  Container(
+                    width: double.infinity,
+                    height: 40, // Fixed height to prevent overflow
+                    padding: EdgeInsets.symmetric(horizontal: 2),
+                    child: Column(
+                      children: [
+                        SizedBox(height: 2),
+                        // Show up to 2 events to fit in the fixed space
+                        ...events.take(2).map((event) {
+                          return Container(
+                            width: double.infinity,
+                            height: 12,
+                            margin: EdgeInsets.only(bottom: 1),
+                            decoration: BoxDecoration(
+                              color: event.color,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 2),
+                              child: Text(
+                                event.title,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w500,
                                 ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
                               ),
-                            );
-                          }).toList(),
-                          // Show more indicator if there are more than 3 events
-                          if (events.length > 3)
-                            Text(
-                              '+${events.length - 3} more',
+                            ),
+                          );
+                        }).toList(),
+                        // Show more indicator if there are more than 2 events
+                        if (events.length > 2)
+                          Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Text(
+                              '+${events.length - 2} more',
                               style: TextStyle(
-                                fontSize: 8,
+                                fontSize: 7,
                                 color: Colors.grey[600],
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                      ],
                     ),
                   ),
-                // Add spacer if no events to maintain consistent height
+                // Fixed spacer for days without events
                 if (events.isEmpty)
-                  Expanded(child: SizedBox()),
+                  SizedBox(height: 44), // Day number (36) + events space (40) + margin (8)
               ],
             ),
           ),
@@ -706,27 +729,58 @@ class _CalendarPageState extends State<CalendarPage> {
       );
     }
 
-    // Group into weeks with equal heights
-    List<Widget> weeks = [weekHeaders];
+    // Fill remaining empty cells to complete the last week
+    while (dayWidgets.length % 7 != 0) {
+      dayWidgets.add(Container());
+    }
+
+    // Create weeks with fixed heights
+    List<Widget> weeks = [];
+
+    // Week headers
+    weeks.add(
+      Container(
+        height: 40,
+        child: Row(
+          children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+              .map((day) => Expanded(
+            child: Container(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Center(
+                child: Text(
+                  day,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ),
+            ),
+          ))
+              .toList(),
+        ),
+      ),
+    );
+
+    // Calculate number of weeks and fixed height for each week
+    final numberOfWeeks = (dayWidgets.length / 7).ceil();
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final headerHeight = 40.0;
         final availableHeight = constraints.maxHeight - headerHeight;
-        final weekCount = ((firstWeekday - 1 + daysInMonth) / 7).ceil();
-        final weekHeight = availableHeight / weekCount;
+        final weekHeight = availableHeight / numberOfWeeks;
 
+        // Create week rows
         for (int i = 0; i < dayWidgets.length; i += 7) {
           final weekWidgets = dayWidgets.skip(i).take(7).toList();
-          while (weekWidgets.length < 7) {
-            weekWidgets.add(Container());
-          }
 
           weeks.add(
             Container(
               height: weekHeight,
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start, // Align to top to prevent overflow
                 children: weekWidgets.map((widget) => Expanded(child: widget)).toList(),
               ),
             ),
@@ -746,9 +800,9 @@ class _CalendarPageState extends State<CalendarPage> {
 
     return Column(
       children: [
-        // Week header
+        // Week header with fixed height and proper constraints
         Container(
-          height: 60,
+          height: 70, // Increased height to prevent overflow
           child: Row(
             children: [
               Container(width: 60), // Time column space
@@ -756,8 +810,10 @@ class _CalendarPageState extends State<CalendarPage> {
                 final isToday = _isSameDay(day, DateTime.now());
                 return Expanded(
                   child: Container(
-                    padding: EdgeInsets.symmetric(vertical: 8),
+                    padding: EdgeInsets.symmetric(vertical: 4), // Reduced padding
                     child: Column(
+                      mainAxisSize: MainAxisSize.min, // Use minimum space needed
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           _getDayName(day.weekday).substring(0, 3),
@@ -766,6 +822,7 @@ class _CalendarPageState extends State<CalendarPage> {
                             color: Colors.grey[600],
                           ),
                         ),
+                        SizedBox(height: 4), // Fixed spacing
                         Container(
                           width: 32,
                           height: 32,
@@ -821,7 +878,7 @@ class _CalendarPageState extends State<CalendarPage> {
               Text(
                 '${_selectedDate.day}',
                 style: TextStyle(
-                  fontSize: 24,
+                  fontSize: 18,
                   fontWeight: FontWeight.w500,
                   color: Colors.black87,
                 ),
