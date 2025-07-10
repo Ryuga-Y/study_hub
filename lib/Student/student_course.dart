@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
 import 'student_assignment_details.dart';
+import '../goal_progress_service.dart'; // Import the goal service
 
 class StudentCoursePage extends StatefulWidget {
   final String courseId;
@@ -23,6 +24,7 @@ class StudentCoursePage extends StatefulWidget {
 
 class _StudentCoursePageState extends State<StudentCoursePage> with TickerProviderStateMixin {
   final AuthService _authService = AuthService();
+  final GoalProgressService _goalService = GoalProgressService(); // Add goal service
   late TabController _tabController;
 
   // Data
@@ -417,7 +419,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         final snapshot = await uploadTask;
         final fileUrl = await snapshot.ref.getDownloadURL();
 
-        await FirebaseFirestore.instance
+        final submissionRef = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(_organizationCode)
             .collection('courses')
@@ -440,14 +442,46 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
         });
 
+        // Award water buckets for assignment submission (10 buckets)
+        try {
+          await _goalService.awardAssignmentSubmission(submissionRef.id, assignment['id']);
+          print('Awarded water buckets for assignment submission');
+        } catch (e) {
+          print('Error awarding water buckets: $e');
+        }
+
         Navigator.pop(context);
 
         await _fetchSubmissions(user.uid);
 
+        // Show success message with water bucket reward
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Assignment submitted successfully'),
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(child: Text('Assignment submitted successfully!')),
+                SizedBox(width: 8),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[600],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.local_drink, size: 16, color: Colors.white),
+                      SizedBox(width: 4),
+                      Text('+10', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -582,7 +616,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           }
         }
 
-        await FirebaseFirestore.instance
+        final submissionRef = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(_organizationCode)
             .collection('courses')
@@ -601,14 +635,46 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
         });
 
+        // Award water buckets for tutorial submission (2 buckets)
+        try {
+          await _goalService.awardTutorialSubmission(submissionRef.id, material['id']);
+          print('Awarded water buckets for tutorial submission');
+        } catch (e) {
+          print('Error awarding water buckets: $e');
+        }
+
         Navigator.pop(context);
 
         await _fetchTutorialSubmissions(user.uid);
 
+        // Show success message with water bucket reward
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Tutorial submitted successfully'),
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(child: Text('Tutorial submitted successfully!')),
+                SizedBox(width: 8),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[600],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.local_drink, size: 16, color: Colors.white),
+                      SizedBox(width: 4),
+                      Text('+2', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -800,6 +866,35 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                     fontSize: 14,
                                     color: Colors.blue[900],
                                     height: 1.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        // Tutorial reward info
+                        if (isTutorial) ...[
+                          SizedBox(height: 16),
+                          Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange[50],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.orange[200]!),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.local_drink, color: Colors.orange[600], size: 20),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Submit this tutorial to earn 2 water buckets for your tree!',
+                                    style: TextStyle(
+                                      color: Colors.orange[700],
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1427,12 +1522,42 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      assignment['title'] ?? 'Assignment',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            assignment['title'] ?? 'Assignment',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        if (!hasSubmitted) ...[
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.orange[100],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.local_drink, size: 12, color: Colors.orange[700]),
+                                SizedBox(width: 2),
+                                Text(
+                                  '+10',
+                                  style: TextStyle(
+                                    color: Colors.orange[700],
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     SizedBox(height: 4),
                     Text(
@@ -1590,6 +1715,31 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                               ),
                             ),
                           ),
+                          if (!hasSubmitted) ...[
+                            SizedBox(width: 4),
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[100],
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.local_drink, size: 10, color: Colors.orange[700]),
+                                  SizedBox(width: 1),
+                                  Text(
+                                    '+2',
+                                    style: TextStyle(
+                                      color: Colors.orange[700],
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ],
                     ),

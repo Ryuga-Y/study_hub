@@ -4,6 +4,8 @@ import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
 import 'student_course.dart';
 import 'calendar.dart'; // Import the calendar page
+import '../Stu_goal.dart'; // Import the goal page
+import '../goal_progress_service.dart'; // Import the goal service
 
 class StudentHomePage extends StatefulWidget {
   const StudentHomePage({Key? key}) : super(key: key);
@@ -14,6 +16,7 @@ class StudentHomePage extends StatefulWidget {
 
 class _StudentHomePageState extends State<StudentHomePage> {
   final AuthService _authService = AuthService();
+  final GoalProgressService _goalService = GoalProgressService(); // Add goal service
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Data
@@ -22,6 +25,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
   List<Map<String, dynamic>> _enrolledCourses = [];
   int _pendingAssignments = 0;
   int _missedAssignments = 0;
+  int _waterBuckets = 0; // Add water bucket count
+  bool _isStudent = false; // Track if user is a student
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -51,6 +56,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
 
       setState(() {
         _userData = userData;
+        _isStudent = userData['role'] == 'student'; // Check if user is a student
       });
 
       // Load organization data
@@ -74,6 +80,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
       // Load enrolled courses and assignments
       await _loadEnrolledCourses(orgCode, user.uid);
       await _loadAssignmentStats(orgCode, user.uid);
+      await _loadWaterBuckets(); // Load water bucket count
     } catch (e) {
       debugPrint('Error loading data: $e');
       setState(() {
@@ -82,6 +89,28 @@ class _StudentHomePageState extends State<StudentHomePage> {
     } finally {
       setState(() {
         _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadWaterBuckets() async {
+    try {
+      // Only load water buckets if user is a student
+      final isStudent = await _goalService.isCurrentUserStudent();
+      if (isStudent) {
+        final bucketCount = await _goalService.getWaterBucketCount();
+        setState(() {
+          _waterBuckets = bucketCount;
+        });
+      } else {
+        setState(() {
+          _waterBuckets = 0; // Non-students have no buckets
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading water buckets: $e');
+      setState(() {
+        _waterBuckets = 0;
       });
     }
   }
@@ -237,6 +266,31 @@ class _StudentHomePageState extends State<StudentHomePage> {
     );
   }
 
+  void _navigateToGoalSystem() async {
+    // Check if user is a student before allowing access
+    final isStudent = await _goalService.isCurrentUserStudent();
+    if (!isStudent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🌱 Goal system is only available for students'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => StuGoal(),
+      ),
+    ).then((_) {
+      // Reload water buckets when returning from goal system
+      _loadWaterBuckets();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -294,6 +348,40 @@ class _StudentHomePageState extends State<StudentHomePage> {
         child: _buildBody(),
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
+      // Floating Action Button - ONLY FOR STUDENTS
+      floatingActionButton: _isStudent ? FloatingActionButton(
+        onPressed: _navigateToGoalSystem,
+        backgroundColor: Colors.green[600],
+        heroTag: "goal_fab",
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(Icons.local_florist, color: Colors.white, size: 28),
+            if (_waterBuckets > 0)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[600],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white, width: 1),
+                  ),
+                  child: Text(
+                    '$_waterBuckets',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ) : null, // Don't show for non-students
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -403,6 +491,40 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 _navigateToCalendar(); // Navigate to calendar page
               },
             ),
+            // Goal System - ONLY FOR STUDENTS
+            if (_isStudent)
+              ListTile(
+                leading: Icon(Icons.local_florist, color: Colors.green[600]),
+                title: const Text('Goal System'),
+                trailing: _waterBuckets > 0
+                    ? Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.local_drink, size: 14, color: Colors.orange[700]),
+                      SizedBox(width: 4),
+                      Text(
+                        '$_waterBuckets',
+                        style: TextStyle(
+                          color: Colors.orange[700],
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+                    : null,
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToGoalSystem();
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.settings),
               title: const Text('Settings'),
@@ -488,6 +610,87 @@ class _StudentHomePageState extends State<StudentHomePage> {
             ),
           ),
           const SizedBox(height: 24),
+
+          // Goal System Quick Access Card - ONLY FOR STUDENTS
+          if (_isStudent && (_waterBuckets > 0 || _pendingAssignments > 0))
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              margin: const EdgeInsets.only(bottom: 24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.green[600]!, Colors.green[400]!],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.green.withValues(alpha: 0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: InkWell(
+                onTap: _navigateToGoalSystem,
+                borderRadius: BorderRadius.circular(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.local_florist, color: Colors.white, size: 40),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Your Tree Garden',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _waterBuckets > 0
+                                ? 'You have $_waterBuckets water bucket${_waterBuckets == 1 ? '' : 's'} ready!'
+                                : 'Complete assignments to earn water buckets!',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.white.withValues(alpha: 0.9),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_waterBuckets > 0)
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[600],
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.local_drink, size: 18, color: Colors.white),
+                            SizedBox(width: 4),
+                            Text(
+                              '$_waterBuckets',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
 
           // To Do Section
           Container(
@@ -658,6 +861,9 @@ class _StudentHomePageState extends State<StudentHomePage> {
               _enrolledCourses.length,
                   (index) => _buildCourseCard(_enrolledCourses[index]),
             ),
+
+          // Extra space for floating action button
+          const SizedBox(height: 80),
         ],
       ),
     );
@@ -687,7 +893,10 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 courseData: course,
               ),
             ),
-          );
+          ).then((_) {
+            // Reload data when returning from course page
+            _loadData();
+          });
         },
         borderRadius: BorderRadius.circular(12),
         child: Padding(

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
 import 'set_goal.dart'; // Import the new set goal page
 import 'bronze_tree.dart'; // Import bronze tree
 import 'silver_tree.dart'; // Import silver tree
 import 'gold_tree.dart'; // Import gold tree
+import 'goal_progress_service.dart'; // Import the service
 
 void main() => runApp(MyApp());
 
@@ -25,17 +27,25 @@ class StuGoal extends StatefulWidget {
 }
 
 class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
+  // Firebase service
+  final GoalProgressService _goalService = GoalProgressService();
+
+  // Local state (synced with Firebase)
   int wateringCount = 0;
   double treeGrowth = 0.0;
   String goal = "No goal selected - Press 'Set Goal' to choose one";
   bool hasActiveGoal = false;
   double maxGrowth = 1.0;
-  int maxWatering = 49; // Points needed to complete one tree
+  int maxWatering = 49;
+  int waterBuckets = 0; // New: Water bucket count
 
   // Tree progression system
   TreeLevel currentTreeLevel = TreeLevel.bronze;
-  int completedTrees = 0; // Track completed trees
-  int totalProgress = 0; // Total progress across all trees
+  int completedTrees = 0;
+  int totalProgress = 0;
+
+  // Loading state
+  bool isLoading = true;
 
   late AnimationController _growthController;
   late AnimationController _flowerController;
@@ -49,13 +59,137 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   late Animation<double> _levelUpAnimation;
   late Animation<double> _waterDropAnimation;
 
-  void waterTree() {
-    if (wateringCount < maxWatering) {
+  @override
+  void initState() {
+    super.initState();
+    _initializeAnimations();
+    _loadGoalProgress();
+  }
+
+  void _initializeAnimations() {
+    _growthController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 800),
+    );
+
+    _flowerController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 2000),
+    );
+
+    _leafController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 600),
+    );
+
+    _levelUpController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 1000),
+    );
+
+    _waterAnimationController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 1000),
+    );
+
+    _scaleAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.05,
+    ).animate(CurvedAnimation(
+      parent: _growthController,
+      curve: Curves.elasticOut,
+    ));
+
+    _leafScaleAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _leafController,
+      curve: Curves.elasticOut,
+    ));
+
+    _flowerBloomAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _flowerController,
+      curve: Curves.elasticOut,
+    ));
+
+    _flowerRotationAnimation = Tween<double>(
+      begin: 0.0,
+      end: 2 * math.pi,
+    ).animate(CurvedAnimation(
+      parent: _flowerController,
+      curve: Curves.easeInOut,
+    ));
+
+    _levelUpAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _levelUpController,
+      curve: Curves.bounceOut,
+    ));
+
+    _waterDropAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _waterAnimationController,
+      curve: Curves.easeOutCubic,
+    ));
+  }
+
+  // Load goal progress from Firebase
+  Future<void> _loadGoalProgress() async {
+    try {
+      final progress = await _goalService.getGoalProgress();
+      if (progress != null && mounted) {
+        setState(() {
+          wateringCount = progress['wateringCount'] ?? 0;
+          treeGrowth = (progress['treeGrowth'] ?? 0.0).toDouble();
+          goal = progress['currentGoal'] ?? "No goal selected - Press 'Set Goal' to choose one";
+          hasActiveGoal = progress['hasActiveGoal'] ?? false;
+          maxWatering = progress['maxWatering'] ?? 49;
+          waterBuckets = progress['waterBuckets'] ?? 0;
+
+          String treeLevelString = progress['currentTreeLevel'] ?? 'bronze';
+          currentTreeLevel = TreeLevel.values.firstWhere(
+                (e) => e.toString().split('.').last == treeLevelString,
+            orElse: () => TreeLevel.bronze,
+          );
+
+          completedTrees = progress['completedTrees'] ?? 0;
+          totalProgress = progress['totalProgress'] ?? 0;
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading goal progress: $e');
       setState(() {
-        wateringCount++;
-        totalProgress++;
-        treeGrowth = wateringCount / maxWatering;
+        isLoading = false;
       });
+    }
+  }
+
+  void waterTree() async {
+    // Check if we have water buckets
+    if (waterBuckets <= 0) {
+      _showNoWaterBucketsMessage();
+      return;
+    }
+
+    // Use water bucket through Firebase
+    final success = await _goalService.useWaterBucket();
+
+    if (success) {
+      // Reload progress from Firebase
+      await _loadGoalProgress();
 
       // Play animations
       _growthController.forward(from: 0.0);
@@ -66,39 +200,34 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       if (treeGrowth >= 1.0) {
         _flowerController.forward();
 
-        // After a delay, level up the tree
+        // After a delay, level up the tree (handled by Firebase)
         Future.delayed(Duration(milliseconds: 2000), () {
-          _levelUpTree();
+          _showLevelUpMessage();
+          _levelUpController.forward(from: 0.0);
+
+          // Reset animations
+          _flowerController.reset();
+          _growthController.reset();
+          _leafController.reset();
+          _waterAnimationController.reset();
         });
       }
     }
   }
 
-  void _levelUpTree() {
-    setState(() {
-      completedTrees++;
-      wateringCount = 0;
-      treeGrowth = 0.0;
-
-      // Progress to next tree level
-      if (currentTreeLevel == TreeLevel.bronze && completedTrees >= 1) {
-        currentTreeLevel = TreeLevel.silver;
-      } else if (currentTreeLevel == TreeLevel.silver && completedTrees >= 2) {
-        currentTreeLevel = TreeLevel.gold;
-      }
-    });
-
-    // Reset animations
-    _flowerController.reset();
-    _growthController.reset();
-    _leafController.reset();
-    _waterAnimationController.reset();
-
-    // Play level up animation
-    _levelUpController.forward(from: 0.0);
-
-    // Show level up message
-    _showLevelUpMessage();
+  void _showNoWaterBucketsMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('🪣 No water buckets! Complete assignments or tutorials to earn more.'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 3),
+        action: SnackBarAction(
+          label: 'OK',
+          textColor: Colors.white,
+          onPressed: () {},
+        ),
+      ),
+    );
   }
 
   void _showLevelUpMessage() {
@@ -133,8 +262,11 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   }
 
   // Function to update goal from the set goal page
-  void updateGoal(String newGoal) {
-    print('Updating goal to: $newGoal'); // Debug print
+  void updateGoal(String newGoal) async {
+    print('Updating goal to: $newGoal');
+
+    await _goalService.updateGoal(newGoal);
+
     setState(() {
       goal = newGoal;
       hasActiveGoal = true;
@@ -340,84 +472,6 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   }
 
   @override
-  void initState() {
-    super.initState();
-
-    _growthController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 800),
-    );
-
-    _flowerController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 2000),
-    );
-
-    _leafController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 600),
-    );
-
-    _levelUpController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1000),
-    );
-
-    _waterAnimationController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1000),
-    );
-
-    _scaleAnimation = Tween<double>(
-      begin: 1.0,
-      end: 1.05,
-    ).animate(CurvedAnimation(
-      parent: _growthController,
-      curve: Curves.elasticOut,
-    ));
-
-    _leafScaleAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _leafController,
-      curve: Curves.elasticOut,
-    ));
-
-    _flowerBloomAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _flowerController,
-      curve: Curves.elasticOut,
-    ));
-
-    _flowerRotationAnimation = Tween<double>(
-      begin: 0.0,
-      end: 2 * math.pi,
-    ).animate(CurvedAnimation(
-      parent: _flowerController,
-      curve: Curves.easeInOut,
-    ));
-
-    _levelUpAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _levelUpController,
-      curve: Curves.bounceOut,
-    ));
-
-    _waterDropAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _waterAnimationController,
-      curve: Curves.easeOutCubic,
-    ));
-  }
-
-  @override
   void dispose() {
     _growthController.dispose();
     _flowerController.dispose();
@@ -429,6 +483,21 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return Scaffold(
+        backgroundColor: Colors.lightBlue[50],
+        appBar: AppBar(
+          title: Text('StudyHub'),
+          backgroundColor: Colors.white,
+        ),
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.lightBlue[50],
       appBar: AppBar(
@@ -501,29 +570,73 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
             ),
             SizedBox(height: 15),
 
-            // Water Button
-            GestureDetector(
-              onTap: waterTree,
-              child: AnimatedContainer(
-                duration: Duration(milliseconds: 200),
-                padding: EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.blueAccent,
-                  borderRadius: BorderRadius.circular(50),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.blue.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: Offset(0, 4),
+            // Water Button with Bucket Count
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                GestureDetector(
+                  onTap: waterTree,
+                  child: AnimatedContainer(
+                    duration: Duration(milliseconds: 200),
+                    padding: EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: waterBuckets > 0 ? Colors.blueAccent : Colors.grey[400],
+                      borderRadius: BorderRadius.circular(50),
+                      boxShadow: [
+                        BoxShadow(
+                          color: (waterBuckets > 0 ? Colors.blue : Colors.grey).withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
                     ),
-                  ],
+                    child: Icon(
+                      Icons.water_drop_outlined,
+                      size: 50,
+                      color: Colors.white,
+                    ),
+                  ),
                 ),
-                child: Icon(
-                  Icons.water_drop_outlined,
-                  size: 50,
-                  color: Colors.white,
+                // Water bucket count at bottom right
+                Positioned(
+                  right: -5,
+                  bottom: -5,
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.orange[600],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.orange.withOpacity(0.3),
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.local_drink,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                        SizedBox(width: 2),
+                        Text(
+                          '$waterBuckets',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
             SizedBox(height: 15),
 
@@ -610,16 +723,42 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
 
             SizedBox(height: 15),
 
+            // Water Bucket Info
+            if (waterBuckets > 0)
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange[100],
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.orange[300]!),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.local_drink, color: Colors.orange[700], size: 16),
+                    SizedBox(width: 6),
+                    Text(
+                      'You have $waterBuckets water bucket${waterBuckets == 1 ? '' : 's'}!',
+                      style: TextStyle(
+                        color: Colors.orange[700],
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            SizedBox(height: 15),
+
             // Set Goal Button
             ElevatedButton(
               onPressed: () async {
-                // Navigate to set goal page with callback
                 await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => SetGoalPage(
                       onGoalStarred: (String starredGoal) {
-                        // This callback will be called when a goal is starred
                         updateGoal(starredGoal);
                       },
                     ),
