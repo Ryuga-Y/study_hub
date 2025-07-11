@@ -1272,7 +1272,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
         if (isUploading)
           Positioned.fill(
             child: Container(
-              color: Colors.black.withOpacity(0.5),
+              color: Colors.black.withValues(alpha: 0.5),
               child: Center(
                 child: Container(
                   margin: EdgeInsets.all(20),
@@ -1282,7 +1282,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
+                        color: Colors.black.withValues(alpha: 0.2),
                         blurRadius: 10,
                         offset: Offset(0, 5),
                       ),

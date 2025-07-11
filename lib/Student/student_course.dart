@@ -952,7 +952,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                 border: Border.all(color: Colors.grey[300]!),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.grey.withOpacity(0.1),
+                                    color: Colors.grey.withValues(alpha: 0.1),
                                     blurRadius: 2,
                                     offset: Offset(0, 1),
                                   ),
@@ -1070,7 +1070,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.grey.withOpacity(0.1),
+                          color: Colors.grey.withValues(alpha: 0.1),
                           blurRadius: 10,
                           offset: Offset(0, -5),
                         ),
@@ -2129,7 +2129,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         Container(
           padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.purple.withOpacity(0.1),
+            color: Colors.purple.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text(

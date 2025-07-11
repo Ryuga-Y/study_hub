@@ -365,7 +365,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.orange.withOpacity(0.3),
+                  color: Colors.orange.withValues(alpha: 0.3),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
@@ -385,12 +385,12 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 SizedBox(height: 8),
                 Row(
                   children: [
-                    Icon(Icons.grade, color: Colors.white.withOpacity(0.9), size: 18),
+                    Icon(Icons.grade, color: Colors.white.withValues(alpha: 0.9), size: 18),
                     SizedBox(width: 8),
                     Text(
                       'Total Points: $maxPoints',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.9),
+                        color: Colors.white.withValues(alpha: 0.9),
                         fontSize: 16,
                       ),
                     ),
@@ -398,7 +398,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                     Container(
                       padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
+                        color: Colors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -427,7 +427,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 border: Border.all(color: Colors.blue[300]!),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.grey.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 5),
                   ),
@@ -484,7 +484,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 border: Border.all(color: Colors.green[300]!),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.grey.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 5),
                   ),
@@ -546,7 +546,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.grey.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 5),
                   ),
@@ -572,7 +572,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                         height: 100,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _getGradeColor(displayLetterGrade).withOpacity(0.1),
+                          color: _getGradeColor(displayLetterGrade).withValues(alpha: 0.1),
                           border: Border.all(
                             color: _getGradeColor(displayLetterGrade),
                             width: 4,
@@ -595,7 +595,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                         height: 100,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _getGradeColor(displayLetterGrade).withOpacity(0.1),
+                          color: _getGradeColor(displayLetterGrade).withValues(alpha: 0.1),
                           border: Border.all(
                             color: _getGradeColor(displayLetterGrade),
                             width: 4,
@@ -648,7 +648,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 border: Border.all(color: Colors.orange[300]!),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.grey.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 5),
                   ),
@@ -701,7 +701,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.grey.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 5),
                   ),
@@ -751,7 +751,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
@@ -857,7 +857,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.grey.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 5),
                   ),
@@ -1071,7 +1071,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.grey.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 5),
                   ),
@@ -1240,7 +1240,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 10,
             offset: Offset(0, 5),
           ),
