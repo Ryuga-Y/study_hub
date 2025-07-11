@@ -538,7 +538,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           SizedBox(height: 16),
 
           // Grade Card (if graded) - Enhanced with letter grade
-          if (isGraded && grade != null)if (isGraded && grade != null)
+          if (isGraded && grade != null)
             Container(
               padding: EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -848,7 +848,221 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           ),
           SizedBox(height: 16),
 
-          // Submission History - Enhanced with letter grades
+          // Enhanced Submission Versions - Shows version history of the same submission
+          if (latestSubmission!['submissionVersion'] != null && latestSubmission!['submissionVersion'] > 1)
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.history, color: Colors.grey[600], size: 24),
+                      SizedBox(width: 12),
+                      Text(
+                        'Submission Versions',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 16),
+                  Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue[200]!),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.blue[600], size: 20),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Current Version: ${latestSubmission!['submissionVersion']}',
+                                style: TextStyle(
+                                  color: Colors.blue[700],
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'You have updated your submission ${latestSubmission!['submissionVersion'] - 1} time${(latestSubmission!['submissionVersion'] - 1) > 1 ? 's' : ''}',
+                                style: TextStyle(
+                                  color: Colors.blue[600],
+                                  fontSize: 14,
+                                ),
+                              ),
+                              if (latestSubmission!['resubmittedAt'] != null) ...[
+                                SizedBox(height: 4),
+                                Text(
+                                  'Last updated: ${_formatDateTime(latestSubmission!['resubmittedAt'])}',
+                                  style: TextStyle(
+                                    color: Colors.blue[600],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Version Details',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  SizedBox(height: 12),
+                  // Initial submission
+                  Container(
+                    margin: EdgeInsets.only(bottom: 8),
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[400],
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Text(
+                              'V1',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Initial Submission',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              Text(
+                                _formatDateTime(latestSubmission!['submittedAt']),
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Current version (if resubmitted)
+                  if (latestSubmission!['resubmittedAt'] != null)
+                    Container(
+                      padding: EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue[300]!),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: Colors.blue[400],
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                'V${latestSubmission!['submissionVersion']}',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Current Version',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.blue[700],
+                                  ),
+                                ),
+                                Text(
+                                  _formatDateTime(latestSubmission!['resubmittedAt']),
+                                  style: TextStyle(
+                                    color: Colors.blue[600],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[400],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              'Latest',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+          // Submission History - Enhanced with letter grades (only if multiple separate submissions)
           if (submissionHistory.length > 1)
             Container(
               padding: EdgeInsets.all(20),
@@ -894,6 +1108,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                     final isCurrent = index == 0;
                     final submissionGrade = submission['grade'];
                     final submissionLetterGrade = submission['letterGrade'];
+                    final maxPoints = widget.assignmentData['points'] ?? 100;
 
                     // Calculate letter grade if not provided (backwards compatibility)
                     String displayLetter = submissionLetterGrade ?? '';
