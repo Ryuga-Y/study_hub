@@ -458,10 +458,10 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
         });
 
-        // Award water buckets for assignment submission (10 buckets)
+        // Award water buckets for assignment submission (4 buckets)
         try {
           await _goalService.awardAssignmentSubmission(submissionRef.id, assignment['id']);
-          print('Awarded water buckets for assignment submission');
+          print('Awarded 4 water buckets for assignment submission');
         } catch (e) {
           print('Error awarding water buckets: $e');
         }
@@ -492,7 +492,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                     children: [
                       Icon(Icons.local_drink, size: 16, color: Colors.white),
                       SizedBox(width: 4),
-                      Text('+10', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      Text('+4', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ),
@@ -502,6 +502,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
             duration: Duration(seconds: 4),
           ),
         );
+
       }
     } catch (e) {
       // Close loading dialog if it's open
@@ -687,7 +688,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                     children: [
                       Icon(Icons.local_drink, size: 16, color: Colors.white),
                       SizedBox(width: 4),
-                      Text('+2', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      Text('+1', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ),
@@ -1749,7 +1750,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                   Icon(Icons.local_drink, size: 10, color: Colors.orange[700]),
                                   SizedBox(width: 1),
                                   Text(
-                                    '+2',
+                                    '+1',
                                     style: TextStyle(
                                       color: Colors.orange[700],
                                       fontSize: 9,

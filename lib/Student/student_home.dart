@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async'; // Add Timer import
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
 import 'student_course.dart';
@@ -37,6 +38,91 @@ class _StudentHomePageState extends State<StudentHomePage> {
   void initState() {
     super.initState();
     _loadData();
+    _startListeningForSubmissions(); // Add automatic submission detection
+  }
+
+  // Start listening for new submissions automatically
+  void _startListeningForSubmissions() {
+    // Check for new submissions when app starts
+    _checkForNewSubmissions();
+
+    // Set up periodic checks (every 10 seconds for faster detection)
+    Timer.periodic(Duration(seconds: 10), (timer) {
+      if (mounted) {
+        _checkForNewSubmissions();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  // Check for new submissions and update water buckets
+  Future<void> _checkForNewSubmissions() async {
+    try {
+      await _goalService.checkAndProcessNewSubmissions();
+
+      // Reload water bucket count to update FAB
+      final previousBuckets = _waterBuckets;
+      await _loadWaterBuckets();
+
+      // Show notification if buckets increased
+      if (_waterBuckets > previousBuckets) {
+        final bucketsAdded = _waterBuckets - previousBuckets;
+        _showBucketRewardNotification(bucketsAdded);
+      }
+    } catch (e) {
+      print('Error checking for new submissions: $e');
+    }
+  }
+
+  // Show notification when water buckets are earned
+  void _showBucketRewardNotification(int bucketsAdded) {
+    String submissionType = '';
+    if (bucketsAdded == 1) {
+      submissionType = 'tutorial';
+    } else if (bucketsAdded == 4) {
+      submissionType = 'assignment';
+    } else {
+      submissionType = 'submission';
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.celebration, color: Colors.white),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text('🎉 You earned $bucketsAdded water bucket${bucketsAdded == 1 ? '' : 's'} for completing a $submissionType!'),
+            ),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.local_drink, size: 16, color: Colors.white),
+                  SizedBox(width: 4),
+                  Text(
+                    '+$bucketsAdded',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.green[600],
+        duration: Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _loadData() async {
@@ -361,19 +447,31 @@ class _StudentHomePageState extends State<StudentHomePage> {
               Positioned(
                 right: 0,
                 top: 0,
-                child: Container(
+                child: AnimatedContainer(
+                  duration: Duration(milliseconds: 300),
                   padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: Colors.orange[600],
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: Colors.white, width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.orange.withOpacity(0.4),
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
                   ),
-                  child: Text(
-                    '$_waterBuckets',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                  child: AnimatedSwitcher(
+                    duration: Duration(milliseconds: 300),
+                    child: Text(
+                      '$_waterBuckets',
+                      key: ValueKey(_waterBuckets),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
