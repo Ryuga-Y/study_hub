@@ -33,7 +33,7 @@ class GoalProgressService {
     }
   }
 
-  // Get current user's goal progress
+  // Get current user's goal progress with real-time updates
   Stream<DocumentSnapshot> getGoalProgressStream() {
     final userId = _auth.currentUser?.uid;
     if (userId == null) throw Exception('User not authenticated');
@@ -42,6 +42,145 @@ class GoalProgressService {
         .collection('goalProgress')
         .doc(userId)
         .snapshots();
+  }
+
+  // Listen for new submissions and award buckets automatically
+  Stream<List<DocumentSnapshot>> listenForNewSubmissions() {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) throw Exception('User not authenticated');
+
+    // Listen to the user's submission rewards collection
+    return _firestore
+        .collection('submissionRewards')
+        .doc(userId)
+        .collection('rewards')
+        .snapshots()
+        .map((snapshot) => snapshot.docs);
+  }
+
+  // Check and process any new submissions that haven't been rewarded yet
+  Future<void> checkAndProcessNewSubmissions() async {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null || !await _verifyStudentAccess()) return;
+
+    try {
+      // Get user's organization and courses
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) return;
+
+      final userData = userDoc.data()!;
+      final orgCode = userData['organizationCode'];
+      if (orgCode == null) return;
+
+      // Get all courses this student is enrolled in
+      final enrollmentsSnapshot = await _firestore
+          .collectionGroup('enrollments')
+          .where('studentId', isEqualTo: userId)
+          .get();
+
+      // Check for new assignment submissions
+      for (var enrollment in enrollmentsSnapshot.docs) {
+        final courseRef = enrollment.reference.parent.parent;
+        if (courseRef == null) continue;
+
+        // Check assignment submissions
+        await _checkCourseAssignmentSubmissions(courseRef.id, orgCode, userId);
+
+        // Check tutorial submissions
+        await _checkCourseTutorialSubmissions(courseRef.id, orgCode, userId);
+      }
+    } catch (e) {
+      print('Error checking new submissions: $e');
+    }
+  }
+
+  // Check for new assignment submissions in a course
+  Future<void> _checkCourseAssignmentSubmissions(String courseId, String orgCode, String userId) async {
+    try {
+      final assignmentsSnapshot = await _firestore
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('assignments')
+          .get();
+
+      for (var assignment in assignmentsSnapshot.docs) {
+        final submissionsSnapshot = await _firestore
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('assignments')
+            .doc(assignment.id)
+            .collection('submissions')
+            .where('studentId', isEqualTo: userId)
+            .get();
+
+        for (var submission in submissionsSnapshot.docs) {
+          // Check if this submission has been rewarded
+          final rewardDoc = await _firestore
+              .collection('submissionRewards')
+              .doc(userId)
+              .collection('rewards')
+              .doc(submission.id)
+              .get();
+
+          if (!rewardDoc.exists) {
+            // Award buckets for this new submission
+            await awardAssignmentSubmission(submission.id, assignment.id);
+            print('Awarded 4 buckets for assignment submission: ${submission.id}');
+          }
+        }
+      }
+    } catch (e) {
+      print('Error checking assignment submissions: $e');
+    }
+  }
+
+  // Check for new tutorial submissions in a course
+  Future<void> _checkCourseTutorialSubmissions(String courseId, String orgCode, String userId) async {
+    try {
+      final materialsSnapshot = await _firestore
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('materials')
+          .where('materialType', isEqualTo: 'tutorial')
+          .get();
+
+      for (var material in materialsSnapshot.docs) {
+        final submissionsSnapshot = await _firestore
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('materials')
+            .doc(material.id)
+            .collection('submissions')
+            .where('studentId', isEqualTo: userId)
+            .get();
+
+        for (var submission in submissionsSnapshot.docs) {
+          // Check if this submission has been rewarded
+          final rewardDoc = await _firestore
+              .collection('submissionRewards')
+              .doc(userId)
+              .collection('rewards')
+              .doc(submission.id)
+              .get();
+
+          if (!rewardDoc.exists) {
+            // Award buckets for this new submission
+            await awardTutorialSubmission(submission.id, material.id);
+            print('Awarded 1 bucket for tutorial submission: ${submission.id}');
+          }
+        }
+      }
+    } catch (e) {
+      print('Error checking tutorial submissions: $e');
+    }
   }
 
   // Get current goal progress as a future
@@ -87,7 +226,7 @@ class GoalProgressService {
       'currentTreeLevel': 'bronze',
       'completedTrees': 0,
       'totalProgress': 0,
-      'maxWatering': 49,
+      'maxWatering': 20, // Changed to 20 since each bucket = 5% (20 buckets = 100%)
       'lastUpdated': FieldValue.serverTimestamp(),
       'createdAt': FieldValue.serverTimestamp(),
     };
@@ -116,24 +255,24 @@ class GoalProgressService {
         .update(progress);
   }
 
-  // Award water buckets for tutorial submission (2 buckets, 5% each)
+  // Award water buckets for tutorial submission (1 bucket = 5% growth potential)
   Future<void> awardTutorialSubmission(String submissionId, String materialId) async {
     // Verify user is a student before awarding
     if (!await _verifyStudentAccess()) {
       print('Tutorial reward skipped: User is not a student');
       return;
     }
-    await _awardWaterBuckets(submissionId, 2, 'tutorial');
+    await _awardWaterBuckets(submissionId, 1, 'tutorial');
   }
 
-  // Award water buckets for assignment submission (10 buckets, 10% each)
+  // Award water buckets for assignment submission (4 buckets = 20% growth potential)
   Future<void> awardAssignmentSubmission(String submissionId, String assignmentId) async {
     // Verify user is a student before awarding
     if (!await _verifyStudentAccess()) {
       print('Assignment reward skipped: User is not a student');
       return;
     }
-    await _awardWaterBuckets(submissionId, 10, 'assignment');
+    await _awardWaterBuckets(submissionId, 4, 'assignment');
   }
 
   // Internal method to award water buckets (ONLY for students)
@@ -198,6 +337,7 @@ class GoalProgressService {
   }
 
   // Use a water bucket (called when watering tree) - ONLY for students
+  // Each bucket increases growth by 5%
   Future<bool> useWaterBucket() async {
     final userId = _auth.currentUser?.uid;
     if (userId == null) throw Exception('User not authenticated');
@@ -221,22 +361,28 @@ class GoalProgressService {
     int waterBuckets = currentProgress['waterBuckets'] ?? 0;
     int wateringCount = currentProgress['wateringCount'] ?? 0;
     double treeGrowth = (currentProgress['treeGrowth'] ?? 0.0).toDouble();
-    int maxWatering = currentProgress['maxWatering'] ?? 49;
+    int maxWatering = currentProgress['maxWatering'] ?? 20;
 
     // Check if we have water buckets and tree is not complete
-    if (waterBuckets <= 0 || wateringCount >= maxWatering) {
+    if (waterBuckets <= 0 || treeGrowth >= 1.0) {
       return false;
     }
 
-    // Use one water bucket
+    // Use one water bucket and increase growth by 5%
     waterBuckets--;
     wateringCount++;
+    treeGrowth += 0.05; // Each bucket = 5% growth
+
+    // Ensure treeGrowth doesn't exceed 1.0
+    if (treeGrowth > 1.0) {
+      treeGrowth = 1.0;
+    }
+
     int totalProgress = currentProgress['totalProgress'] ?? 0;
     totalProgress++;
-    treeGrowth = wateringCount / maxWatering;
 
-    // Check if tree is complete
-    if (wateringCount >= maxWatering) {
+    // Check if tree is complete (100% growth)
+    if (treeGrowth >= 1.0) {
       // Tree completed, level up
       String currentTreeLevel = currentProgress['currentTreeLevel'] ?? 'bronze';
       int completedTrees = currentProgress['completedTrees'] ?? 0;
@@ -260,6 +406,7 @@ class GoalProgressService {
         'currentTreeLevel': currentTreeLevel,
         'completedTrees': completedTrees,
         'totalProgress': totalProgress,
+        'maxWatering': 20, // Reset max watering for new tree
       });
     } else {
       await updateGoalProgress({
@@ -316,5 +463,62 @@ class GoalProgressService {
   // Check if current user is a student (public method)
   Future<bool> isCurrentUserStudent() async {
     return await _verifyStudentAccess();
+  }
+
+  // Get detailed submission statistics for water buckets
+  Future<Map<String, dynamic>> getSubmissionStats() async {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null || !await _verifyStudentAccess()) {
+      return {
+        'totalAssignments': 0,
+        'totalTutorials': 0,
+        'totalBuckets': 0,
+        'assignmentBuckets': 0,
+        'tutorialBuckets': 0,
+      };
+    }
+
+    try {
+      final rewardsSnapshot = await _firestore
+          .collection('submissionRewards')
+          .doc(userId)
+          .collection('rewards')
+          .get();
+
+      int assignmentCount = 0;
+      int tutorialCount = 0;
+      int totalBuckets = 0;
+
+      for (var doc in rewardsSnapshot.docs) {
+        final data = doc.data();
+        final type = data['type'] as String?;
+        final buckets = data['buckets'] as int? ?? 0;
+
+        totalBuckets += buckets;
+
+        if (type == 'assignment') {
+          assignmentCount++;
+        } else if (type == 'tutorial') {
+          tutorialCount++;
+        }
+      }
+
+      return {
+        'totalAssignments': assignmentCount,
+        'totalTutorials': tutorialCount,
+        'totalBuckets': totalBuckets,
+        'assignmentBuckets': assignmentCount * 20,
+        'tutorialBuckets': tutorialCount * 5,
+      };
+    } catch (e) {
+      print('Error getting submission stats: $e');
+      return {
+        'totalAssignments': 0,
+        'totalTutorials': 0,
+        'totalBuckets': 0,
+        'assignmentBuckets': 0,
+        'tutorialBuckets': 0,
+      };
+    }
   }
 }
