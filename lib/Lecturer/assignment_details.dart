@@ -1228,6 +1228,8 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     final submittedAt = submission['submittedAt'] as Timestamp?;
     final isGraded = submission['grade'] != null;
     final hasDetailedEvaluation = submission['hasEvaluation'] == true;
+    final letterGrade = submission['letterGrade'];
+    final percentage = submission['percentage'];
 
     return Container(
       margin: EdgeInsets.only(bottom: 12),
@@ -1298,7 +1300,26 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                         color: Colors.purple[600],
                       ),
                     ),
-                  if (isGraded)
+                  if (isGraded) ...[
+                    // Show letter grade if available
+                    if (letterGrade != null)
+                      Container(
+                        margin: EdgeInsets.only(right: 8),
+                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _getLetterGradeColor(letterGrade),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          letterGrade,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    // Show points and percentage
                     Container(
                       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
@@ -1306,16 +1327,28 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(color: Colors.green[300]!),
                       ),
-                      child: Text(
-                        '${submission['grade']}/${assignmentData['points'] ?? 100}',
-                        style: TextStyle(
-                          color: Colors.green[700],
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
+                      child: Column(
+                        children: [
+                          Text(
+                            '${submission['grade']}/${assignmentData['points'] ?? 100}',
+                            style: TextStyle(
+                              color: Colors.green[700],
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          if (percentage != null)
+                            Text(
+                              '${percentage.toStringAsFixed(1)}%',
+                              style: TextStyle(
+                                color: Colors.green[600],
+                                fontSize: 10,
+                              ),
+                            ),
+                        ],
                       ),
-                    )
-                  else
+                    ),
+                  ] else
                     ElevatedButton(
                       onPressed: () => _navigateToEvaluation(submission),
                       style: ElevatedButton.styleFrom(
@@ -1340,8 +1373,27 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                       fontSize: 12,
                     ),
                   ),
+                  if (submission['status'] == 'completed') ...[
+                    SizedBox(width: 12),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.green[100],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Completed',
+                        style: TextStyle(
+                          color: Colors.green[700],
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
+              // File attachment display
               if (submission['fileName'] != null) ...[
                 SizedBox(height: 8),
                 Row(
@@ -1362,6 +1414,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                   ],
                 ),
               ],
+              // Detailed evaluation feedback
               if (hasDetailedEvaluation && submission['evaluationData'] != null) ...[
                 SizedBox(height: 8),
                 Container(
@@ -1475,6 +1528,28 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
         return Icons.folder_zip;
       default:
         return Icons.insert_drive_file;
+    }
+  }
+
+  Color _getLetterGradeColor(String? letterGrade) {
+    if (letterGrade == null) return Colors.grey[600]!;
+
+    switch (letterGrade) {
+      case 'A+':
+      case 'A':
+      case 'A-':
+        return Colors.green[600]!;
+      case 'B+':
+      case 'B':
+      case 'B-':
+        return Colors.blue[600]!;
+      case 'C+':
+      case 'C':
+        return Colors.orange[600]!;
+      case 'F':
+        return Colors.red[600]!;
+      default:
+        return Colors.grey[600]!;
     }
   }
 

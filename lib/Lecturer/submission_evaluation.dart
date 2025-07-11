@@ -218,6 +218,10 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
       final totalPoints = widget.assignmentData['points'] ?? 100;
       final grade = (totalScore * totalPoints / 100).round();
 
+      // Calculate percentage and letter grade
+      final percentage = (grade / totalPoints) * 100;
+      final letterGrade = _calculateLetterGrade(percentage);
+
       final evaluationData = {
         'submissionId': widget.submissionId,
         'studentId': widget.submissionData['studentId'],
@@ -226,6 +230,8 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         'evaluatorId': FirebaseAuth.instance.currentUser?.uid,
         'evaluatedAt': FieldValue.serverTimestamp(),
         'grade': grade,
+        'letterGrade': letterGrade, // Add letter grade
+        'percentage': percentage, // Add percentage
         'totalScore': totalScore,
         'maxPoints': totalPoints,
         'criteriaScores': criteriaScores,
@@ -248,7 +254,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
           .doc('current')
           .set(evaluationData);
 
-      // Update submission with grade and feedback
+      // Update submission with grade, letter grade and feedback
       await FirebaseFirestore.instance
           .collection('organizations')
           .doc(widget.organizationCode)
@@ -260,10 +266,12 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
           .doc(widget.submissionId)
           .update({
         'grade': grade,
+        'letterGrade': letterGrade, // Save letter grade
+        'percentage': percentage, // Save percentage
         'feedback': _feedbackController.text.trim(),
         'gradedAt': FieldValue.serverTimestamp(),
         'gradedBy': FirebaseAuth.instance.currentUser?.uid,
-        'status': 'graded',
+        'status': 'completed', // Change from 'graded' to 'completed'
       });
 
       if (mounted) {
@@ -303,6 +311,18 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         );
       }
     }
+  }
+
+  String _calculateLetterGrade(double percentage) {
+    if (percentage >= 90) return 'A+';
+    if (percentage >= 80) return 'A';
+    if (percentage >= 75) return 'A-';
+    if (percentage >= 70) return 'B+';
+    if (percentage >= 65) return 'B';
+    if (percentage >= 60) return 'B-';
+    if (percentage >= 55) return 'C+';
+    if (percentage >= 50) return 'C';
+    return 'F'; // Below 50 is F
   }
 
   // Add ability to clear/reset evaluation
@@ -593,6 +613,22 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
                             color: Colors.purple[600],
+                          ),
+                        ),
+                        // Show predicted letter grade
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _getGradeColor(_calculateLetterGrade(_calculateTotalScore())),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            _calculateLetterGrade(_calculateTotalScore()),
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ],
@@ -1375,6 +1411,26 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         ],
       ),
     );
+  }
+
+  Color _getGradeColor(String letterGrade) {
+    switch (letterGrade) {
+      case 'A+':
+      case 'A':
+      case 'A-':
+        return Colors.green[600]!;
+      case 'B+':
+      case 'B':
+      case 'B-':
+        return Colors.blue[600]!;
+      case 'C+':
+      case 'C':
+        return Colors.orange[600]!;
+      case 'F':
+        return Colors.red[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
   }
 
   IconData _getFileIcon(String fileName) {

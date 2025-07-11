@@ -294,12 +294,25 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                     Icon(Icons.grade, color: Colors.green[700], size: 20),
                     SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        'Grade: ${submission['grade']}/${assignment['points'] ?? 100}',
-                        style: TextStyle(
-                          color: Colors.green[800],
-                          fontWeight: FontWeight.w500,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Grade: ${submission['grade']}/${assignment['points'] ?? 100}',
+                            style: TextStyle(
+                              color: Colors.green[800],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          if (submission['letterGrade'] != null)
+                            Text(
+                              'Letter Grade: ${submission['letterGrade']}',
+                              style: TextStyle(
+                                color: Colors.green[700],
+                                fontSize: 12,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
@@ -332,6 +345,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       return;
     }
 
+    // Check due date
     final dueDate = assignment['dueDate'] as Timestamp?;
     if (dueDate != null && dueDate.toDate().isBefore(DateTime.now())) {
       final confirm = await showDialog<bool>(
@@ -381,6 +395,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           return;
         }
 
+        // Show upload progress dialog
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -419,6 +434,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         final snapshot = await uploadTask;
         final fileUrl = await snapshot.ref.getDownloadURL();
 
+        // Create submission document in Firestore
         final submissionRef = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(_organizationCode)
@@ -450,8 +466,10 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           print('Error awarding water buckets: $e');
         }
 
+        // Close loading dialog
         Navigator.pop(context);
 
+        // Refresh submissions data
         await _fetchSubmissions(user.uid);
 
         // Show success message with water bucket reward
@@ -486,7 +504,9 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         );
       }
     } catch (e) {
+      // Close loading dialog if it's open
       Navigator.pop(context);
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error submitting assignment: $e'),

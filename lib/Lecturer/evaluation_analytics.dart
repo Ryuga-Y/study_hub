@@ -838,22 +838,31 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
   }
 
   Widget _buildGradeDistribution() {
-    // Calculate grade distribution
+    // Calculate grade distribution using the exact grading system
     Map<String, int> distribution = {
-      'A (90-100)': 0,
-      'B (80-89)': 0,
-      'C (70-79)': 0,
-      'D (60-69)': 0,
-      'F (0-59)': 0,
+      'A+ (90-100)': 0,
+      'A (80-89)': 0,
+      'A- (75-79)': 0,
+      'B+ (70-74)': 0,
+      'B (65-69)': 0,
+      'B- (60-64)': 0,
+      'C+ (55-59)': 0,
+      'C (50-54)': 0,
+      'F (0-49)': 0,
     };
 
     for (var student in studentPerformance) {
       final grade = (student['averageGrade'] as num).toDouble();
-      if (grade >= 90) distribution['A (90-100)'] = distribution['A (90-100)']! + 1;
-      else if (grade >= 80) distribution['B (80-89)'] = distribution['B (80-89)']! + 1;
-      else if (grade >= 70) distribution['C (70-79)'] = distribution['C (70-79)']! + 1;
-      else if (grade >= 60) distribution['D (60-69)'] = distribution['D (60-69)']! + 1;
-      else distribution['F (0-59)'] = distribution['F (0-59)']! + 1;
+      if (grade >= 90) {
+        distribution['A+ (90-100)'] = distribution['A+ (90-100)']! + 1;
+      } else if (grade >= 80) distribution['A (80-89)'] = distribution['A (80-89)']! + 1;
+      else if (grade >= 75) distribution['A- (75-79)'] = distribution['A- (75-79)']! + 1;
+      else if (grade >= 70) distribution['B+ (70-74)'] = distribution['B+ (70-74)']! + 1;
+      else if (grade >= 65) distribution['B (65-69)'] = distribution['B (65-69)']! + 1;
+      else if (grade >= 60) distribution['B- (60-64)'] = distribution['B- (60-64)']! + 1;
+      else if (grade >= 55) distribution['C+ (55-59)'] = distribution['C+ (55-59)']! + 1;
+      else if (grade >= 50) distribution['C (50-54)'] = distribution['C (50-54)']! + 1;
+      else distribution['F (0-49)'] = distribution['F (0-49)']! + 1;
     }
 
     return Column(
@@ -867,11 +876,12 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
           child: Row(
             children: [
               SizedBox(
-                width: 80,
+                width: 100,
                 child: Text(
                   entry.key,
                   style: TextStyle(
                     fontWeight: FontWeight.w500,
+                    fontSize: 13,
                   ),
                 ),
               ),
@@ -897,10 +907,14 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
                 ),
               ),
               SizedBox(width: 8),
-              Text(
-                '${entry.value}',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
+              Container(
+                width: 40,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '${entry.value}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -1032,19 +1046,26 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
     );
   }
 
-  Color _getGradeColor(double grade) {
-    if (grade >= 90) return Colors.green[600]!;
-    if (grade >= 80) return Colors.blue[600]!;
-    if (grade >= 70) return Colors.orange[600]!;
-    if (grade >= 60) return Colors.deepOrange[600]!;
+  Color _getGradeColor(double percentage) {
+    if (percentage >= 90) return Colors.green[600]!;
+    if (percentage >= 75) return Colors.green[500]!;
+    if (percentage >= 70) return Colors.blue[600]!;
+    if (percentage >= 60) return Colors.blue[500]!;
+    if (percentage >= 55) return Colors.orange[600]!;
+    if (percentage >= 50) return Colors.orange[500]!;
     return Colors.red[600]!;
   }
 
   Color _getGradeBarColor(String grade) {
-    if (grade.startsWith('A')) return Colors.green[600]!;
-    if (grade.startsWith('B')) return Colors.blue[600]!;
-    if (grade.startsWith('C')) return Colors.orange[600]!;
-    if (grade.startsWith('D')) return Colors.deepOrange[600]!;
+    if (grade.startsWith('A+') || grade.startsWith('A ') || grade.startsWith('A-')) {
+      return Colors.green[600]!;
+    }
+    if (grade.startsWith('B+') || grade.startsWith('B ') || grade.startsWith('B-')) {
+      return Colors.blue[600]!;
+    }
+    if (grade.startsWith('C+') || grade.startsWith('C ')) {
+      return Colors.orange[600]!;
+    }
     return Colors.red[600]!;
   }
 

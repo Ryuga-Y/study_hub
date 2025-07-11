@@ -538,7 +538,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           SizedBox(height: 16),
 
           // Grade Card (if graded) - Enhanced with letter grade
-          if (isGraded && grade != null)
+          if (isGraded && grade != null)if (isGraded && grade != null)
             Container(
               padding: EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -914,6 +914,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                       ),
                       child: Row(
                         children: [
+                          // Version number circle
                           Container(
                             width: 32,
                             height: 32,

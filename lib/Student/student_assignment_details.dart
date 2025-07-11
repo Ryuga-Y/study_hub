@@ -133,6 +133,92 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
     final user = _authService.currentUser;
     if (user == null) return;
 
+    // Check if assignment has been graded
+    if (latestSubmission != null && latestSubmission!['grade'] != null) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(Icons.block, color: Colors.red, size: 24),
+              SizedBox(width: 8),
+              Text('Submission Not Allowed'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This assignment has already been graded.',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 12),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.grade, color: Colors.green[700], size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Grade: ${latestSubmission!['grade']}/${widget.assignment['points'] ?? 100}',
+                            style: TextStyle(
+                              color: Colors.green[800],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          if (latestSubmission!['letterGrade'] != null)
+                            Text(
+                              'Letter Grade: ${latestSubmission!['letterGrade']}',
+                              style: TextStyle(
+                                color: Colors.green[700],
+                                fontSize: 12,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'No further submissions are allowed once an assignment has been graded.',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Check due date
     final dueDate = widget.assignment['dueDate'] as Timestamp?;
     if (dueDate != null && dueDate.toDate().isBefore(DateTime.now())) {
       final confirm = await showDialog<bool>(
@@ -408,7 +494,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.orange.withOpacity(0.3),
+                      color: Colors.orange.withValues(alpha: 0.3),
                       blurRadius: 10,
                       offset: Offset(0, 5),
                     ),
@@ -422,7 +508,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Row(
@@ -446,7 +532,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                           Container(
                             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
-                              color: Colors.red.withOpacity(0.3),
+                              color: Colors.red.withValues(alpha: 0.3),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
@@ -464,7 +550,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                           Container(
                             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.3),
+                              color: Colors.green.withValues(alpha: 0.3),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
@@ -491,14 +577,14 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                     SizedBox(height: 8),
                     Row(
                       children: [
-                        Icon(Icons.library_books, color: Colors.white.withOpacity(0.9), size: 18),
+                        Icon(Icons.library_books, color: Colors.white.withValues(alpha: 0.9), size: 18),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             '${widget.courseData['code'] ?? ''} - ${widget.courseData['title'] ?? ''}',
                             style: TextStyle(
                               fontSize: 16,
-                              color: Colors.white.withOpacity(0.9),
+                              color: Colors.white.withValues(alpha: 0.9),
                             ),
                             overflow: TextOverflow.ellipsis,
                             maxLines: 1,
@@ -520,7 +606,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
+                        color: Colors.grey.withValues(alpha: 0.1),
                         blurRadius: 5,
                         offset: Offset(0, 2),
                       ),
@@ -529,10 +615,11 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                   child: Column(
                     children: [
                       if (!hasSubmitted) ...[
-                        SizedBox(
+                        // Submit button - FIXED: Added the missing implementation
+                        Container(
                           width: double.infinity,
                           child: ElevatedButton.icon(
-                            onPressed: isUploading ? null : _submitAssignment,
+                            onPressed: _submitAssignment,
                             icon: Icon(Icons.upload_file, color: Colors.white),
                             label: Text(
                               'Submit Assignment',
@@ -546,22 +633,23 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                               backgroundColor: Colors.orange[600],
                               padding: EdgeInsets.symmetric(vertical: 16),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(8),
                               ),
                             ),
                           ),
                         ),
-                      ] else ...[
+                      ] else if (latestSubmission?['grade'] == null) ...[
+                        // Submitted but not graded - show resubmit option
                         Container(
                           padding: EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.green[50],
+                            color: Colors.blue[50],
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[300]!),
+                            border: Border.all(color: Colors.blue[300]!),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                              Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
                               SizedBox(width: 12),
                               Expanded(
                                 child: Column(
@@ -570,73 +658,133 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                                     Text(
                                       'Assignment Submitted',
                                       style: TextStyle(
-                                        color: Colors.green[700],
+                                        color: Colors.blue[700],
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                    if (latestSubmission != null) ...[
-                                      SizedBox(height: 4),
-                                      Text(
-                                        'Submitted: ${_formatDateTime(latestSubmission!['submittedAt'])}',
-                                        style: TextStyle(
-                                          color: Colors.green[600],
-                                          fontSize: 12,
-                                        ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'You can resubmit until graded',
+                                      style: TextStyle(
+                                        color: Colors.blue[600],
+                                        fontSize: 12,
                                       ),
-                                    ],
+                                    ),
                                   ],
                                 ),
                               ),
-                              TextButton(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => StudentSubmissionView(
-                                        courseId: widget.courseId,
-                                        assignmentId: widget.assignment['id'],
-                                        assignmentData: widget.assignment,
-                                        organizationCode: widget.organizationCode,
-                                      ),
-                                    ),
-                                  ).then((_) {
-                                    _loadData();
-                                  });
-                                },
-                                child: Text('View'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: Colors.green[700],
+                              ElevatedButton(
+                                onPressed: _submitAssignment,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue[600],
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
                                 ),
+                                child: Text('Resubmit', style: TextStyle(color: Colors.white)),
                               ),
                             ],
                           ),
                         ),
                       ],
-
-                      // Upload Progress
-                      if (isUploading) ...[
-                        SizedBox(height: 16),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              uploadStatus,
-                              style: TextStyle(
-                                color: Colors.grey[700],
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                    ],
+                  ),
+                )
+              else
+              // Graded - show final grade
+                Container(
+                  margin: EdgeInsets.symmetric(horizontal: 16),
+                  padding: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        blurRadius: 5,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green[300]!),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green[700], size: 24),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Assignment Completed',
+                                style: TextStyle(
+                                  color: Colors.green[700],
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
                               ),
-                            ),
-                            SizedBox(height: 8),
-                            LinearProgressIndicator(
-                              value: uploadProgress,
-                              backgroundColor: Colors.grey[200],
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[600]!),
-                            ),
-                          ],
+                              SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Text(
+                                    'Grade: ${latestSubmission!['grade']}/${widget.assignment['points'] ?? 100}',
+                                    style: TextStyle(
+                                      color: Colors.green[600],
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  if (latestSubmission!['letterGrade'] != null) ...[
+                                    SizedBox(width: 12),
+                                    Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: _getLetterGradeColor(latestSubmission!['letterGrade']),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        latestSubmission!['letterGrade'],
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => StudentSubmissionView(
+                                  courseId: widget.courseId,
+                                  assignmentId: widget.assignment['id'],
+                                  assignmentData: widget.assignment,
+                                  organizationCode: widget.organizationCode,
+                                ),
+                              ),
+                            ).then((_) {
+                              _loadData();
+                            });
+                          },
+                          child: Text('View Details'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.green[700],
+                          ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
 
@@ -649,7 +797,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
+                      color: Colors.grey.withValues(alpha: 0.1),
                       blurRadius: 10,
                       offset: Offset(0, 5),
                     ),
@@ -759,7 +907,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
+                        color: Colors.grey.withValues(alpha: 0.1),
                         blurRadius: 10,
                         offset: Offset(0, 5),
                       ),
@@ -915,7 +1063,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
+                        color: Colors.grey.withValues(alpha: 0.1),
                         blurRadius: 10,
                         offset: Offset(0, 5),
                       ),
@@ -1007,9 +1155,9 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1100,6 +1248,28 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
       return 'Yesterday at $timeStr';
     } else {
       return '$dateStr at $timeStr';
+    }
+  }
+
+  Color _getLetterGradeColor(String? letterGrade) {
+    if (letterGrade == null) return Colors.grey[600]!;
+
+    switch (letterGrade) {
+      case 'A+':
+      case 'A':
+      case 'A-':
+        return Colors.green[600]!;
+      case 'B+':
+      case 'B':
+      case 'B-':
+        return Colors.blue[600]!;
+      case 'C+':
+      case 'C':
+        return Colors.orange[600]!;
+      case 'F':
+        return Colors.red[600]!;
+      default:
+        return Colors.grey[600]!;
     }
   }
 
