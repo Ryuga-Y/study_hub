@@ -1267,7 +1267,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                         context,
                         MaterialPageRoute(
                           builder: (context) => SetGoalPage(
-                            onGoalStarred: (String starredGoal) {
+                            onGoalPinned: (String starredGoal) {
                               updateGoal(starredGoal);
                             },
                           ),

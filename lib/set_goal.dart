@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class Goal {
   String id;
   String title;
   String description;
   bool isCompleted;
-  bool isStarred;
+  bool isPinned; // Changed from isStarred
   DateTime createdDate;
   DateTime? targetDate;
 
@@ -14,28 +16,110 @@ class Goal {
     required this.title,
     required this.description,
     this.isCompleted = false,
-    this.isStarred = false,
+    this.isPinned = false, // Changed from isStarred
     required this.createdDate,
     this.targetDate,
   });
+
+  // Factory constructor to create Goal from Firebase data
+  factory Goal.fromMap(Map<String, dynamic> data) {
+    return Goal(
+      id: data['id'] ?? '',
+      title: data['title'] ?? '',
+      description: data['description'] ?? '',
+      isCompleted: data['isCompleted'] ?? false,
+      isPinned: data['isPinned'] ?? false,
+      createdDate: data['createdDate'] ?? DateTime.now(),
+      targetDate: data['targetDate'],
+    );
+  }
 }
 
 class SetGoalPage extends StatefulWidget {
-  final Function(String)? onGoalStarred;
+  final Function(String)? onGoalPinned; // Changed from onGoalStarred
 
-  const SetGoalPage({Key? key, this.onGoalStarred}) : super(key: key);
+  const SetGoalPage({Key? key, this.onGoalPinned}) : super(key: key);
 
   @override
   _SetGoalPageState createState() => _SetGoalPageState();
 }
 
 class _SetGoalPageState extends State<SetGoalPage> {
+  // Firebase instances
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
   List<Goal> goals = [];
+  bool isLoading = true;
 
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   DateTime? _selectedTargetDate;
   String? _editingGoalId;
+
+  // Get current user ID
+  String? get userId => _auth.currentUser?.uid;
+
+  // Get reference to user's goals subcollection
+  CollectionReference get _goalsRef {
+    if (userId == null) throw Exception('User not authenticated');
+    return _firestore
+        .collection('goalProgress')
+        .doc(userId)
+        .collection('goals');
+  }
+
+  // Get reference to goal progress document
+  DocumentReference get _goalProgressRef {
+    if (userId == null) throw Exception('User not authenticated');
+    return _firestore.collection('goalProgress').doc(userId);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGoals();
+  }
+
+  // Load goals from Firebase
+  Future<void> _loadGoals() async {
+    try {
+      setState(() {
+        isLoading = true;
+      });
+
+      // Listen to goals stream
+      _goalsRef
+          .orderBy('createdDate', descending: true)
+          .snapshots()
+          .listen((snapshot) {
+        if (mounted) {
+          setState(() {
+            goals = snapshot.docs.map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              data['id'] = doc.id;
+
+              // Convert Timestamp to DateTime if exists
+              if (data['createdDate'] != null && data['createdDate'] is Timestamp) {
+                data['createdDate'] = (data['createdDate'] as Timestamp).toDate();
+              }
+              if (data['targetDate'] != null && data['targetDate'] is Timestamp) {
+                data['targetDate'] = (data['targetDate'] as Timestamp).toDate();
+              }
+
+              return Goal.fromMap(data);
+            }).toList();
+            isLoading = false;
+          });
+        }
+      });
+    } catch (e) {
+      print('Error loading goals: $e');
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -138,8 +222,8 @@ class _SetGoalPageState extends State<SetGoalPage> {
                   child: Text('Cancel'),
                 ),
                 ElevatedButton(
-                  onPressed: () {
-                    _saveGoal();
+                  onPressed: () async {
+                    await _saveGoal();
                     Navigator.of(context).pop();
                   },
                   style: ElevatedButton.styleFrom(
@@ -156,7 +240,7 @@ class _SetGoalPageState extends State<SetGoalPage> {
     );
   }
 
-  void _saveGoal() {
+  Future<void> _saveGoal() async {
     if (_titleController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -167,86 +251,123 @@ class _SetGoalPageState extends State<SetGoalPage> {
       return;
     }
 
-    setState(() {
+    try {
       if (_editingGoalId != null) {
-        // Update existing goal
-        int index = goals.indexWhere((g) => g.id == _editingGoalId);
-        if (index != -1) {
-          goals[index].title = _titleController.text.trim();
-          goals[index].description = _descriptionController.text.trim();
-          goals[index].targetDate = _selectedTargetDate;
-        }
+        // Update existing goal in Firebase
+        await _goalsRef.doc(_editingGoalId).update({
+          'title': _titleController.text.trim(),
+          'description': _descriptionController.text.trim(),
+          'targetDate': _selectedTargetDate != null ? Timestamp.fromDate(_selectedTargetDate!) : null,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       } else {
-        // Add new goal
-        goals.add(Goal(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          title: _titleController.text.trim(),
-          description: _descriptionController.text.trim(),
-          createdDate: DateTime.now(),
-          targetDate: _selectedTargetDate,
-        ));
-      }
-    });
+        // Add new goal to Firebase
+        final goalId = _goalsRef.doc().id;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_editingGoalId != null ? 'Goal updated successfully!' : 'Goal added successfully!'),
-        backgroundColor: Colors.green,
-      ),
-    );
+        await _goalsRef.doc(goalId).set({
+          'id': goalId,
+          'title': _titleController.text.trim(),
+          'description': _descriptionController.text.trim(),
+          'isCompleted': false,
+          'isPinned': false,
+          'createdDate': FieldValue.serverTimestamp(),
+          'targetDate': _selectedTargetDate != null ? Timestamp.fromDate(_selectedTargetDate!) : null,
+          'createdBy': userId,
+        });
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_editingGoalId != null ? 'Goal updated successfully!' : 'Goal added successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error saving goal: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  void _toggleStarred(String goalId) {
-    setState(() {
-      // First unstar all goals (only one can be starred at a time)
-      for (var goal in goals) {
-        goal.isStarred = false;
-      }
+  Future<void> _togglePinned(String goalId) async {
+    try {
+      // Find the goal
+      Goal? goalToPin = goals.firstWhere((g) => g.id == goalId);
 
-      // Then star the selected goal
-      int index = goals.indexWhere((g) => g.id == goalId);
-      if (index != -1) {
-        goals[index].isStarred = true;
+      if (goalToPin != null) {
+        // Start a batch write
+        final batch = _firestore.batch();
 
-        // Get the starred goal
-        Goal starredGoal = goals[index];
-        print('Starring goal: ${starredGoal.title}'); // Debug print
-
-        // Call the callback function to update main page
-        if (widget.onGoalStarred != null) {
-          widget.onGoalStarred!(starredGoal.title);
+        // First, unpin all goals
+        final allGoals = await _goalsRef.get();
+        for (var doc in allGoals.docs) {
+          batch.update(doc.reference, {'isPinned': false});
         }
 
-        // Show success message but don't navigate back
+        // Pin the selected goal
+        batch.update(_goalsRef.doc(goalId), {'isPinned': true});
+
+        // Update the main goal progress document
+        batch.update(_goalProgressRef, {
+          'currentGoal': goalToPin.title,
+          'hasActiveGoal': true,
+        });
+
+        // Commit the batch
+        await batch.commit();
+
+        // Call the callback function to update main page
+        if (widget.onGoalPinned != null) {
+          widget.onGoalPinned!(goalToPin.title);
+        }
+
+        // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${starredGoal.title} is now your mission in progress! ⭐'),
+            content: Text('${goalToPin.title} is now your mission in progress! 📌'),
             backgroundColor: Colors.amber,
             duration: Duration(seconds: 2),
           ),
         );
       }
-    });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error pinning goal: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  void _toggleGoalCompletion(String goalId) {
-    setState(() {
-      int index = goals.indexWhere((g) => g.id == goalId);
-      if (index != -1) {
-        goals[index].isCompleted = !goals[index].isCompleted;
-      }
-    });
+  Future<void> _toggleGoalCompletion(String goalId) async {
+    try {
+      Goal goal = goals.firstWhere((g) => g.id == goalId);
+      await _goalsRef.doc(goalId).update({
+        'isCompleted': !goal.isCompleted,
+        'completedAt': !goal.isCompleted ? FieldValue.serverTimestamp() : null,
+      });
 
-    Goal goal = goals.firstWhere((g) => g.id == goalId);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(goal.isCompleted ? 'Goal completed! 🎉' : 'Goal marked as incomplete'),
-        backgroundColor: goal.isCompleted ? Colors.green : Colors.orange,
-      ),
-    );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(!goal.isCompleted ? 'Goal completed! 🎉' : 'Goal marked as incomplete'),
+          backgroundColor: !goal.isCompleted ? Colors.green : Colors.orange,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating goal: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  void _deleteGoal(String goalId) {
+  Future<void> _deleteGoal(String goalId) async {
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -261,17 +382,40 @@ class _SetGoalPageState extends State<SetGoalPage> {
               child: Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  goals.removeWhere((g) => g.id == goalId);
-                });
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Goal deleted successfully'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+              onPressed: () async {
+                try {
+                  // Check if this goal is pinned
+                  final goalDoc = await _goalsRef.doc(goalId).get();
+                  if (goalDoc.exists && goalDoc.data() != null) {
+                    final data = goalDoc.data() as Map<String, dynamic>;
+                    if (data['isPinned'] == true) {
+                      // If it's pinned, remove it from the main goal progress
+                      await _goalProgressRef.update({
+                        'currentGoal': 'No goal selected - Press \'Set Goal\' to choose one',
+                        'hasActiveGoal': false,
+                      });
+                    }
+                  }
+
+                  // Delete the goal
+                  await _goalsRef.doc(goalId).delete();
+
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Goal deleted successfully'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                } catch (e) {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error deleting goal: ${e.toString()}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
@@ -297,6 +441,22 @@ class _SetGoalPageState extends State<SetGoalPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text('Set Goals'),
+          backgroundColor: Colors.blueAccent,
+          foregroundColor: Colors.white,
+          elevation: 2,
+        ),
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Set Goals'),
@@ -444,12 +604,12 @@ class _SetGoalPageState extends State<SetGoalPage> {
                                 ),
                               ),
 
-                              // Star icon
+                              // Pin icon (changed from star)
                               GestureDetector(
-                                onTap: () => _toggleStarred(goal.id),
+                                onTap: () => _togglePinned(goal.id),
                                 child: Icon(
-                                  goal.isStarred ? Icons.star : Icons.star_border,
-                                  color: goal.isStarred ? Colors.amber : Colors.grey[400],
+                                  goal.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                                  color: goal.isPinned ? Colors.amber : Colors.grey[400],
                                   size: 28,
                                 ),
                               ),

@@ -49,11 +49,11 @@ class GoalProgressService {
     final userId = _auth.currentUser?.uid;
     if (userId == null) throw Exception('User not authenticated');
 
-    // Listen to the user's submission rewards collection
+    // Listen to the user's submission rewards collection under goalProgress
     return _firestore
-        .collection('submissionRewards')
+        .collection('goalProgress')
         .doc(userId)
-        .collection('rewards')
+        .collection('submissionRewards')
         .snapshots()
         .map((snapshot) => snapshot.docs);
   }
@@ -118,11 +118,11 @@ class GoalProgressService {
             .get();
 
         for (var submission in submissionsSnapshot.docs) {
-          // Check if this submission has been rewarded
+          // Check if this submission has been rewarded (NEW PATH)
           final rewardDoc = await _firestore
-              .collection('submissionRewards')
+              .collection('goalProgress')
               .doc(userId)
-              .collection('rewards')
+              .collection('submissionRewards')
               .doc(submission.id)
               .get();
 
@@ -163,11 +163,11 @@ class GoalProgressService {
             .get();
 
         for (var submission in submissionsSnapshot.docs) {
-          // Check if this submission has been rewarded
+          // Check if this submission has been rewarded (NEW PATH)
           final rewardDoc = await _firestore
-              .collection('submissionRewards')
+              .collection('goalProgress')
               .doc(userId)
-              .collection('rewards')
+              .collection('submissionRewards')
               .doc(submission.id)
               .get();
 
@@ -285,11 +285,11 @@ class GoalProgressService {
       throw Exception('Rewards are only available for students');
     }
 
-    // Check if this submission has already been rewarded
+    // Check if this submission has already been rewarded (NEW PATH)
     final rewardDoc = await _firestore
-        .collection('submissionRewards')
+        .collection('goalProgress')
         .doc(userId)
-        .collection('rewards')
+        .collection('submissionRewards')
         .doc(submissionId)
         .get();
 
@@ -298,11 +298,11 @@ class GoalProgressService {
       return; // Already rewarded
     }
 
-    // Mark this submission as rewarded
+    // Mark this submission as rewarded (NEW PATH)
     await _firestore
-        .collection('submissionRewards')
+        .collection('goalProgress')
         .doc(userId)
-        .collection('rewards')
+        .collection('submissionRewards')
         .doc(submissionId)
         .set({
       'type': type,
@@ -479,10 +479,11 @@ class GoalProgressService {
     }
 
     try {
+      // Get submission rewards from the new path
       final rewardsSnapshot = await _firestore
-          .collection('submissionRewards')
+          .collection('goalProgress')
           .doc(userId)
-          .collection('rewards')
+          .collection('submissionRewards')
           .get();
 
       int assignmentCount = 0;
@@ -507,8 +508,8 @@ class GoalProgressService {
         'totalAssignments': assignmentCount,
         'totalTutorials': tutorialCount,
         'totalBuckets': totalBuckets,
-        'assignmentBuckets': assignmentCount * 20,
-        'tutorialBuckets': tutorialCount * 5,
+        'assignmentBuckets': assignmentCount * 4,
+        'tutorialBuckets': tutorialCount * 1,
       };
     } catch (e) {
       print('Error getting submission stats: $e');
