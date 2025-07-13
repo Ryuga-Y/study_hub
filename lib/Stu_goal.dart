@@ -8,6 +8,7 @@ import 'bronze_tree.dart'; // Import bronze tree
 import 'silver_tree.dart'; // Import silver tree
 import 'gold_tree.dart'; // Import gold tree
 import 'goal_progress_service.dart'; // Import the service
+import 'view_badges.dart'; // Import the new view badges page
 
 void main() => runApp(MyApp());
 
@@ -47,6 +48,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
 
   // Loading state
   bool isLoading = true;
+  bool isAutoSyncing = false; // Track auto-sync status
 
   // Animation controllers
   late AnimationController _growthController;
@@ -70,6 +72,166 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     _loadGoalProgress();
     _startListeningForSubmissions(); // Add automatic submission detection
     _startRealtimeGoalProgressListener(); // Add real-time Firebase listener
+    _startAutoSyncTimer(); // 🔄 NEW: Start auto-sync timer
+  }
+
+  // 🔄 NEW: Start periodic auto-sync to detect deleted rewards
+  void _startAutoSyncTimer() {
+    // Check every 30 seconds for deleted rewards
+    Timer.periodic(Duration(seconds: 30), (timer) {
+      if (mounted) {
+        _performAutoSync();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  // 🔄 NEW: Perform auto-sync to detect and correct bucket count
+  Future<void> _performAutoSync() async {
+    if (isAutoSyncing) return; // Prevent concurrent syncs
+
+    try {
+      setState(() {
+        isAutoSyncing = true;
+      });
+
+      final bucketCountChanged = await _goalService.autoSyncWaterBuckets();
+
+      if (bucketCountChanged) {
+        print('🔄 Auto-sync detected changes - refreshing UI...');
+
+        // Reload goal progress to get updated bucket count
+        await _loadGoalProgress();
+
+        // Show subtle notification that buckets were updated
+        _showAutoSyncNotification();
+      }
+    } catch (e) {
+      print('❌ Error during auto-sync: $e');
+    } finally {
+      setState(() {
+        isAutoSyncing = false;
+      });
+    }
+  }
+
+  // 🔄 NEW: Show notification when auto-sync corrects bucket count
+  void _showAutoSyncNotification() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.sync, color: Colors.white, size: 16),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '🔄 Water bucket count synchronized',
+                style: TextStyle(fontSize: 14),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.blue[600],
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(bottom: 80),
+      ),
+    );
+  }
+
+  // 🔄 NEW: Manual recalculation method for debugging/maintenance
+  Future<void> _manualRecalculation() async {
+    try {
+      setState(() {
+        isLoading = true;
+      });
+
+      final result = await _goalService.recalculateWaterBuckets();
+
+      if (result['success'] == true) {
+        final oldCount = result['oldBucketCount'] ?? 0;
+        final newCount = result['newBucketCount'] ?? 0;
+        final difference = result['bucketDifference'] ?? 0;
+
+        // Reload UI with corrected data
+        await _loadGoalProgress();
+
+        // Show detailed result
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.sync, color: Colors.blue[600]),
+                SizedBox(width: 8),
+                Text('Recalculation Complete'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Water bucket count has been synchronized with submission rewards.'),
+                SizedBox(height: 12),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Old count: $oldCount buckets'),
+                      Text('New count: $newCount buckets'),
+                      if (difference != 0) ...[
+                        SizedBox(height: 4),
+                        Text(
+                          'Correction: ${difference > 0 ? '+' : ''}$difference buckets',
+                          style: TextStyle(
+                            color: difference > 0 ? Colors.green : Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                      SizedBox(height: 8),
+                      Text('Total assignments: ${result['totalAssignments'] ?? 0}'),
+                      Text('Total tutorials: ${result['totalTutorials'] ?? 0}'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('OK'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        // Show error
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Recalculation failed: ${result['error'] ?? 'Unknown error'}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error during recalculation: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
+    }
   }
 
   // Start real-time listener for goal progress changes
@@ -287,6 +449,9 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   // Refresh water bucket count from Firebase
   Future<void> _refreshWaterBuckets() async {
     try {
+      // Auto-sync before refreshing to ensure accuracy
+      await _goalService.autoSyncWaterBuckets();
+
       final progress = await _goalService.getGoalProgress();
       if (progress != null && mounted) {
         setState(() {
@@ -533,71 +698,13 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     );
   }
 
-  // Function to handle view badges
+  // Function to handle view badges - UPDATED to navigate to ViewBadgesPage
   void _viewBadges() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('🏆 Your Badges'),
-          content: Container(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Bronze Badge
-                ListTile(
-                  leading: Icon(
-                    Icons.emoji_events,
-                    color: completedTrees >= 1 ? Color(0xFFCD7F32) : Colors.grey,
-                    size: 30,
-                  ),
-                  title: Text('Bronze Tree Master'),
-                  subtitle: Text(completedTrees >= 1 ? 'Completed!' : 'Complete 1 tree'),
-                  trailing: completedTrees >= 1 ? Icon(Icons.check, color: Colors.green) : null,
-                ),
-                // Silver Badge
-                ListTile(
-                  leading: Icon(
-                    Icons.emoji_events,
-                    color: completedTrees >= 2 ? Color(0xFFC0C0C0) : Colors.grey,
-                    size: 30,
-                  ),
-                  title: Text('Silver Tree Guardian'),
-                  subtitle: Text(completedTrees >= 2 ? 'Completed!' : 'Complete 2 trees'),
-                  trailing: completedTrees >= 2 ? Icon(Icons.check, color: Colors.green) : null,
-                ),
-                // Gold Badge
-                ListTile(
-                  leading: Icon(
-                    Icons.emoji_events,
-                    color: completedTrees >= 3 ? Color(0xFFFFD700) : Colors.grey,
-                    size: 30,
-                  ),
-                  title: Text('Gold Tree Legend'),
-                  subtitle: Text(completedTrees >= 3 ? 'Completed!' : 'Complete 3 trees'),
-                  trailing: completedTrees >= 3 ? Icon(Icons.check, color: Colors.green) : null,
-                ),
-                SizedBox(height: 10),
-                Text(
-                  'Trees Completed: $completedTrees',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  'Total Progress: $totalProgress points',
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('Close'),
-            ),
-          ],
-        );
-      },
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ViewBadgesPage(),
+      ),
     );
   }
 
@@ -888,6 +995,22 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
         title: Text('StudyHub'),
         backgroundColor: Colors.white,
         actions: [
+          // 🔄 NEW: Auto-sync indicator
+          if (isAutoSyncing)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[600]!),
+                  ),
+                ),
+              ),
+            ),
+
           // Water bucket info button
           IconButton(
             onPressed: _showWaterBucketDetails,

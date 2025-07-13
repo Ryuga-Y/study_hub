@@ -6,7 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
 import 'student_assignment_details.dart';
-import '../goal_progress_service.dart'; // Import the goal service
+import '../goal_progress_service.dart'; // Import the enhanced goal service
 
 class StudentCoursePage extends StatefulWidget {
   final String courseId;
@@ -24,7 +24,7 @@ class StudentCoursePage extends StatefulWidget {
 
 class _StudentCoursePageState extends State<StudentCoursePage> with TickerProviderStateMixin {
   final AuthService _authService = AuthService();
-  final GoalProgressService _goalService = GoalProgressService(); // Add goal service
+  final GoalProgressService _goalService = GoalProgressService(); // Enhanced goal service
   late TabController _tabController;
 
   // Data
@@ -255,6 +255,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     }
   }
 
+  // 🎯 ENHANCED ASSIGNMENT SUBMISSION with water bucket rewards
   Future<void> _submitAssignment(Map<String, dynamic> assignment) async {
     final user = _authService.currentUser;
     if (user == null) return;
@@ -406,7 +407,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                   valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
                 ),
                 SizedBox(width: 20),
-                Text('Submitting assignment...'),
+                Expanded(child: Text('Submitting assignment...')),
               ],
             ),
           ),
@@ -458,12 +459,17 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
         });
 
-        // Award water buckets for assignment submission (4 buckets)
+        // 🎯 AWARD WATER BUCKETS: 4 buckets for assignment submission
         try {
-          await _goalService.awardAssignmentSubmission(submissionRef.id, assignment['id']);
-          print('Awarded 4 water buckets for assignment submission');
+          await _goalService.awardAssignmentSubmission(
+              submissionRef.id,
+              assignment['id'],
+              assignmentName: assignment['title'] ?? 'Assignment'
+          );
+          print('✅ Awarded 4 water buckets for assignment: ${assignment['title']}');
         } catch (e) {
-          print('Error awarding water buckets: $e');
+          print('❌ Error awarding water buckets: $e');
+          // Don't fail the submission if reward fails
         }
 
         // Close loading dialog
@@ -502,7 +508,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
             duration: Duration(seconds: 4),
           ),
         );
-
       }
     } catch (e) {
       // Close loading dialog if it's open
@@ -517,6 +522,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     }
   }
 
+  // 🎯 ENHANCED TUTORIAL SUBMISSION with water bucket rewards
   Future<void> _submitTutorial(Map<String, dynamic> material) async {
     final user = _authService.currentUser;
     if (user == null) return;
@@ -602,7 +608,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                   valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[400]!),
                 ),
                 SizedBox(width: 20),
-                Text('Submitting tutorial...'),
+                Expanded(child: Text('Submitting tutorial...')),
               ],
             ),
           ),
@@ -656,12 +662,17 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
         });
 
-        // Award water buckets for tutorial submission (2 buckets)
+        // 🎯 AWARD WATER BUCKETS: 1 bucket for tutorial submission
         try {
-          await _goalService.awardTutorialSubmission(submissionRef.id, material['id']);
-          print('Awarded water buckets for tutorial submission');
+          await _goalService.awardTutorialSubmission(
+              submissionRef.id,
+              material['id'],
+              materialName: material['title'] ?? 'Tutorial'
+          );
+          print('✅ Awarded 1 water bucket for tutorial: ${material['title']}');
         } catch (e) {
-          print('Error awarding water buckets: $e');
+          print('❌ Error awarding water buckets: $e');
+          // Don't fail the submission if reward fails
         }
 
         Navigator.pop(context);
@@ -910,7 +921,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                 SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'Submit this tutorial to earn 2 water buckets for your tree!',
+                                    'Submit this tutorial to earn 1 water bucket for your tree!',
                                     style: TextStyle(
                                       color: Colors.orange[700],
                                       fontSize: 13,
@@ -1567,7 +1578,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                 Icon(Icons.local_drink, size: 12, color: Colors.orange[700]),
                                 SizedBox(width: 2),
                                 Text(
-                                  '+10',
+                                  '+4',
                                   style: TextStyle(
                                     color: Colors.orange[700],
                                     fontSize: 10,
@@ -1661,7 +1672,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       ),
     );
   }
-
 
   Widget _buildMaterialCard(Map<String, dynamic> material) {
     final isTutorial = material['materialType'] == 'tutorial';
@@ -2162,7 +2172,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     );
   }
 
-// Add these helper methods to the StudentCoursePage class:
+  // Helper methods for letter grades
   String _calculateLetterGrade(double percentage) {
     if (percentage >= 90) return 'A+';
     if (percentage >= 80) return 'A';
@@ -2312,6 +2322,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     );
   }
 
+  // Utility methods
   String _formatDate(dynamic timestamp) {
     if (timestamp == null) return 'N/A';
 
