@@ -982,26 +982,6 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                           ),
                         ),
                         SizedBox(height: 8),
-                        Text(
-                          widget.assignment['description'] ?? 'No description provided.',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.grey[600],
-                            height: 1.5,
-                          ),
-                        ),
-                        SizedBox(height: 20),
-
-                        // Instructions
-                        Text(
-                          'Instructions',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        SizedBox(height: 8),
                         Container(
                           padding: EdgeInsets.all(16),
                           decoration: BoxDecoration(
@@ -1010,7 +990,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                             border: Border.all(color: Colors.orange[200]!),
                           ),
                           child: Text(
-                            widget.assignment['instructions'] ?? 'No specific instructions provided.',
+                            widget.assignment['description'] ?? 'No description provided.',
                             style: TextStyle(
                               fontSize: 15,
                               color: Colors.grey[700],

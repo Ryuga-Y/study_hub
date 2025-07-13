@@ -32,7 +32,6 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _instructionsController = TextEditingController();
   final _pointsController = TextEditingController();
 
   DateTime? _dueDate;
@@ -52,7 +51,6 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     if (widget.editMode && widget.assignmentData != null) {
       _titleController.text = widget.assignmentData!['title'] ?? '';
       _descriptionController.text = widget.assignmentData!['description'] ?? '';
-      _instructionsController.text = widget.assignmentData!['instructions'] ?? '';
       _pointsController.text = (widget.assignmentData!['points'] ?? 0).toString();
 
       // Set due date if exists
@@ -83,7 +81,6 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _instructionsController.dispose();
     _pointsController.dispose();
     _uploadSubscription?.cancel();
     super.dispose();
@@ -335,7 +332,6 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       final assignmentData = {
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
-        'instructions': _instructionsController.text.trim(),
         'points': int.tryParse(_pointsController.text.trim()) ?? 0,
         'dueDate': Timestamp.fromDate(dueDateTime),
         'courseId': widget.courseId,
@@ -645,35 +641,6 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Please enter a description';
-                        }
-                        return null;
-                      },
-                    ),
-                    SizedBox(height: 16),
-
-                    // Instructions
-                    TextFormField(
-                      controller: _instructionsController,
-                      maxLines: 4,
-                      decoration: InputDecoration(
-                        labelText: 'Instructions',
-                        hintText: 'Provide detailed instructions for completing this assignment',
-                        prefixIcon: Padding(
-                          padding: EdgeInsets.only(bottom: 80),
-                          child: Icon(Icons.list_alt, color: Colors.purple[400]),
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: Colors.purple[400]!, width: 2),
-                        ),
-                        alignLabelWithHint: true,
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter instructions';
                         }
                         return null;
                       },

@@ -844,34 +844,6 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                     height: 1.5,
                   ),
                 ),
-                SizedBox(height: 20),
-
-                // Instructions
-                Text(
-                  'Instructions',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[700],
-                  ),
-                ),
-                SizedBox(height: 8),
-                Container(
-                  padding: EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange[200]!),
-                  ),
-                  child: Text(
-                    assignmentData['instructions'] ?? 'No specific instructions provided.',
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: Colors.grey[700],
-                      height: 1.5,
-                    ),
-                  ),
-                ),
               ],
             ),
           ),

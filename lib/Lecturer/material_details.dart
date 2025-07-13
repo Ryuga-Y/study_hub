@@ -117,6 +117,144 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> with SingleTick
     }
   }
 
+  Future<void> _provideFeedback(Map<String, dynamic> submission) async {
+    final commentController = TextEditingController();
+
+    // Check if feedback already exists
+    Map<String, dynamic>? existingFeedback;
+    try {
+      final feedbackDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('materials')
+          .doc(materialData['id'])
+          .collection('submissions')
+          .doc(submission['id'])
+          .collection('feedback')
+          .doc('main')
+          .get();
+
+      if (feedbackDoc.exists) {
+        existingFeedback = feedbackDoc.data();
+        commentController.text = existingFeedback?['comment'] ?? '';
+      }
+    } catch (e) {
+      print('Error checking existing feedback: $e');
+    }
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(existingFeedback != null ? 'Update Feedback' : 'Provide Feedback'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Student: ${submission['studentName']}',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 16),
+              TextField(
+                controller: commentController,
+                maxLines: 5,
+                decoration: InputDecoration(
+                  labelText: 'Feedback Comment',
+                  hintText: 'Enter your feedback for the student...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, commentController.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue[600],
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text(
+              existingFeedback != null ? 'Update' : 'Submit',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('materials')
+            .doc(materialData['id'])
+            .collection('submissions')
+            .doc(submission['id'])
+            .collection('feedback')
+            .doc('main')
+            .set({
+          'comment': result,
+          'providedAt': FieldValue.serverTimestamp(),
+          'providedBy': _authService.currentUser?.uid,
+          'lecturerName': widget.courseData['lecturerName'],
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              existingFeedback != null ? 'Feedback updated successfully' : 'Feedback provided successfully',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error providing feedback: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<bool> _checkFeedbackExists(String submissionId) async {
+    try {
+      final feedbackDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('materials')
+          .doc(materialData['id'])
+          .collection('submissions')
+          .doc(submissionId)
+          .collection('feedback')
+          .doc('main')
+          .get();
+
+      return feedbackDoc.exists;
+    } catch (e) {
+      return false;
+    }
+  }
+
   IconData _getMaterialIcon() {
     switch (materialData['materialType']) {
       case 'tutorial':
@@ -588,38 +726,6 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> with SingleTick
                     height: 1.5,
                   ),
                 ),
-
-                // Instructions (for tutorials)
-                if (materialData['materialType'] == 'tutorial' &&
-                    materialData['instructions'] != null &&
-                    materialData['instructions'].toString().isNotEmpty) ...[
-                  SizedBox(height: 20),
-                  Text(
-                    'Instructions',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Container(
-                    padding: EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue[200]!),
-                    ),
-                    child: Text(
-                      materialData['instructions'],
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: Colors.grey[700],
-                        height: 1.5,
-                      ),
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
@@ -968,6 +1074,32 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> with SingleTick
                   ),
                 ),
               ],
+              // Check if feedback exists
+              FutureBuilder<bool>(
+                future: _checkFeedbackExists(submission['id']),
+                builder: (context, snapshot) {
+                  if (snapshot.data == true) {
+                    return Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.comment, size: 14, color: Colors.green[600]),
+                          SizedBox(width: 4),
+                          Text(
+                            'Feedback provided',
+                            style: TextStyle(
+                              color: Colors.green[600],
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  return SizedBox.shrink();
+                },
+              ),
             ],
           ),
         ),
@@ -1120,11 +1252,25 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> with SingleTick
 
               SizedBox(height: 20),
               Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
                     child: Text('Close'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _provideFeedback(submission);
+                    },
+                    icon: Icon(Icons.comment, color: Colors.white),
+                    label: Text('Provide Feedback', style: TextStyle(color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue[600],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                   ),
                 ],
               ),

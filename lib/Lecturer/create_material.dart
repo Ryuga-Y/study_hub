@@ -32,7 +32,6 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _instructionsController = TextEditingController();
 
   String _materialType = 'learning'; // 'learning' or 'tutorial'
   DateTime? _dueDate; // Only for tutorials
@@ -53,10 +52,6 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       _titleController.text = widget.materialData!['title'] ?? '';
       _descriptionController.text = widget.materialData!['description'] ?? '';
       _materialType = widget.materialData!['materialType'] ?? 'learning';
-
-      if (widget.materialData!['instructions'] != null) {
-        _instructionsController.text = widget.materialData!['instructions'];
-      }
 
       // Set due date if exists (for tutorials)
       if (widget.materialData!['dueDate'] != null) {
@@ -86,7 +81,6 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _instructionsController.dispose();
     _uploadSubscription?.cancel();
     super.dispose();
   }
@@ -351,14 +345,12 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         );
 
         materialData['dueDate'] = Timestamp.fromDate(dueDateTime);
-        materialData['instructions'] = _instructionsController.text.trim();
         materialData['requiresSubmission'] = true;
       } else {
         materialData['requiresSubmission'] = false;
         // Remove tutorial fields if changing from tutorial to learning
         if (widget.editMode) {
           materialData['dueDate'] = FieldValue.delete();
-          materialData['instructions'] = FieldValue.delete();
         }
       }
 
@@ -736,37 +728,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                       },
                     ),
 
-                    // Tutorial-specific fields
+                    // Tutorial-specific fields (Due Date and Time only)
                     if (_materialType == 'tutorial') ...[
-                      SizedBox(height: 16),
-
-                      // Instructions
-                      TextFormField(
-                        controller: _instructionsController,
-                        maxLines: 4,
-                        decoration: InputDecoration(
-                          labelText: 'Tutorial Instructions',
-                          hintText: 'Provide detailed instructions for completing this tutorial',
-                          prefixIcon: Padding(
-                            padding: EdgeInsets.only(bottom: 80),
-                            child: Icon(Icons.assignment, color: Colors.purple[400]),
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.purple[400]!, width: 2),
-                          ),
-                          alignLabelWithHint: true,
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter tutorial instructions';
-                          }
-                          return null;
-                        },
-                      ),
                       SizedBox(height: 16),
 
                       // Due Date and Time

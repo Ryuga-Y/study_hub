@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:study_hub/Student/student_tutorial.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/auth_services.dart';
@@ -865,46 +866,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                           ),
                         ),
 
-                        if (isTutorial && material['instructions'] != null) ...[
-                          SizedBox(height: 16),
-                          Container(
-                            padding: EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.blue[50],
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.blue[200]!),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(Icons.assignment, color: Colors.blue[700], size: 20),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Instructions',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.blue[800],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                SizedBox(height: 8),
-                                Text(
-                                  material['instructions'],
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.blue[900],
-                                    height: 1.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-
                         // Tutorial reward info
                         if (isTutorial) ...[
                           SizedBox(height: 16),
@@ -1096,27 +1057,57 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                             dueDate.toDate().isBefore(DateTime.now());
 
                         if (hasSubmitted) {
-                          return Container(
-                            padding: EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.green[50],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.green[300]!),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.check_circle, color: Colors.green[700], size: 20),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Tutorial Submitted',
-                                  style: TextStyle(
-                                    color: Colors.green[700],
-                                    fontWeight: FontWeight.bold,
+                          return Row(
+                            children: [
+                              Expanded(
+                                child: Container(
+                                  padding: EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green[50],
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.green[300]!),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Tutorial Submitted',
+                                        style: TextStyle(
+                                          color: Colors.green[700],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                              SizedBox(width: 8),
+                              ElevatedButton(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => StudentTutorialSubmissionView(
+                                        courseId: widget.courseId,
+                                        materialId: material['id'],
+                                        materialData: material,
+                                        organizationCode: _organizationCode!,
+                                      ),
+                                    ),
+                                  ).then((_) => _loadData());
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue[600],
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: Text('View', style: TextStyle(color: Colors.white)),
+                              ),
+                            ],
                           );
                         }
 
