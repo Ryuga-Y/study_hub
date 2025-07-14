@@ -179,22 +179,27 @@ class _ViewBadgesPageState extends State<ViewBadgesPage> with TickerProviderStat
       String submissionId,
       String itemId,
       String type,
-      String userId
+      String userId,
       ) async {
     try {
-      // First, find the course and submission
+      // Get all courses in the organization
       final coursesSnapshot = await FirebaseFirestore.instance
           .collection('organizations')
           .doc(orgCode)
           .collection('courses')
           .get();
 
+      // Search through each course to find the submission
       for (var courseDoc in coursesSnapshot.docs) {
         final courseId = courseDoc.id;
+        final courseData = courseDoc.data();
+
+        DocumentSnapshot? submissionDoc;
+        DocumentSnapshot? itemDoc;
 
         if (type == 'assignment') {
-          // Look in assignments
-          final submissionDoc = await FirebaseFirestore.instance
+          // Look for submission in assignments collection
+          submissionDoc = await FirebaseFirestore.instance
               .collection('organizations')
               .doc(orgCode)
               .collection('courses')
@@ -205,9 +210,9 @@ class _ViewBadgesPageState extends State<ViewBadgesPage> with TickerProviderStat
               .doc(submissionId)
               .get();
 
+          // If submission found, get the assignment details
           if (submissionDoc.exists) {
-            // Get assignment details
-            final assignmentDoc = await FirebaseFirestore.instance
+            itemDoc = await FirebaseFirestore.instance
                 .collection('organizations')
                 .doc(orgCode)
                 .collection('courses')
@@ -215,23 +220,10 @@ class _ViewBadgesPageState extends State<ViewBadgesPage> with TickerProviderStat
                 .collection('assignments')
                 .doc(itemId)
                 .get();
-
-            if (assignmentDoc.exists) {
-              final submissionData = submissionDoc.data()!;
-              final assignmentData = assignmentDoc.data()!;
-
-              return {
-                'submittedAt': submissionData['submittedAt'],
-                'dueDate': assignmentData['dueDate'],
-                'isLate': submissionData['isLate'] ?? false,
-                'courseName': courseDoc.data()['title'] ?? 'Unknown Course',
-                'courseCode': courseDoc.data()['code'] ?? '',
-              };
-            }
           }
         } else if (type == 'tutorial') {
-          // Look in materials (tutorials)
-          final submissionDoc = await FirebaseFirestore.instance
+          // Look for submission in materials collection
+          submissionDoc = await FirebaseFirestore.instance
               .collection('organizations')
               .doc(orgCode)
               .collection('courses')
@@ -242,9 +234,9 @@ class _ViewBadgesPageState extends State<ViewBadgesPage> with TickerProviderStat
               .doc(submissionId)
               .get();
 
+          // If submission found, get the material details
           if (submissionDoc.exists) {
-            // Get material details
-            final materialDoc = await FirebaseFirestore.instance
+            itemDoc = await FirebaseFirestore.instance
                 .collection('organizations')
                 .doc(orgCode)
                 .collection('courses')
@@ -252,27 +244,40 @@ class _ViewBadgesPageState extends State<ViewBadgesPage> with TickerProviderStat
                 .collection('materials')
                 .doc(itemId)
                 .get();
-
-            if (materialDoc.exists) {
-              final submissionData = submissionDoc.data()!;
-              final materialData = materialDoc.data()!;
-
-              return {
-                'submittedAt': submissionData['submittedAt'],
-                'dueDate': materialData['dueDate'],
-                'isLate': submissionData['isLate'] ?? false,
-                'courseName': courseDoc.data()['title'] ?? 'Unknown Course',
-                'courseCode': courseDoc.data()['code'] ?? '',
-              };
-            }
           }
         }
+
+        // If both submission and item documents exist, return the details
+        if (submissionDoc != null && submissionDoc.exists &&
+            itemDoc != null && itemDoc.exists) {
+
+          final submissionData = submissionDoc.data() as Map<String, dynamic>;
+          final itemData = itemDoc.data() as Map<String, dynamic>;
+
+          return {
+            'submittedAt': submissionData['submittedAt'],
+            'dueDate': itemData['dueDate'],
+            'isLate': submissionData['isLate'] ?? false,
+            'courseName': courseData['title'] ?? courseData['name'] ?? 'Unknown Course',
+            'courseCode': courseData['code'] ?? '',
+            'itemId': itemId,
+            'courseId': courseId,
+            'itemName': itemData['title'] ?? itemData['name'] ?? 'Unknown Item',
+            'submissionStatus': submissionData['status'] ?? 'submitted',
+            'grade': submissionData['grade'],
+            'feedback': submissionData['feedback'],
+          };
+        }
       }
+
+      // If no submission found in any course
+      print('Submission not found: orgCode=$orgCode, submissionId=$submissionId, itemId=$itemId, type=$type');
+      return null;
+
     } catch (e) {
       print('Error getting submission details: $e');
+      return null;
     }
-
-    return null;
   }
 
   @override

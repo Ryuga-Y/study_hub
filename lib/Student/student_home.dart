@@ -179,12 +179,14 @@ class _StudentHomePageState extends State<StudentHomePage> {
     }
   }
 
+  // ✅ FIXED: Use getGoalProgress() instead of getWaterBucketCount()
   Future<void> _loadWaterBuckets() async {
     try {
       // Only load water buckets if user is a student
       final isStudent = await _goalService.isCurrentUserStudent();
       if (isStudent) {
-        final bucketCount = await _goalService.getWaterBucketCount();
+        final progress = await _goalService.getGoalProgress();
+        final bucketCount = progress?['waterBuckets'] ?? 0;
         setState(() {
           _waterBuckets = bucketCount;
         });
@@ -566,7 +568,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   Text(
                     _userData?['email'] ?? '',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.9),
+                      color: Colors.white.withOpacity(0.9),
                       fontSize: 14,
                     ),
                   ),
@@ -679,7 +681,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.purple.withValues(alpha: 0.3),
+                  color: Colors.purple.withOpacity(0.3),
                   blurRadius: 10,
                   offset: const Offset(0, 5),
                 ),
@@ -701,7 +703,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   'You have ${_enrolledCourses.length} enrolled course${_enrolledCourses.length == 1 ? '' : 's'}',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.white.withValues(alpha: 0.9),
+                    color: Colors.white.withOpacity(0.9),
                   ),
                 ),
               ],
@@ -724,7 +726,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.green.withValues(alpha: 0.3),
+                    color: Colors.green.withOpacity(0.3),
                     blurRadius: 10,
                     offset: const Offset(0, 5),
                   ),
@@ -756,7 +758,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                                 : 'Complete assignments to earn water buckets!',
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.white.withValues(alpha: 0.9),
+                              color: Colors.white.withOpacity(0.9),
                             ),
                           ),
                         ],
@@ -799,7 +801,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.1),
+                  color: Colors.grey.withOpacity(0.1),
                   blurRadius: 10,
                   offset: const Offset(0, 5),
                 ),
@@ -975,7 +977,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
+            color: Colors.grey.withOpacity(0.1),
             blurRadius: 5,
             offset: const Offset(0, 2),
           ),

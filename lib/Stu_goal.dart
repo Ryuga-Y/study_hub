@@ -73,13 +73,28 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     _startListeningForSubmissions(); // Add automatic submission detection
     _startRealtimeGoalProgressListener(); // Add real-time Firebase listener
     _startAutoSyncTimer(); // 🔄 NEW: Start auto-sync timer
+
+    // Check for missed rewards on startup
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForMissedRewards();
+    });
   }
 
-  // 🔄 NEW: Start periodic auto-sync to detect deleted rewards
+  // Add this new method:
+  Future<void> _checkForMissedRewards() async {
+    try {
+      print('🔍 Checking for any missed submission rewards...');
+      await _goalService.scanAndRewardMissedSubmissions();
+    } catch (e) {
+      print('Error checking missed rewards: $e');
+    }
+  }
+
+  // 🚀 UPDATED: Auto-sync timer with longer intervals
   void _startAutoSyncTimer() {
-    // Check every 30 seconds for deleted rewards
-    Timer.periodic(Duration(seconds: 30), (timer) {
-      if (mounted) {
+    // Check every 2 minutes for deleted rewards (longer interval)
+    Timer.periodic(Duration(minutes: 2), (timer) {
+      if (mounted && !isLoading) {
         _performAutoSync();
       } else {
         timer.cancel();
@@ -87,24 +102,25 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     });
   }
 
-  // 🔄 NEW: Perform auto-sync to detect and correct bucket count
+  // 🚀 UPDATED: Less aggressive auto-sync
   Future<void> _performAutoSync() async {
-    if (isAutoSyncing) return; // Prevent concurrent syncs
+    if (isAutoSyncing || isLoading) return; // Prevent concurrent syncs
 
     try {
       setState(() {
         isAutoSyncing = true;
       });
 
+      // Only perform auto-sync if there's a significant discrepancy
       final bucketCountChanged = await _goalService.autoSyncWaterBuckets();
 
       if (bucketCountChanged) {
-        print('🔄 Auto-sync detected changes - refreshing UI...');
+        print('🔄 Auto-sync detected significant changes - refreshing UI...');
 
         // Reload goal progress to get updated bucket count
         await _loadGoalProgress();
 
-        // Show subtle notification that buckets were updated
+        // Show subtle notification that buckets were updated (only for major changes)
         _showAutoSyncNotification();
       }
     } catch (e) {
@@ -240,15 +256,19 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       if (snapshot.exists && mounted) {
         final data = snapshot.data() as Map<String, dynamic>;
         final newWaterBuckets = data['waterBuckets'] ?? 0;
+        final newTreeGrowth = (data['treeGrowth'] ?? 0.0).toDouble();
+        final newWateringCount = data['wateringCount'] ?? 0;
 
-        // Check if buckets increased (new submission detected)
-        if (newWaterBuckets > waterBuckets) {
+        // 🚀 FIXED: Only trigger reward notification if buckets increased significantly
+        // This prevents interference with normal bucket consumption
+        if (newWaterBuckets > waterBuckets + 1) {
+          // Significant increase detected (new submission reward)
           final bucketsAdded = newWaterBuckets - waterBuckets;
 
           setState(() {
             waterBuckets = newWaterBuckets;
-            wateringCount = data['wateringCount'] ?? 0;
-            treeGrowth = (data['treeGrowth'] ?? 0.0).toDouble();
+            wateringCount = newWateringCount;
+            treeGrowth = newTreeGrowth;
             String treeLevelString = data['currentTreeLevel'] ?? 'bronze';
             currentTreeLevel = TreeLevel.values.firstWhere(
                   (e) => e.toString().split('.').last == treeLevelString,
@@ -264,31 +284,41 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
           // Show congratulations message
           _showBucketRewardMessage(bucketsAdded);
         } else {
-          // Update other data without notification
-          setState(() {
-            waterBuckets = newWaterBuckets;
-            wateringCount = data['wateringCount'] ?? 0;
-            treeGrowth = (data['treeGrowth'] ?? 0.0).toDouble();
-            String treeLevelString = data['currentTreeLevel'] ?? 'bronze';
-            currentTreeLevel = TreeLevel.values.firstWhere(
-                  (e) => e.toString().split('.').last == treeLevelString,
-              orElse: () => TreeLevel.bronze,
-            );
-            completedTrees = data['completedTrees'] ?? 0;
-            totalProgress = data['totalProgress'] ?? 0;
-          });
+          // 🚀 FIXED: For normal updates (like bucket consumption), update silently
+          // Don't override if we're in the middle of a water operation
+          if (!isLoading) {
+            setState(() {
+              // Only update if the values are different to avoid unnecessary rebuilds
+              if (waterBuckets != newWaterBuckets) waterBuckets = newWaterBuckets;
+              if (wateringCount != newWateringCount) wateringCount = newWateringCount;
+              if (treeGrowth != newTreeGrowth) treeGrowth = newTreeGrowth;
+
+              String treeLevelString = data['currentTreeLevel'] ?? 'bronze';
+              TreeLevel newTreeLevel = TreeLevel.values.firstWhere(
+                    (e) => e.toString().split('.').last == treeLevelString,
+                orElse: () => TreeLevel.bronze,
+              );
+              if (currentTreeLevel != newTreeLevel) currentTreeLevel = newTreeLevel;
+
+              int newCompletedTrees = data['completedTrees'] ?? 0;
+              if (completedTrees != newCompletedTrees) completedTrees = newCompletedTrees;
+
+              int newTotalProgress = data['totalProgress'] ?? 0;
+              if (totalProgress != newTotalProgress) totalProgress = newTotalProgress;
+            });
+          }
         }
       }
     });
   }
 
-  // Start listening for new submissions automatically
+  // 🚀 UPDATED: Modified to reduce frequency and avoid interference
   void _startListeningForSubmissions() {
     // Check for new submissions when app starts
     _checkForNewSubmissions();
 
-    // Set up periodic checks (every 10 seconds for faster detection)
-    Timer.periodic(Duration(seconds: 10), (timer) {
+    // Set up periodic checks (reduced frequency to every 30 seconds)
+    Timer.periodic(Duration(seconds: 30), (timer) {
       if (mounted) {
         _checkForNewSubmissions();
       } else {
@@ -446,12 +476,10 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     ));
   }
 
-  // Refresh water bucket count from Firebase
+  // 🚀 UPDATED: Remove auto-sync from refresh method to avoid interference
   Future<void> _refreshWaterBuckets() async {
     try {
-      // Auto-sync before refreshing to ensure accuracy
-      await _goalService.autoSyncWaterBuckets();
-
+      // Get bucket count directly without auto-sync
       final progress = await _goalService.getGoalProgress();
       if (progress != null && mounted) {
         setState(() {
@@ -518,18 +546,24 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       return;
     }
 
-    // Calculate growth before watering
+    // Store initial values for animation
     double previousGrowth = treeGrowth;
+    int previousBuckets = waterBuckets;
 
-    // Use water bucket through Firebase (this increases tree growth by 5%)
+    // 🚀 FIXED: Update UI immediately for responsive feedback
+    setState(() {
+      waterBuckets = previousBuckets - 1;
+      treeGrowth = math.min(previousGrowth + 0.05, 1.0);
+    });
+
+    // Use water bucket through Firebase
     final success = await _goalService.useWaterBucket();
 
     if (success) {
-      // Reload progress from Firebase
-      await _loadGoalProgress();
+      // Firebase operation successful - UI already updated above
 
       // Calculate growth increase for visual feedback
-      double growthIncrease = treeGrowth - previousGrowth;
+      double growthIncrease = 0.05;
 
       // Play animations
       _growthController.forward(from: 0.0);
@@ -555,6 +589,24 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
           _waterAnimationController.reset();
         });
       }
+
+      // Reload progress from Firebase after a short delay to ensure consistency
+      Future.delayed(Duration(milliseconds: 500), () {
+        _loadGoalProgress();
+      });
+    } else {
+      // Firebase operation failed - revert UI changes
+      setState(() {
+        waterBuckets = previousBuckets;
+        treeGrowth = previousGrowth;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Failed to use water bucket. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -840,6 +892,89 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     );
   }
 
+  // 🔍 DEBUG: Show bucket count verification dialog
+  Future<void> _showBucketVerification() async {
+    try {
+      final verification = await _goalService.verifyBucketCount();
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.bug_report, color: Colors.blue[600]),
+              SizedBox(width: 8),
+              Text('Bucket Count Debug'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (verification['error'] != null)
+                Text('Error: ${verification['error']}')
+              else ...[
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: verification['isCorrect'] ? Colors.green[50] : Colors.red[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: verification['isCorrect'] ? Colors.green[300]! : Colors.red[300]!,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        verification['message'],
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: verification['isCorrect'] ? Colors.green[700] : Colors.red[700],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text('Current in Firebase: ${verification['currentBuckets']}'),
+                      Text('Calculated (earned - consumed): ${verification['calculatedBuckets']}'),
+                      Text('Total earned: ${verification['totalEarned']}'),
+                      Text('Total consumed: ${verification['totalConsumed']}'),
+                      if (verification['discrepancy'] != 0)
+                        Text(
+                          'Discrepancy: ${verification['discrepancy']}',
+                          style: TextStyle(color: Colors.red[700], fontWeight: FontWeight.bold),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            if (verification['error'] == null && !verification['isCorrect'])
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _manualRecalculation();
+                },
+                child: Text('Fix Discrepancy'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Widget _getCurrentTreePainter() {
     switch (currentTreeLevel) {
       case TreeLevel.bronze:
@@ -995,7 +1130,14 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
         title: Text('StudyHub'),
         backgroundColor: Colors.white,
         actions: [
-          // 🔄 NEW: Auto-sync indicator
+          // 🔄 Debug verification button (remove after testing)
+          IconButton(
+            onPressed: _showBucketVerification,
+            icon: Icon(Icons.bug_report, color: Colors.orange[600]),
+            tooltip: 'Debug Bucket Count',
+          ),
+
+          // 🔄 Auto-sync indicator
           if (isAutoSyncing)
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),

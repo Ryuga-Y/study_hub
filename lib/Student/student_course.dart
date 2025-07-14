@@ -276,94 +276,133 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     }
   }
 
-  // 🎯 ENHANCED ASSIGNMENT SUBMISSION with water bucket rewards
+  // 🎯 ENHANCED ASSIGNMENT SUBMISSION with existing submission check
   Future<void> _submitAssignment(Map<String, dynamic> assignment) async {
     final user = _authService.currentUser;
     if (user == null) return;
 
-    // Check if assignment has been graded - if so, prevent submission
-    final submission = submissions[assignment['id']];
-    if (submission != null && submission['grade'] != null) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              Icon(Icons.block, color: Colors.red, size: 24),
-              SizedBox(width: 8),
-              Text('Submission Not Allowed'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'This assignment has already been graded.',
-                style: TextStyle(fontWeight: FontWeight.w500),
-              ),
-              SizedBox(height: 12),
-              Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green[300]!),
+    // Check if already submitted
+    final existingSubmission = submissions[assignment['id']];
+    if (existingSubmission != null) {
+      // Check if it's been graded
+      if (existingSubmission['grade'] != null) {
+        // Show "already graded" message (existing code)
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Icon(Icons.block, color: Colors.red, size: 24),
+                SizedBox(width: 8),
+                Text('Submission Not Allowed'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'This assignment has already been graded.',
+                  style: TextStyle(fontWeight: FontWeight.w500),
                 ),
-                child: Row(
-                  children: [
-                    Icon(Icons.grade, color: Colors.green[700], size: 20),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Grade: ${submission['grade']}/${assignment['points'] ?? 100}',
-                            style: TextStyle(
-                              color: Colors.green[800],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          if (submission['letterGrade'] != null)
+                SizedBox(height: 12),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green[300]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.grade, color: Colors.green[700], size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Text(
-                              'Letter Grade: ${submission['letterGrade']}',
+                              'Grade: ${existingSubmission['grade']}/${assignment['points'] ?? 100}',
                               style: TextStyle(
-                                color: Colors.green[700],
-                                fontSize: 12,
+                                color: Colors.green[800],
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
-                        ],
+                            if (existingSubmission['letterGrade'] != null)
+                              Text(
+                                'Letter Grade: ${existingSubmission['letterGrade']}',
+                                style: TextStyle(
+                                  color: Colors.green[700],
+                                  fontSize: 12,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              SizedBox(height: 12),
-              Text(
-                'No further submissions are allowed once an assignment has been graded.',
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 14,
+                SizedBox(height: 12),
+                Text(
+                  'No further submissions are allowed once an assignment has been graded.',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 14,
+                  ),
                 ),
+              ],
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text('OK', style: TextStyle(color: Colors.white)),
               ),
             ],
           ),
+        );
+        return;
+      }
+
+      // Show dialog asking if they want to update their submission
+      final shouldUpdate = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Update Submission?'),
+          content: Text('You have already submitted this assignment. Do you want to update your submission?'),
           actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
             ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: Text('OK', style: TextStyle(color: Colors.white)),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text('Update'),
             ),
           ],
         ),
       );
+
+      if (shouldUpdate != true) return;
+
+      // Navigate to assignment details page for resubmission
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StudentAssignmentDetailsPage(
+            assignment: assignment,
+            courseId: widget.courseId,
+            courseData: widget.courseData,
+            organizationCode: _organizationCode!,
+          ),
+        ),
+      ).then((_) => _loadData());
       return;
     }
 
@@ -480,7 +519,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
         });
 
-        // 🎯 AWARD WATER BUCKETS: 4 buckets for assignment submission
+        // 🎯 AWARD WATER BUCKETS: 4 buckets for assignment submission (only for NEW submissions)
         try {
           await _goalService.awardAssignmentSubmission(
               submissionRef.id,
@@ -543,10 +582,49 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     }
   }
 
-  // 🎯 ENHANCED TUTORIAL SUBMISSION with water bucket rewards
+  // 🎯 ENHANCED TUTORIAL SUBMISSION with existing submission check
   Future<void> _submitTutorial(Map<String, dynamic> material) async {
     final user = _authService.currentUser;
     if (user == null) return;
+
+    // Check if already submitted
+    final existingSubmission = tutorialSubmissions[material['id']];
+    if (existingSubmission != null) {
+      // Tutorial already submitted - navigate to view/update it
+      final shouldUpdate = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Update Tutorial Submission?'),
+          content: Text('You have already submitted this tutorial. Do you want to update your submission?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text('Update'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldUpdate != true) return;
+
+      // Navigate to tutorial submission view for resubmission
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StudentTutorialSubmissionView(
+            courseId: widget.courseId,
+            materialId: material['id'],
+            materialData: material,
+            organizationCode: _organizationCode!,
+          ),
+        ),
+      ).then((_) => _loadData());
+      return;
+    }
 
     final dueDate = material['dueDate'] as Timestamp?;
     if (dueDate != null && dueDate.toDate().isBefore(DateTime.now())) {
@@ -683,7 +761,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           'isLate': dueDate != null && DateTime.now().isAfter(dueDate.toDate()),
         });
 
-        // 🎯 AWARD WATER BUCKETS: 1 bucket for tutorial submission
+        // 🎯 AWARD WATER BUCKETS: 1 bucket for tutorial submission (only first submission gets reward)
         try {
           await _goalService.awardTutorialSubmission(
               submissionRef.id,

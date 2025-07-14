@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/auth_services.dart';
 import 'student_submit_view.dart';
+import '../goal_progress_service.dart';
 
 class StudentAssignmentDetailsPage extends StatefulWidget {
   final Map<String, dynamic> assignment;
@@ -26,6 +27,7 @@ class StudentAssignmentDetailsPage extends StatefulWidget {
 
 class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsPage> {
   final AuthService _authService = AuthService();
+  final GoalProgressService _goalService = GoalProgressService();
 
   bool isLoading = true;
   Map<String, dynamic>? rubricData;
@@ -50,7 +52,22 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
       });
 
       final user = _authService.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        _showErrorDialog('Authentication Error', 'Please log in to view assignment details.');
+        return;
+      }
+
+      // Verify user data and permissions
+      final userData = await _authService.getUserData(user.uid);
+      if (userData == null) {
+        _showErrorDialog('User Data Error', 'Could not retrieve user information. Please try logging in again.');
+        return;
+      }
+
+      if (userData['role'] != 'student') {
+        _showErrorDialog('Permission Error', 'Only students can view assignment details.');
+        return;
+      }
 
       // Load rubric if exists
       await _loadRubric();
@@ -66,6 +83,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
       setState(() {
         isLoading = false;
       });
+      _showErrorDialog('Loading Error', 'Failed to load assignment details: $e');
     }
   }
 
@@ -84,11 +102,12 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
 
       if (rubricDoc.exists) {
         setState(() {
-          rubricData = rubricDoc.data();
+          rubricData = rubricDoc.data() as Map<String, dynamic>?;
         });
       }
     } catch (e) {
       print('Error loading rubric: $e');
+      // Don't show error for rubric loading failure - it's optional
     }
   }
 
@@ -118,20 +137,43 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
 
         setState(() {
           hasSubmitted = true;
-          latestSubmission = {
+          latestSubmission = <String, dynamic>{
             'id': sortedDocs.first.id,
-            ...sortedDocs.first.data(),
+            ...(sortedDocs.first.data() as Map<String, dynamic>),
           };
         });
       }
     } catch (e) {
       print('Error checking submission status: $e');
+      // Don't show error for submission check failure - user might not have submitted yet
     }
   }
 
   Future<void> _submitAssignment() async {
     final user = _authService.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      _showErrorDialog('Authentication Error', 'Please log in to submit assignments.');
+      return;
+    }
+
+    // Verify user data first
+    final userData = await _authService.getUserData(user.uid);
+    if (userData == null) {
+      _showErrorDialog('User Data Error', 'Could not retrieve user information. Please try logging in again.');
+      return;
+    }
+
+    // Verify user is a student
+    if (userData['role'] != 'student') {
+      _showErrorDialog('Permission Error', 'Only students can submit assignments.');
+      return;
+    }
+
+    // Verify organization membership
+    if (userData['organizationCode'] != widget.organizationCode) {
+      _showErrorDialog('Organization Error', 'You are not enrolled in this organization.');
+      return;
+    }
 
     // Check if assignment has been graded
     if (latestSubmission != null && latestSubmission!['grade'] != null) {
@@ -346,8 +388,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
           uploadStatus = 'Preparing upload...';
         });
 
-        final userData = await _authService.getUserData(user.uid);
-        final studentName = userData?['fullName'] ?? 'Unknown Student';
+        final studentName = userData['fullName'] ?? 'Unknown Student';
 
         // Delete old file if resubmitting
         if (isResubmit && latestSubmission!['storagePath'] != null) {
@@ -399,7 +440,7 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
         });
 
         if (isResubmit) {
-          // Update existing submission
+          // Update existing submission - NO NEW REWARD
           await FirebaseFirestore.instance
               .collection('organizations')
               .doc(widget.organizationCode)
@@ -417,7 +458,6 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
             'resubmittedAt': FieldValue.serverTimestamp(),
             'submissionVersion': FieldValue.increment(1),
             'isLate': isLate,
-            // Reset evaluation status if any
             'status': 'submitted',
           });
 
@@ -431,19 +471,11 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
           latestSubmission!['status'] = 'submitted';
 
         } else {
-          // Create new submission
-          final submissionRef = await FirebaseFirestore.instance
-              .collection('organizations')
-              .doc(widget.organizationCode)
-              .collection('courses')
-              .doc(widget.courseId)
-              .collection('assignments')
-              .doc(widget.assignment['id'])
-              .collection('submissions')
-              .add({
-            'studentId': user.uid,
+          // Create new submission with comprehensive data structure for security rules
+          final submissionData = <String, dynamic>{
+            'studentId': user.uid,  // CRITICAL: This must match auth.uid for security rules
             'studentName': studentName,
-            'studentEmail': userData?['email'] ?? '',
+            'studentEmail': userData['email'] ?? '',
             'submittedAt': FieldValue.serverTimestamp(),
             'fileUrl': fileUrl,
             'fileName': result.files.single.name,
@@ -454,21 +486,69 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
             'feedback': null,
             'isLate': isLate,
             'submissionVersion': 1,
-          });
+            'assignmentId': widget.assignment['id'],
+            'courseId': widget.courseId,
+            'organizationCode': widget.organizationCode,
+            // Additional metadata for tracking
+            'submissionType': 'assignment',
+            'createdAt': FieldValue.serverTimestamp(),
+            'lastModified': FieldValue.serverTimestamp(),
+          };
+
+          // Create submission with proper error handling
+          DocumentReference submissionRef;
+          try {
+            submissionRef = await FirebaseFirestore.instance
+                .collection('organizations')
+                .doc(widget.organizationCode)
+                .collection('courses')
+                .doc(widget.courseId)
+                .collection('assignments')
+                .doc(widget.assignment['id'])
+                .collection('submissions')
+                .add(submissionData);
+
+            print('✅ Submission created successfully: ${submissionRef.id}');
+          } catch (firestoreError) {
+            setState(() {
+              isUploading = false;
+              uploadProgress = 0.0;
+              uploadStatus = '';
+            });
+
+            print('❌ Firestore submission error: $firestoreError');
+
+            // Show specific error dialog
+            _showFirestoreErrorDialog(firestoreError);
+            return;
+          }
 
           // Wait for the submission to be written
           await Future.delayed(Duration(seconds: 1));
 
           // Fetch the created submission document to ensure we have the latest data
           final submissionDoc = await submissionRef.get();
-          final submissionData = {
+          final submissionDocData = <String, dynamic>{
             'id': submissionDoc.id,
-            ...submissionDoc.data() ?? {},
+            ...(submissionDoc.data() as Map<String, dynamic>? ?? <String, dynamic>{}),
           };
+
+          // 🎯 AWARD WATER BUCKETS: 4 buckets for assignment submission
+          try {
+            await _goalService.awardAssignmentSubmission(
+                submissionRef.id,
+                widget.assignment['id'],
+                assignmentName: widget.assignment['title'] ?? 'Assignment'
+            );
+            print('✅ Awarded 4 water buckets for assignment: ${widget.assignment['title']}');
+          } catch (e) {
+            print('❌ Error awarding water buckets: $e');
+            // Don't fail the submission if reward fails
+          }
 
           setState(() {
             hasSubmitted = true;
-            latestSubmission = submissionData;
+            latestSubmission = submissionDocData;
           });
         }
 
@@ -480,8 +560,33 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isResubmit ? 'Assignment resubmitted successfully' : 'Assignment submitted successfully'),
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(child: Text(isResubmit ? 'Assignment resubmitted successfully' : 'Assignment submitted successfully!')),
+                if (!isResubmit) ...[
+                  SizedBox(width: 8),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.orange[600],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.local_drink, size: 16, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('+4', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
           ),
         );
 
@@ -510,13 +615,191 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
         uploadStatus = '';
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error ${isResubmit ? "resubmitting" : "submitting"} assignment: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      print('❌ General submission error: $e');
+      _showErrorDialog('Submission Error', 'Failed to submit assignment: $e');
     }
+  }
+
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.error, color: Colors.red, size: 24),
+            SizedBox(width: 8),
+            Expanded(child: Text(title)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange[300]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Troubleshooting Steps:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange[800],
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text('1. Check your internet connection', style: TextStyle(fontSize: 12)),
+                  Text('2. Make sure you\'re logged in as a student', style: TextStyle(fontSize: 12)),
+                  Text('3. Verify you\'re enrolled in this course', style: TextStyle(fontSize: 12)),
+                  Text('4. Contact your instructor if the problem continues', style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('OK', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFirestoreErrorDialog(dynamic error) {
+    String errorMessage = 'Unknown database error occurred.';
+    String troubleshootingSteps = '';
+
+    if (error.toString().contains('permission-denied')) {
+      errorMessage = 'Permission denied. You don\'t have permission to submit assignments.';
+      troubleshootingSteps = '''
+This usually happens when:
+• Database security rules haven't been properly configured
+• Your account doesn't have student permissions
+• The course enrollment is incomplete
+• You're not part of the correct organization
+
+Please contact your instructor or administrator to resolve this issue.
+      ''';
+    } else if (error.toString().contains('not-found')) {
+      errorMessage = 'Assignment or course not found in the database.';
+      troubleshootingSteps = '''
+This might happen when:
+• The assignment has been deleted
+• The course has been removed
+• There's a database synchronization issue
+
+Please refresh the page and try again.
+      ''';
+    } else if (error.toString().contains('unavailable')) {
+      errorMessage = 'Database is temporarily unavailable. Please try again later.';
+      troubleshootingSteps = '''
+This is usually a temporary issue:
+• Check your internet connection
+• Wait a few minutes and try again
+• Contact support if the problem persists
+      ''';
+    } else if (error.toString().contains('failed-precondition')) {
+      errorMessage = 'Data validation failed. Please check your submission details.';
+      troubleshootingSteps = '''
+This happens when:
+• Required fields are missing
+• Data format is incorrect
+• Security validation failed
+
+Please try submitting again or contact support.
+      ''';
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.cloud_off, color: Colors.red, size: 24),
+            SizedBox(width: 8),
+            Text('Database Error'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                errorMessage,
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 16),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red[200]!),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'What to do:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red[800],
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      troubleshootingSteps.trim(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.red[700],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Retry the submission
+              _submitAssignment();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text('Try Again', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _downloadFile(String fileUrl, String fileName) async {
@@ -542,8 +825,21 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
       return Scaffold(
         backgroundColor: Colors.grey[50],
         body: Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'Loading assignment details...',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 16,
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -596,6 +892,12 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                     foregroundColor: Colors.purple[600],
                   ),
                 ),
+              // Refresh button
+              IconButton(
+                onPressed: _loadData,
+                icon: Icon(Icons.refresh, color: Colors.grey[600]),
+                tooltip: 'Refresh',
+              ),
             ],
           ),
           body: RefreshIndicator(
@@ -761,6 +1063,32 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                 ),
+                              ),
+                            ),
+                            // Reward info
+                            SizedBox(height: 12),
+                            Container(
+                              padding: EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[50],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.orange[200]!),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.local_drink, color: Colors.orange[600], size: 20),
+                                  SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Submit this assignment to earn 4 water buckets for your tree!',
+                                      style: TextStyle(
+                                        color: Colors.orange[700],
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ] else if (latestSubmission?['grade'] == null) ...[
