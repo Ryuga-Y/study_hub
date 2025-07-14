@@ -222,69 +222,178 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
       final percentage = (grade / totalPoints) * 100;
       final letterGrade = _calculateLetterGrade(percentage);
 
-      final evaluationData = {
-        'submissionId': widget.submissionId,
-        'studentId': widget.submissionData['studentId'],
-        'assignmentId': widget.assignmentId,
-        'courseId': widget.courseId,
-        'evaluatorId': FirebaseAuth.instance.currentUser?.uid,
-        'evaluatedAt': FieldValue.serverTimestamp(),
-        'grade': grade,
-        'letterGrade': letterGrade, // Add letter grade
-        'percentage': percentage, // Add percentage
-        'totalScore': totalScore,
-        'maxPoints': totalPoints,
-        'criteriaScores': criteriaScores,
-        'feedback': _feedbackController.text.trim(),
-        'privateNotes': _privateNotesController.text.trim(),
-        'rubricUsed': rubric != null,
-      };
+      // Debug logging to check studentId
+      print('=== DEBUG EVALUATION SAVE ===');
+      print('Widget submissionData: ${widget.submissionData}');
+      print('StudentId from submissionData: ${widget.submissionData['studentId']}');
+      print('StudentName from submissionData: ${widget.submissionData['studentName']}');
 
-      // Save to evaluations subcollection
-      await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(widget.organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('assignments')
-          .doc(widget.assignmentId)
-          .collection('submissions')
-          .doc(widget.submissionId)
-          .collection('evaluations')
-          .doc('current')
-          .set(evaluationData);
+      // Ensure we have a valid studentId
+      final studentId = widget.submissionData['studentId']?.toString() ?? '';
+      if (studentId.isEmpty) {
+        print('ERROR: StudentId is empty or null!');
+        // Try to fetch it from the submission document directly
+        final submissionDoc = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .collection('submissions')
+            .doc(widget.submissionId)
+            .get();
 
-      // Update submission with grade, letter grade and feedback
-      await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(widget.organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('assignments')
-          .doc(widget.assignmentId)
-          .collection('submissions')
-          .doc(widget.submissionId)
-          .update({
-        'grade': grade,
-        'letterGrade': letterGrade, // Save letter grade
-        'percentage': percentage, // Save percentage
-        'feedback': _feedbackController.text.trim(),
-        'gradedAt': FieldValue.serverTimestamp(),
-        'gradedBy': FirebaseAuth.instance.currentUser?.uid,
-        'status': 'completed', // Change from 'graded' to 'completed'
-      });
+        if (submissionDoc.exists) {
+          final submissionData = submissionDoc.data()!;
+          final fetchedStudentId = submissionData['studentId']?.toString() ?? '';
+          print('Fetched studentId from document: $fetchedStudentId');
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Evaluation saved successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
+          if (fetchedStudentId.isEmpty) {
+            throw Exception('Cannot find studentId in submission document');
+          }
 
-        Navigator.pop(context, true);
+          // Update the evaluation data with the fetched studentId
+          final evaluationData = {
+            'submissionId': widget.submissionId,
+            'studentId': fetchedStudentId, // Use fetched studentId
+            'studentName': submissionData['studentName'] ?? widget.submissionData['studentName'] ?? '',
+            'studentEmail': submissionData['studentEmail'] ?? widget.submissionData['studentEmail'] ?? '',
+            'assignmentId': widget.assignmentId,
+            'courseId': widget.courseId,
+            'evaluatorId': FirebaseAuth.instance.currentUser?.uid,
+            'evaluatedAt': FieldValue.serverTimestamp(),
+            'grade': grade,
+            'letterGrade': letterGrade,
+            'percentage': percentage,
+            'totalScore': totalScore,
+            'maxPoints': totalPoints,
+            'criteriaScores': criteriaScores,
+            'feedback': _feedbackController.text.trim(),
+            'privateNotes': _privateNotesController.text.trim(),
+            'rubricUsed': rubric != null,
+          };
+
+          print('Final evaluationData studentId: ${evaluationData['studentId']}');
+
+          // Save to evaluations subcollection
+          await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(widget.organizationCode)
+              .collection('courses')
+              .doc(widget.courseId)
+              .collection('assignments')
+              .doc(widget.assignmentId)
+              .collection('submissions')
+              .doc(widget.submissionId)
+              .collection('evaluations')
+              .doc('current')
+              .set(evaluationData);
+
+          // Update submission with grade, letter grade and feedback
+          await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(widget.organizationCode)
+              .collection('courses')
+              .doc(widget.courseId)
+              .collection('assignments')
+              .doc(widget.assignmentId)
+              .collection('submissions')
+              .doc(widget.submissionId)
+              .update({
+            'grade': grade,
+            'letterGrade': letterGrade,
+            'percentage': percentage,
+            'feedback': _feedbackController.text.trim(),
+            'gradedAt': FieldValue.serverTimestamp(),
+            'gradedBy': FirebaseAuth.instance.currentUser?.uid,
+            'status': 'completed',
+          });
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Evaluation saved successfully'),
+                backgroundColor: Colors.green,
+              ),
+            );
+
+            Navigator.pop(context, true);
+          }
+        } else {
+          throw Exception('Submission document not found');
+        }
+      } else {
+        // StudentId is available, proceed normally
+        final evaluationData = {
+          'submissionId': widget.submissionId,
+          'studentId': studentId, // Use the validated studentId
+          'studentName': widget.submissionData['studentName']?.toString() ?? '',
+          'studentEmail': widget.submissionData['studentEmail']?.toString() ?? '',
+          'assignmentId': widget.assignmentId,
+          'courseId': widget.courseId,
+          'evaluatorId': FirebaseAuth.instance.currentUser?.uid,
+          'evaluatedAt': FieldValue.serverTimestamp(),
+          'grade': grade,
+          'letterGrade': letterGrade,
+          'percentage': percentage,
+          'totalScore': totalScore,
+          'maxPoints': totalPoints,
+          'criteriaScores': criteriaScores,
+          'feedback': _feedbackController.text.trim(),
+          'privateNotes': _privateNotesController.text.trim(),
+          'rubricUsed': rubric != null,
+        };
+
+        print('Final evaluationData studentId: ${evaluationData['studentId']}');
+
+        // Save to evaluations subcollection
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .collection('submissions')
+            .doc(widget.submissionId)
+            .collection('evaluations')
+            .doc('current')
+            .set(evaluationData);
+
+        // Update submission with grade, letter grade and feedback
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .collection('submissions')
+            .doc(widget.submissionId)
+            .update({
+          'grade': grade,
+          'letterGrade': letterGrade,
+          'percentage': percentage,
+          'feedback': _feedbackController.text.trim(),
+          'gradedAt': FieldValue.serverTimestamp(),
+          'gradedBy': FirebaseAuth.instance.currentUser?.uid,
+          'status': 'completed',
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Evaluation saved successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+
+          Navigator.pop(context, true);
+        }
       }
     } catch (e) {
+      print('Error saving evaluation: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -325,7 +434,6 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
     return 'F'; // Below 50 is F
   }
 
-  // Add ability to clear/reset evaluation
   Future<void> _clearEvaluation() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -446,7 +554,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
             .doc('current')
             .delete();
 
-        // Update submission status
+        // Update submission status - FIXED: Added letterGrade and percentage
         await FirebaseFirestore.instance
             .collection('organizations')
             .doc(widget.organizationCode)
@@ -458,6 +566,8 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
             .doc(widget.submissionId)
             .update({
           'grade': null,
+          'letterGrade': null,           // ADDED: Clear letter grade
+          'percentage': null,            // ADDED: Clear percentage
           'feedback': null,
           'gradedAt': null,
           'gradedBy': null,

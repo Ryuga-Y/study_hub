@@ -179,7 +179,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Lecturer created successfully!'),
+          content: Text('Course created successfully!'),
           backgroundColor: Colors.green[600],
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
@@ -215,7 +215,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
         backgroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          'Create New Lecturer',
+          'Create New Course',
           style: TextStyle(
             color: Colors.black87,
             fontSize: 20,
@@ -289,7 +289,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Lecturer Information',
+                    'Course Information',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -326,7 +326,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
                       isExpanded: true,  // IMPORTANT: This prevents overflow
                       menuMaxHeight: 300,  // Limit dropdown height
                       decoration: InputDecoration(
-                        labelText: 'Select Lecturer Template *',
+                        labelText: 'Select Course Template *',
                         hintText: 'Choose a course template',
                         prefixIcon: Icon(Icons.library_books, color: Colors.purple[400]),
                         border: OutlineInputBorder(
@@ -448,7 +448,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Selected Lecturer Template',
+                                    'Selected Course Template',
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: Colors.blue[800],
@@ -496,7 +496,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
                     controller: _descriptionController,
                     maxLines: 4,
                     decoration: InputDecoration(
-                      labelText: 'Lecturer Description *',
+                      labelText: 'Course Description *',
                       hintText: 'Enter a description for this course section',
                       prefixIcon: Padding(
                         padding: EdgeInsets.only(bottom: 60),
@@ -612,7 +612,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
             SizedBox(
               width: double.infinity,
               child: CustomButton(
-                text: _isLoading ? 'Creating...' : 'Create Lecturer',
+                text: _isLoading ? 'Creating...' : 'Create Course',
                 onPressed: _isLoading || _baseCourses.isEmpty ? () {} : _createCourse,
                 isLoading: _isLoading,
               ),

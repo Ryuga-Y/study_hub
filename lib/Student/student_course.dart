@@ -71,9 +71,14 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         _organizationCode = userData['organizationCode'];
       });
 
+      // First, fetch materials and assignments
       await Future.wait([
         _fetchAssignments(),
         _fetchMaterials(),
+      ]);
+
+      // Then fetch submissions (which depend on assignments and materials being loaded)
+      await Future.wait([
         _fetchSubmissions(user.uid),
         _fetchTutorialSubmissions(user.uid),
         _fetchClassmates(user.uid),
@@ -184,8 +189,14 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     try {
       Map<String, Map<String, dynamic>> tutorialMap = {};
 
+      // Debug: Log the number of materials
+      print('📚 Total materials: ${materials.length}');
+
       for (var material in materials) {
         if (material['materialType'] == 'tutorial') {
+          // Debug: Log tutorial material info
+          print('🔍 Checking tutorial: ${material['title']} (ID: ${material['id']})');
+
           var submissionQuery = await FirebaseFirestore.instance
               .collection('organizations')
               .doc(_organizationCode)
@@ -200,13 +211,22 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
               .get();
 
           if (submissionQuery.docs.isNotEmpty) {
+            // Debug: Log found submission
+            print('✅ Found submission for tutorial: ${material['title']}');
+
             tutorialMap[material['id']] = {
               'id': submissionQuery.docs.first.id,
               ...submissionQuery.docs.first.data(),
             };
+          } else {
+            // Debug: Log no submission found
+            print('❌ No submission found for tutorial: ${material['title']}');
           }
         }
       }
+
+      // Debug: Log final tutorial submissions
+      print('📊 Total tutorial submissions found: ${tutorialMap.length}');
 
       setState(() {
         tutorialSubmissions = tutorialMap;
@@ -1411,264 +1431,11 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     );
   }
 
-  Widget _buildContentTab() {
-    return RefreshIndicator(
-      onRefresh: () async {
-        await Future.wait([
-          _fetchAssignments(),
-          _fetchMaterials(),
-          _fetchSubmissions(_authService.currentUser!.uid),
-          _fetchTutorialSubmissions(_authService.currentUser!.uid),
-        ]);
-      },
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(16),
-        child: Column(
-          children: [
-            if (assignments.isNotEmpty) ...[
-              _buildSectionHeader('Assignments', Icons.assignment),
-              ...assignments.map((assignment) => _buildAssignmentCard(assignment)),
-              SizedBox(height: 24),
-            ],
-
-            if (materials.isNotEmpty) ...[
-              _buildSectionHeader('Materials', Icons.description),
-              ...materials.map((material) => _buildMaterialCard(material)),
-            ],
-
-            if (assignments.isEmpty && materials.isEmpty)
-              Container(
-                padding: EdgeInsets.all(40),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.folder_open,
-                      size: 64,
-                      color: Colors.grey[400],
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      'No content available yet.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            SizedBox(height: 100),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSectionHeader(String title, IconData icon) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.purple[400], size: 24),
-          SizedBox(width: 8),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[800],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAssignmentCard(Map<String, dynamic> assignment) {
-    final hasSubmitted = submissions.containsKey(assignment['id']);
-    final submission = submissions[assignment['id']];
-    final dueDate = assignment['dueDate'] as Timestamp?;
-    final isDuePassed = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
-
-    return Container(
-      margin: EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 5,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: InkWell(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => StudentAssignmentDetailsPage(
-                assignment: assignment,
-                courseId: widget.courseId,
-                courseData: widget.courseData,
-                organizationCode: _organizationCode!,
-              ),
-            ),
-          ).then((_) => _loadData());
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.assignment,
-                    color: Colors.orange,
-                    size: 28,
-                  ),
-                ),
-              ),
-              SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            assignment['title'] ?? 'Assignment',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                        if (!hasSubmitted) ...[
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.orange[100],
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.local_drink, size: 12, color: Colors.orange[700]),
-                                SizedBox(width: 2),
-                                Text(
-                                  '+4',
-                                  style: TextStyle(
-                                    color: Colors.orange[700],
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      assignment['description'] ?? 'No description',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 14,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    SizedBox(height: 8),
-
-                    // Enhanced status and grade display
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: [
-                        // Due date info
-                        if (dueDate != null)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
-                              SizedBox(width: 4),
-                              Text(
-                                'Due: ${_formatDate(dueDate)}',
-                                style: TextStyle(
-                                  color: isDuePassed ? Colors.red : Colors.grey[600],
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-
-                        // Status badge
-                        Container(
-                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: hasSubmitted
-                                ? (submission?['grade'] != null
-                                ? Colors.green.withValues(alpha: 0.1)
-                                : Colors.blue.withValues(alpha: 0.1))
-                                : (isDuePassed
-                                ? Colors.red.withValues(alpha: 0.1)
-                                : Colors.orange.withValues(alpha: 0.1)),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            hasSubmitted
-                                ? (submission?['grade'] != null ? 'Completed' : 'Submitted')
-                                : (isDuePassed ? 'Missing' : 'Pending'),
-                            style: TextStyle(
-                              color: hasSubmitted
-                                  ? (submission?['grade'] != null ? Colors.green : Colors.blue)
-                                  : (isDuePassed ? Colors.red : Colors.orange),
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    // Grade display with letter grade
-                    if (hasSubmitted && submission?['grade'] != null) ...[
-                      SizedBox(height: 8),
-                      _buildGradeDisplay(
-                        grade: submission!['grade'],
-                        letterGrade: submission['letterGrade'],
-                        maxPoints: assignment['points'] ?? 100,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMaterialCard(Map<String, dynamic> material) {
+  Widget _buildMaterialCardWithStream(Map<String, dynamic> material) {
     final isTutorial = material['materialType'] == 'tutorial';
-    final hasSubmitted = tutorialSubmissions.containsKey(material['id']);
     final dueDate = material['dueDate'] as Timestamp?;
     final isPastDue = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
+    final user = _authService.currentUser;
 
     return Container(
       margin: EdgeInsets.only(bottom: 12),
@@ -1737,31 +1504,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                               ),
                             ),
                           ),
-                          if (!hasSubmitted) ...[
-                            SizedBox(width: 4),
-                            Container(
-                              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.orange[100],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.local_drink, size: 10, color: Colors.orange[700]),
-                                  SizedBox(width: 1),
-                                  Text(
-                                    '+1',
-                                    style: TextStyle(
-                                      color: Colors.orange[700],
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
                         ],
                       ],
                     ),
@@ -1776,52 +1518,96 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                       overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 8),
-                    Row(
-                      children: [
-                        if (isTutorial && dueDate != null) ...[
-                          Icon(Icons.access_time, size: 14, color: isPastDue ? Colors.red : Colors.grey[600]),
-                          SizedBox(width: 4),
-                          Text(
-                            'Due: ${_formatDate(dueDate)}',
-                            style: TextStyle(
-                              color: isPastDue ? Colors.red : Colors.grey[600],
-                              fontSize: 12,
-                              fontWeight: isPastDue ? FontWeight.bold : FontWeight.normal,
-                            ),
-                          ),
-                          SizedBox(width: 12),
-                        ],
-                        if (isTutorial) ...[
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: hasSubmitted
-                                  ? Colors.green.withValues(alpha: 0.1)
-                                  : (isPastDue ? Colors.red.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1)),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              hasSubmitted ? 'Submitted' : (isPastDue ? 'Missing' : 'Pending'),
-                              style: TextStyle(
-                                color: hasSubmitted
-                                    ? Colors.green
-                                    : (isPastDue ? Colors.red : Colors.orange),
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                    if (isTutorial && user != null && _organizationCode != null)
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('organizations')
+                            .doc(_organizationCode)
+                            .collection('courses')
+                            .doc(widget.courseId)
+                            .collection('materials')
+                            .doc(material['id'])
+                            .collection('submissions')
+                            .where('studentId', isEqualTo: user.uid)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          final hasSubmitted = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+
+                          return Row(
+                            children: [
+                              if (dueDate != null) ...[
+                                Icon(
+                                    Icons.access_time,
+                                    size: 14,
+                                    color: (hasSubmitted && isPastDue) ? Colors.grey[600] : (isPastDue ? Colors.red : Colors.grey[600])
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Due: ${_formatDate(dueDate)}',
+                                  style: TextStyle(
+                                    color: (hasSubmitted && isPastDue) ? Colors.grey[600] : (isPastDue ? Colors.red : Colors.grey[600]),
+                                    fontSize: 12,
+                                    fontWeight: (hasSubmitted && isPastDue) ? FontWeight.normal : (isPastDue ? FontWeight.bold : FontWeight.normal),
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                              ],
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: hasSubmitted
+                                      ? Colors.green.withValues(alpha: 0.1)
+                                      : (isPastDue ? Colors.red.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1)),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  hasSubmitted ? 'Submitted' : (isPastDue ? 'Missing' : 'Pending'),
+                                  style: TextStyle(
+                                    color: hasSubmitted
+                                        ? Colors.green
+                                        : (isPastDue ? Colors.red : Colors.orange),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ] else ...[
-                          Text(
-                            _formatDate(material['createdAt']),
-                            style: TextStyle(
-                              color: Colors.grey[500],
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+                              if (!hasSubmitted) ...[
+                                SizedBox(width: 4),
+                                Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange[100],
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.local_drink, size: 10, color: Colors.orange[700]),
+                                      SizedBox(width: 1),
+                                      Text(
+                                        '+1',
+                                        style: TextStyle(
+                                          color: Colors.orange[700],
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      )
+                    else if (!isTutorial)
+                      Text(
+                        _formatDate(material['createdAt']),
+                        style: TextStyle(
+                          color: Colors.grey[500],
+                          fontSize: 12,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -1831,6 +1617,349 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                     : Icons.visibility,
                 color: Colors.grey[400],
                 size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContentTab() {
+    return RefreshIndicator(
+      onRefresh: () async {
+        // First fetch assignments and materials
+        await Future.wait([
+          _fetchAssignments(),
+          _fetchMaterials(),
+        ]);
+
+        // Then fetch submissions after materials are loaded
+        await Future.wait([
+          _fetchSubmissions(_authService.currentUser!.uid),
+          _fetchTutorialSubmissions(_authService.currentUser!.uid),
+        ]);
+      },
+      child: SingleChildScrollView(
+        physics: AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            if (assignments.isNotEmpty) ...[
+              _buildSectionHeader('Assignments', Icons.assignment),
+              // Updated to use the streaming version
+              ...assignments.map((assignment) => _buildAssignmentCardWithStream(assignment)),
+              SizedBox(height: 24),
+            ],
+
+            if (materials.isNotEmpty) ...[
+              _buildSectionHeader('Materials', Icons.description),
+              ...materials.map((material) => _buildMaterialCardWithStream(material)),
+            ],
+
+            if (assignments.isEmpty && materials.isEmpty)
+              Container(
+                padding: EdgeInsets.all(40),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.folder_open,
+                      size: 64,
+                      color: Colors.grey[400],
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      'No content available yet.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            SizedBox(height: 100),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.purple[400], size: 24),
+          SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[800],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssignmentCardWithStream(Map<String, dynamic> assignment) {
+    final dueDate = assignment['dueDate'] as Timestamp?;
+    final isDuePassed = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
+    final user = _authService.currentUser;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => StudentAssignmentDetailsPage(
+                assignment: assignment,
+                courseId: widget.courseId,
+                courseData: widget.courseData,
+                organizationCode: _organizationCode!,
+              ),
+            ),
+          ).then((_) => _loadData());
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Icon(
+                    Icons.assignment,
+                    color: Colors.orange,
+                    size: 28,
+                  ),
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            assignment['title'] ?? 'Assignment',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        if (user != null && _organizationCode != null)
+                          StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('organizations')
+                                .doc(_organizationCode)
+                                .collection('courses')
+                                .doc(widget.courseId)
+                                .collection('assignments')
+                                .doc(assignment['id'])
+                                .collection('submissions')
+                                .where('studentId', isEqualTo: user.uid)
+                                .snapshots(),
+                            builder: (context, snapshot) {
+                              final hasSubmitted = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+                              // Removed unused 'submission' variable
+
+                              if (!hasSubmitted) {
+                                return Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange[100],
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.local_drink, size: 12, color: Colors.orange[700]),
+                                      SizedBox(width: 2),
+                                      Text(
+                                        '+4',
+                                        style: TextStyle(
+                                          color: Colors.orange[700],
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                              return SizedBox.shrink();
+                            },
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      assignment['description'] ?? 'No description',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 8),
+
+                    if (user != null && _organizationCode != null)
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('organizations')
+                            .doc(_organizationCode)
+                            .collection('courses')
+                            .doc(widget.courseId)
+                            .collection('assignments')
+                            .doc(assignment['id'])
+                            .collection('submissions')
+                            .where('studentId', isEqualTo: user.uid)
+                            .orderBy('submittedAt', descending: true)
+                            .limit(1)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          final hasSubmitted = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+                          final submission = hasSubmitted ? snapshot.data!.docs.first.data() as Map<String, dynamic> : null;
+                          final isGraded = submission?['grade'] != null;
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Status and due date row
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                children: [
+                                  // Due date info
+                                  if (dueDate != null)
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                            Icons.calendar_today,
+                                            size: 14,
+                                            color: (hasSubmitted && isDuePassed) ? Colors.grey[600] : (isDuePassed ? Colors.red : Colors.grey[600])
+                                        ),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Due: ${_formatDate(dueDate)}',
+                                          style: TextStyle(
+                                            color: (hasSubmitted && isDuePassed) ? Colors.grey[600] : (isDuePassed ? Colors.red : Colors.grey[600]),
+                                            fontSize: 12,
+                                            fontWeight: (hasSubmitted && isDuePassed) ? FontWeight.normal : (isDuePassed ? FontWeight.bold : FontWeight.normal),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                  // Status badge
+                                  Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: hasSubmitted
+                                          ? (isGraded
+                                          ? Colors.green.withValues(alpha: 0.1)
+                                          : Colors.blue.withValues(alpha: 0.1))
+                                          : (isDuePassed
+                                          ? Colors.red.withValues(alpha: 0.1)
+                                          : Colors.orange.withValues(alpha: 0.1)),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      hasSubmitted
+                                          ? (isGraded ? 'Completed' : 'Submitted')
+                                          : (isDuePassed ? 'Missing' : 'Pending'),
+                                      style: TextStyle(
+                                        color: hasSubmitted
+                                            ? (isGraded ? Colors.green : Colors.blue)
+                                            : (isDuePassed ? Colors.red : Colors.orange),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              // Grade display
+                              if (hasSubmitted && isGraded) ...[
+                                SizedBox(height: 8),
+                                _buildGradeDisplay(
+                                  grade: submission!['grade'],
+                                  letterGrade: submission['letterGrade'],
+                                  maxPoints: assignment['points'] ?? 100,
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      )
+                    else
+                    // Fallback for when user is null or organization code is null
+                      Row(
+                        children: [
+                          if (dueDate != null) ...[
+                            Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
+                            SizedBox(width: 4),
+                            Text(
+                              'Due: ${_formatDate(dueDate)}',
+                              style: TextStyle(
+                                color: isDuePassed ? Colors.red : Colors.grey[600],
+                                fontSize: 12,
+                              ),
+                            ),
+                            SizedBox(width: 12),
+                          ],
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isDuePassed
+                                  ? Colors.red.withValues(alpha: 0.1)
+                                  : Colors.orange.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              isDuePassed ? 'Missing' : 'Pending',
+                              style: TextStyle(
+                                color: isDuePassed ? Colors.red : Colors.orange,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
               ),
             ],
           ),
