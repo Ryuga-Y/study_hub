@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../Authentication/auth_services.dart';
 
 class EvaluationAnalyticsPage extends StatefulWidget {
   final String courseId;

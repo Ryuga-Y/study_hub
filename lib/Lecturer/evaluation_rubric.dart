@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../Authentication/custom_widgets.dart';
+
 
 class EvaluationRubricPage extends StatefulWidget {
   final String courseId;
@@ -852,7 +852,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
+                            color: Colors.grey.withValues(alpha: 0.1),
                             blurRadius: 5,
                             offset: Offset(0, 2),
                           ),
@@ -1175,7 +1175,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 10,
             offset: Offset(0, 5),
           ),
