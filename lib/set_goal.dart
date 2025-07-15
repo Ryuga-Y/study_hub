@@ -295,40 +295,60 @@ class _SetGoalPageState extends State<SetGoalPage> {
   Future<void> _togglePinned(String goalId) async {
     try {
       // Find the goal
-      Goal? goalToPin = goals.firstWhere((g) => g.id == goalId);
+      Goal? goalToToggle = goals.firstWhere((g) => g.id == goalId);
 
-      if (goalToPin != null) {
-        // Start a batch write
-        final batch = _firestore.batch();
+      if (goalToToggle != null) {
+        // Toggle the pin state
+        bool newPinState = !goalToToggle.isPinned;
 
-        // First, unpin all goals
-        final allGoals = await _goalsRef.get();
-        for (var doc in allGoals.docs) {
-          batch.update(doc.reference, {'isPinned': false});
-        }
-
-        // Pin the selected goal
-        batch.update(_goalsRef.doc(goalId), {'isPinned': true});
-
-        // Update the main goal progress document
-        batch.update(_goalProgressRef, {
-          'currentGoal': goalToPin.title,
-          'hasActiveGoal': true,
+        // Update the goal's pin state
+        await _goalsRef.doc(goalId).update({
+          'isPinned': newPinState,
         });
 
-        // Commit the batch
-        await batch.commit();
+        // Get all currently pinned goals
+        final pinnedGoalsSnapshot = await _goalsRef
+            .where('isPinned', isEqualTo: true)
+            .get();
+
+        // Create list of pinned goal titles
+        List<String> pinnedGoalTitles = [];
+        for (var doc in pinnedGoalsSnapshot.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          if (doc.id == goalId) {
+            // If this is the goal we're toggling and it's being pinned
+            if (newPinState) {
+              pinnedGoalTitles.add(goalToToggle.title);
+            }
+          } else {
+            // Other already pinned goals
+            pinnedGoalTitles.add(data['title'] ?? '');
+          }
+        }
+
+        // Update the main goal progress document with list of pinned goals
+        await _goalProgressRef.update({
+          'pinnedGoals': pinnedGoalTitles,
+          'hasActiveGoal': pinnedGoalTitles.isNotEmpty,
+          'currentGoal': pinnedGoalTitles.isNotEmpty
+              ? pinnedGoalTitles.join(' • ')
+              : "No goal selected - Press 'Set Goal' to choose one",
+        });
 
         // Call the callback function to update main page
-        if (widget.onGoalPinned != null) {
-          widget.onGoalPinned!(goalToPin.title);
+        if (widget.onGoalPinned != null && pinnedGoalTitles.isNotEmpty) {
+          widget.onGoalPinned!(pinnedGoalTitles.join(' • '));
         }
 
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${goalToPin.title} is now your mission in progress! 📌'),
-            backgroundColor: Colors.amber,
+            content: Text(
+                newPinState
+                    ? '${goalToToggle.title} pinned to missions! 📌'
+                    : '${goalToToggle.title} unpinned from missions!'
+            ),
+            backgroundColor: newPinState ? Colors.amber : Colors.grey,
             duration: Duration(seconds: 2),
           ),
         );
@@ -336,7 +356,7 @@ class _SetGoalPageState extends State<SetGoalPage> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error pinning goal: ${e.toString()}'),
+          content: Text('Error toggling pin: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );

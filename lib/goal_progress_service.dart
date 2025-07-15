@@ -1323,6 +1323,7 @@ class GoalProgressService {
       'wateringCount': 0,
       'treeGrowth': 0.0,
       'currentGoal': 'No goal selected - Press \'Set Goal\' to choose one',
+      'pinnedGoals': [], // New field for multiple pinned goals
       'hasActiveGoal': false,
       'currentTreeLevel': 'bronze',
       'completedTrees': 0,

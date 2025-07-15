@@ -36,6 +36,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   int wateringCount = 0;
   double treeGrowth = 0.0;
   String goal = "No goal selected - Press 'Set Goal' to choose one";
+  List<String> pinnedGoals = []; // List of pinned goals
   bool hasActiveGoal = false;
   double maxGrowth = 1.0;
   int maxWatering = 20; // Changed to 20 since each bucket = 5%
@@ -269,6 +270,18 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
             waterBuckets = newWaterBuckets;
             wateringCount = newWateringCount;
             treeGrowth = newTreeGrowth;
+
+            // Handle pinned goals
+            if (data['pinnedGoals'] != null && data['pinnedGoals'] is List) {
+              pinnedGoals = List<String>.from(data['pinnedGoals']);
+              hasActiveGoal = pinnedGoals.isNotEmpty;
+            } else {
+              pinnedGoals = [];
+              hasActiveGoal = data['hasActiveGoal'] ?? false;
+            }
+
+            goal = data['currentGoal'] ?? "No goal selected - Press 'Set Goal' to choose one";
+
             String treeLevelString = data['currentTreeLevel'] ?? 'bronze';
             currentTreeLevel = TreeLevel.values.firstWhere(
                   (e) => e.toString().split('.').last == treeLevelString,
@@ -292,6 +305,17 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
               if (waterBuckets != newWaterBuckets) waterBuckets = newWaterBuckets;
               if (wateringCount != newWateringCount) wateringCount = newWateringCount;
               if (treeGrowth != newTreeGrowth) treeGrowth = newTreeGrowth;
+
+              // Handle pinned goals
+              if (data['pinnedGoals'] != null && data['pinnedGoals'] is List) {
+                pinnedGoals = List<String>.from(data['pinnedGoals']);
+                hasActiveGoal = pinnedGoals.isNotEmpty;
+              } else {
+                pinnedGoals = [];
+                hasActiveGoal = data['hasActiveGoal'] ?? false;
+              }
+
+              goal = data['currentGoal'] ?? "No goal selected - Press 'Set Goal' to choose one";
 
               String treeLevelString = data['currentTreeLevel'] ?? 'bronze';
               TreeLevel newTreeLevel = TreeLevel.values.firstWhere(
@@ -500,7 +524,16 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
           wateringCount = progress['wateringCount'] ?? 0;
           treeGrowth = (progress['treeGrowth'] ?? 0.0).toDouble();
           goal = progress['currentGoal'] ?? "No goal selected - Press 'Set Goal' to choose one";
-          hasActiveGoal = progress['hasActiveGoal'] ?? false;
+
+          // Handle pinned goals
+          if (progress['pinnedGoals'] != null && progress['pinnedGoals'] is List) {
+            pinnedGoals = List<String>.from(progress['pinnedGoals']);
+            hasActiveGoal = pinnedGoals.isNotEmpty;
+          } else {
+            pinnedGoals = [];
+            hasActiveGoal = progress['hasActiveGoal'] ?? false;
+          }
+
           maxWatering = progress['maxWatering'] ?? 20;
           waterBuckets = progress['waterBuckets'] ?? 0;
 
@@ -731,23 +764,30 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
 
   // Function to update goal from the set goal page
   void updateGoal(String newGoal) async {
-    print('Updating goal to: $newGoal');
+    print('Updating goals with: $newGoal');
 
-    await _goalService.updateGoal(newGoal);
-
+    // The newGoal string contains all pinned goals joined by ' • '
     setState(() {
       goal = newGoal;
-      hasActiveGoal = true;
+      if (newGoal != "No goal selected - Press 'Set Goal' to choose one") {
+        pinnedGoals = newGoal.split(' • ').where((g) => g.isNotEmpty).toList();
+        hasActiveGoal = pinnedGoals.isNotEmpty;
+      } else {
+        pinnedGoals = [];
+        hasActiveGoal = false;
+      }
     });
 
-    // Show confirmation that goal was set
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Mission set: $newGoal ⭐'),
-        backgroundColor: Colors.amber,
-        duration: Duration(seconds: 2),
-      ),
-    );
+    // Show confirmation that goals were updated
+    if (pinnedGoals.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Missions updated: ${pinnedGoals.length} goal${pinnedGoals.length > 1 ? 's' : ''} pinned ⭐'),
+          backgroundColor: Colors.amber,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   // Function to handle view badges - UPDATED to navigate to ViewBadgesPage
@@ -1402,7 +1442,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                         SizedBox(width: 6),
                       ],
                       Text(
-                        'Mission in Progress',
+                        hasActiveGoal ? 'Missions in Progress' : 'Mission in Progress',
                         style: TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -1412,15 +1452,47 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                     ],
                   ),
                   SizedBox(height: 8),
-                  Text(
-                    goal,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontStyle: hasActiveGoal ? FontStyle.normal : FontStyle.italic,
+                  if (pinnedGoals.isNotEmpty) ...[
+                    ...pinnedGoals.map((goalTitle) => Container(
+                      margin: EdgeInsets.symmetric(vertical: 2),
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.push_pin,
+                            color: Colors.amber,
+                            size: 14,
+                          ),
+                          SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              goalTitle,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )).toList(),
+                  ] else
+                    Text(
+                      goal,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontStyle: hasActiveGoal ? FontStyle.normal : FontStyle.italic,
+                      ),
+                      textAlign: TextAlign.center,
                     ),
-                    textAlign: TextAlign.center,
-                  ),
                 ],
               ),
             ),
