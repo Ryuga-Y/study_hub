@@ -34,6 +34,8 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
 
   // Local state (synced with Firebase)
   int wateringCount = 0;
+  // 🔧 ADD: New field to track actual water consumption count
+  int actualWaterConsumptionCount = 0;
   double treeGrowth = 0.0;
   String goal = "No goal selected - Press 'Set Goal' to choose one";
   List<String> pinnedGoals = []; // List of pinned goals
@@ -253,12 +255,15 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
 
   // Start real-time listener for goal progress changes
   void _startRealtimeGoalProgressListener() {
-    _goalService.getGoalProgressStream().listen((snapshot) {
+    _goalService.getGoalProgressStream().listen((snapshot) async {
       if (snapshot.exists && mounted) {
         final data = snapshot.data() as Map<String, dynamic>;
         final newWaterBuckets = data['waterBuckets'] ?? 0;
         final newTreeGrowth = (data['treeGrowth'] ?? 0.0).toDouble();
         final newWateringCount = data['wateringCount'] ?? 0;
+
+        // 🔧 FIX: Get actual water consumption count
+        final newActualWaterConsumptionCount = await _goalService.getActualWaterConsumptionCount();
 
         // 🚀 FIXED: Only trigger reward notification if buckets increased significantly
         // This prevents interference with normal bucket consumption
@@ -269,6 +274,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
           setState(() {
             waterBuckets = newWaterBuckets;
             wateringCount = newWateringCount;
+            actualWaterConsumptionCount = newActualWaterConsumptionCount; // 🔧 Update
             treeGrowth = newTreeGrowth;
 
             // Handle pinned goals
@@ -304,6 +310,9 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
               // Only update if the values are different to avoid unnecessary rebuilds
               if (waterBuckets != newWaterBuckets) waterBuckets = newWaterBuckets;
               if (wateringCount != newWateringCount) wateringCount = newWateringCount;
+              if (actualWaterConsumptionCount != newActualWaterConsumptionCount) {
+                actualWaterConsumptionCount = newActualWaterConsumptionCount; // 🔧 Update
+              }
               if (treeGrowth != newTreeGrowth) treeGrowth = newTreeGrowth;
 
               // Handle pinned goals
@@ -383,7 +392,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -515,13 +524,16 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     }
   }
 
-  // Load goal progress from Firebase
+  // 🔧 UPDATE: Load goal progress method
   Future<void> _loadGoalProgress() async {
     try {
       final progress = await _goalService.getGoalProgress();
       if (progress != null && mounted) {
         setState(() {
           wateringCount = progress['wateringCount'] ?? 0;
+          // 🔧 FIX: Load actual water consumption count
+          actualWaterConsumptionCount = progress['actualWaterConsumptionCount'] ?? 0;
+
           treeGrowth = (progress['treeGrowth'] ?? 0.0).toDouble();
           goal = progress['currentGoal'] ?? "No goal selected - Press 'Set Goal' to choose one";
 
@@ -623,6 +635,12 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
         });
       }
 
+      // 🔧 FIX: Update actual water consumption count after watering
+      final newActualCount = await _goalService.getActualWaterConsumptionCount();
+      setState(() {
+        actualWaterConsumptionCount = newActualCount;
+      });
+
       // Reload progress from Firebase after a short delay to ensure consistency
       Future.delayed(Duration(milliseconds: 500), () {
         _loadGoalProgress();
@@ -657,7 +675,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -1016,11 +1034,14 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   }
 
   Widget _getCurrentTreePainter() {
+    // 🔧 FIX: Use actual water consumption count instead of wateringCount
+    final int leafCount = actualWaterConsumptionCount;
+
     switch (currentTreeLevel) {
       case TreeLevel.bronze:
         return CustomPaint(
           painter: BronzeTreePainter(
-            growthLevel: wateringCount,
+            growthLevel: leafCount, // 🔧 Use actual consumption count
             totalGrowth: treeGrowth,
             flowerBloom: _flowerBloomAnimation.value,
             flowerRotation: _flowerRotationAnimation.value,
@@ -1031,7 +1052,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       case TreeLevel.silver:
         return CustomPaint(
           painter: SilverTreePainter(
-            growthLevel: wateringCount,
+            growthLevel: leafCount, // 🔧 Use actual consumption count
             totalGrowth: treeGrowth,
             flowerBloom: _flowerBloomAnimation.value,
             flowerRotation: _flowerRotationAnimation.value,
@@ -1042,7 +1063,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       case TreeLevel.gold:
         return CustomPaint(
           painter: GoldTreePainter(
-            growthLevel: wateringCount,
+            growthLevel: leafCount, // 🔧 Use actual consumption count
             totalGrowth: treeGrowth,
             flowerBloom: _flowerBloomAnimation.value,
             flowerRotation: _flowerRotationAnimation.value,
@@ -1065,7 +1086,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
             color: completedTrees >= 1 ? Color(0xFFCD7F32) : Colors.grey[300],
             boxShadow: completedTrees >= 1 ? [
               BoxShadow(
-                color: Color(0xFFCD7F32).withOpacity(0.3),
+                color: Color(0xFFCD7F32).withValues(alpha: 0.3),
                 blurRadius: 6,
                 spreadRadius: 1,
               ),
@@ -1087,7 +1108,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
             color: completedTrees >= 2 ? Color(0xFFC0C0C0) : Colors.grey[300],
             boxShadow: completedTrees >= 2 ? [
               BoxShadow(
-                color: Color(0xFFC0C0C0).withOpacity(0.3),
+                color: Color(0xFFC0C0C0).withValues(alpha: 0.3),
                 blurRadius: 6,
                 spreadRadius: 1,
               ),
@@ -1109,7 +1130,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
             color: completedTrees >= 3 ? Color(0xFFFFD700) : Colors.grey[300],
             boxShadow: completedTrees >= 3 ? [
               BoxShadow(
-                color: Color(0xFFFFD700).withOpacity(0.3),
+                color: Color(0xFFFFD700).withValues(alpha: 0.3),
                 blurRadius: 6,
                 spreadRadius: 1,
               ),
@@ -1251,7 +1272,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                         BoxShadow(
                           color: (currentTreeLevel == TreeLevel.bronze ? Color(0xFFCD7F32) :
                           currentTreeLevel == TreeLevel.silver ? Color(0xFFC0C0C0) :
-                          Color(0xFFFFD700)).withOpacity(0.3),
+                          Color(0xFFFFD700)).withValues(alpha: 0.3),
                           blurRadius: 6,
                           offset: Offset(0, 3),
                         ),

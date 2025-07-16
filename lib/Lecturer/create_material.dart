@@ -5,8 +5,270 @@ import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../Authentication/custom_widgets.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show File, Platform;
+import 'dart:io' show File;
 import 'dart:async';
+
+// Add these enums if they don't exist in your project
+enum EventType { normal, recurring, holiday }
+enum RecurrenceType { none, daily, weekly, monthly, yearly }
+
+// NotificationService class for centralized notification management
+class NotificationService {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  // Create notification for new items (assignments, materials, etc.)
+  Future<void> createNewItemNotification({
+    required String itemType,
+    required String itemTitle,
+    required DateTime dueDate,
+    required String sourceId,
+    String? courseId,
+    String? courseName,
+    String? organizationCode,
+  }) async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Get organization code if not provided
+      String? orgCode = organizationCode;
+      if (orgCode == null) {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(currentUser.uid)
+            .get();
+        orgCode = userDoc.data()?['organizationCode'];
+      }
+
+      if (orgCode == null) {
+        throw Exception('Organization code not found');
+      }
+
+      // Get enrolled students if this is a course-related item
+      if (courseId != null) {
+        final enrollmentsSnapshot = await _firestore
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('enrollments')
+            .get();
+
+        // Create notifications for all enrolled students
+        for (var enrollment in enrollmentsSnapshot.docs) {
+          final studentId = enrollment.data()['studentId'];
+
+          await _createStudentNotification(
+            organizationCode: orgCode,
+            studentId: studentId,
+            itemType: itemType,
+            itemTitle: itemTitle,
+            sourceId: sourceId,
+            courseId: courseId,
+            courseName: courseName,
+          );
+        }
+      } else {
+        // For personal items (like goals), create notification for current user
+        await _createStudentNotification(
+          organizationCode: orgCode,
+          studentId: currentUser.uid,
+          itemType: itemType,
+          itemTitle: itemTitle,
+          sourceId: sourceId,
+        );
+      }
+
+      print('✅ Created notifications for $itemType: $itemTitle');
+    } catch (e) {
+      print('Error creating notifications: $e');
+    }
+  }
+
+  // Helper method to create individual student notification
+  Future<void> _createStudentNotification({
+    required String organizationCode,
+    required String studentId,
+    required String itemType,
+    required String itemTitle,
+    required String sourceId,
+    String? courseId,
+    String? courseName,
+  }) async {
+    // Determine notification title and body based on item type
+    String notificationTitle;
+    String notificationBody;
+
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        notificationTitle = '📝 New Assignment Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle assignment has been posted';
+        break;
+      case 'tutorial':
+        notificationTitle = '📚 New Tutorial Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle tutorial has been posted';
+        break;
+      case 'learning':
+        notificationTitle = '📖 New Learning Material Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle learning material has been posted';
+        break;
+      case 'goal':
+        notificationTitle = '🎯 New Goal Created';
+        notificationBody = '$itemTitle has been set with a deadline';
+        break;
+      default:
+        notificationTitle = '📢 New Item Posted';
+        notificationBody = '$itemTitle has been posted';
+    }
+
+    await _firestore
+        .collection('organizations')
+        .doc(organizationCode)
+        .collection('students')
+        .doc(studentId)
+        .collection('notifications')
+        .add({
+      'title': notificationTitle,
+      'body': notificationBody,
+      'type': 'NotificationType.${itemType}',
+      'sourceId': sourceId,
+      'sourceType': itemType,
+      'courseId': courseId,
+      'createdAt': FieldValue.serverTimestamp(),
+      'isRead': false,
+    });
+  }
+
+  // Method to create calendar events for enrolled students
+  Future<void> createCalendarEventsForEnrolledStudents({
+    required String sourceId,
+    required String itemTitle,
+    required DateTime dueDate,
+    required String itemType,
+    required String courseId,
+    String? organizationCode,
+  }) async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) return;
+
+      // Get organization code if not provided
+      String? orgCode = organizationCode;
+      if (orgCode == null) {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(currentUser.uid)
+            .get();
+        orgCode = userDoc.data()?['organizationCode'];
+      }
+
+      if (orgCode == null) return;
+
+      final enrollmentsSnapshot = await _firestore
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('enrollments')
+          .get();
+
+      for (var enrollment in enrollmentsSnapshot.docs) {
+        final studentId = enrollment.data()['studentId'];
+
+        await _firestore
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('students')
+            .doc(studentId)
+            .collection('calendar_events')
+            .add({
+          'title': _getCalendarEventTitle(itemType, itemTitle),
+          'description': _getCalendarEventDescription(itemType),
+          'startTime': Timestamp.fromDate(dueDate),
+          'endTime': Timestamp.fromDate(dueDate),
+          'color': _getCalendarEventColor(itemType),
+          'calendar': _getCalendarCategory(itemType),
+          'eventType': EventType.normal.index,
+          'recurrenceType': RecurrenceType.none.index,
+          'reminderMinutes': 1440, // 24 hours before
+          'location': '',
+          'isRecurring': false,
+          'originalEventId': '',
+          'sourceId': sourceId,
+          'sourceType': itemType,
+          'courseId': courseId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      print('✅ Created calendar events for $itemType: $itemTitle');
+    } catch (e) {
+      print('Error creating calendar events: $e');
+    }
+  }
+
+  // Helper methods for calendar event properties
+  String _getCalendarEventTitle(String itemType, String itemTitle) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return '📝 Assignment: $itemTitle Due';
+      case 'tutorial':
+        return '📚 Tutorial: $itemTitle Due';
+      case 'goal':
+        return '🎯 Goal: $itemTitle Due';
+      default:
+        return '📅 $itemTitle Due';
+    }
+  }
+
+  String _getCalendarEventDescription(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return 'Assignment deadline';
+      case 'tutorial':
+        return 'Tutorial deadline';
+      case 'goal':
+        return 'Goal deadline';
+      default:
+        return 'Item deadline';
+    }
+  }
+
+  int _getCalendarEventColor(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return Colors.orange.value;
+      case 'tutorial':
+        return Colors.blue.value;
+      case 'goal':
+        return Colors.green.value;
+      default:
+        return Colors.purple.value;
+    }
+  }
+
+  String _getCalendarCategory(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return 'assignments';
+      case 'tutorial':
+        return 'tutorials';
+      case 'goal':
+        return 'goals';
+      default:
+        return 'general';
+    }
+  }
+}
 
 class CreateMaterialPage extends StatefulWidget {
   final String courseId;
@@ -42,6 +304,9 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   double _uploadProgress = 0;
   String _uploadStatus = '';
   StreamSubscription? _uploadSubscription;
+
+  // Initialize NotificationService
+  final NotificationService _notificationService = NotificationService();
 
   @override
   void initState() {
@@ -184,7 +449,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
 
           // Create a unique file name
           String fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
-          // Fixed: Using 'materials' instead of 'assignments'
+          // Using 'materials' instead of 'assignments'
           String storagePath = 'materials/${widget.courseId}/$fileName';
 
           // Create file reference
@@ -281,6 +546,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
     }
   }
 
+  // Enhanced _saveMaterial method with NotificationService integration
   Future<void> _saveMaterial() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -368,6 +634,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       }
 
       // Save or update material in Firestore
+      String? materialId;
       if (widget.editMode && widget.materialId != null) {
         // Update existing material
         await FirebaseFirestore.instance
@@ -379,6 +646,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             .doc(widget.materialId)
             .update(materialData);
 
+        materialId = widget.materialId;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -389,7 +657,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         }
       } else {
         // Create new material
-        await FirebaseFirestore.instance
+        final docRef = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(organizationCode)
             .collection('courses')
@@ -397,6 +665,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             .collection('materials')
             .add(materialData);
 
+        materialId = docRef.id;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -405,6 +674,49 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             ),
           );
         }
+      }
+
+      // Enhanced notification and calendar event creation using NotificationService
+      if (_materialType == 'tutorial') {
+        final dueDateTime = DateTime(
+          _dueDate!.year,
+          _dueDate!.month,
+          _dueDate!.day,
+          _dueTime?.hour ?? 23,
+          _dueTime?.minute ?? 59,
+        );
+
+        // Create calendar events using NotificationService
+        await _notificationService.createCalendarEventsForEnrolledStudents(
+          sourceId: materialId!,
+          itemTitle: _titleController.text.trim(),
+          dueDate: dueDateTime,
+          itemType: 'tutorial',
+          courseId: widget.courseId,
+          organizationCode: organizationCode,
+        );
+
+        // Create notifications using NotificationService
+        await _notificationService.createNewItemNotification(
+          itemType: 'tutorial',
+          itemTitle: _titleController.text.trim(),
+          dueDate: dueDateTime,
+          sourceId: materialId,
+          courseId: widget.courseId,
+          courseName: widget.courseData['title'] ?? widget.courseData['name'],
+          organizationCode: organizationCode,
+        );
+      } else {
+        // For learning materials, only send notifications (no calendar events)
+        await _notificationService.createNewItemNotification(
+          itemType: 'learning',
+          itemTitle: _titleController.text.trim(),
+          dueDate: DateTime.now(), // Dummy date for learning materials
+          sourceId: materialId!,
+          courseId: widget.courseId,
+          courseName: widget.courseData['title'] ?? widget.courseData['name'],
+          organizationCode: organizationCode,
+        );
       }
 
       // Navigate back
@@ -431,10 +743,23 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   }
 
   Future<void> _selectDueDate() async {
+    // Determine the first selectable date based on edit mode
+    DateTime firstSelectableDate;
+
+    if (widget.editMode && _dueDate != null) {
+      // In edit mode, allow selecting from the original due date or 1 year ago, whichever is earlier
+      firstSelectableDate = _dueDate!.isBefore(DateTime.now().subtract(Duration(days: 365)))
+          ? _dueDate!
+          : DateTime.now().subtract(Duration(days: 365));
+    } else {
+      // For new tutorials, only allow future dates
+      firstSelectableDate = DateTime.now();
+    }
+
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: _dueDate ?? DateTime.now().add(Duration(days: 7)),
-      firstDate: DateTime.now(),
+      firstDate: firstSelectableDate,
       lastDate: DateTime.now().add(Duration(days: 365)),
     );
 
@@ -547,7 +872,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                       Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
                       SizedBox(width: 8),
                       Text(
-                        'Material type cannot be changed',
+                        'Material type cannot be changed in edit mode',
                         style: TextStyle(
                           color: Colors.grey[600],
                           fontSize: 14,
@@ -655,7 +980,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
+                      color: Colors.grey.withValues(alpha: 0.1),
                       blurRadius: 10,
                       offset: Offset(0, 5),
                     ),
@@ -798,7 +1123,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
+                      color: Colors.grey.withValues(alpha: 0.1),
                       blurRadius: 10,
                       offset: Offset(0, 5),
                     ),
@@ -1006,7 +1331,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
+                        color: Colors.grey.withValues(alpha: 0.1),
                         blurRadius: 5,
                         offset: Offset(0, 2),
                       ),

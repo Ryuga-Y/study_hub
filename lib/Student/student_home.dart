@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:async'; // Add Timer import
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
 import 'student_course.dart';
-import 'calendar.dart'; // Import the calendar page
-import '../Stu_goal.dart'; // Import the goal page
-import '../goal_progress_service.dart'; // Import the goal service
+import 'calendar.dart';
+import '../Stu_goal.dart';
+import '../goal_progress_service.dart';
+import '../notification.dart';
+import '../set_goal.dart';
 
 class StudentHomePage extends StatefulWidget {
   const StudentHomePage({Key? key}) : super(key: key);
@@ -17,7 +20,9 @@ class StudentHomePage extends StatefulWidget {
 
 class _StudentHomePageState extends State<StudentHomePage> {
   final AuthService _authService = AuthService();
-  final GoalProgressService _goalService = GoalProgressService(); // Add goal service
+  final GoalProgressService _goalService = GoalProgressService();
+  final NotificationService _notificationService = NotificationService();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Data
@@ -26,19 +31,52 @@ class _StudentHomePageState extends State<StudentHomePage> {
   List<Map<String, dynamic>> _enrolledCourses = [];
   int _pendingAssignments = 0;
   int _missedAssignments = 0;
-  int _waterBuckets = 0; // Add water bucket count
-  bool _isStudent = false; // Track if user is a student
+  int _waterBuckets = 0;
+  bool _isStudent = false;
   bool _isLoading = true;
   String? _errorMessage;
+  String? organizationCode;
 
   // Navigation
   int _currentIndex = 0;
+
+  // Add timer for periodic checks
+  Timer? _submissionCheckTimer;
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _startListeningForSubmissions(); // Add automatic submission detection
+    _startListeningForSubmissions();
+    _initializeNotificationService();
+    _fetchUserData();
+  }
+
+  @override
+  void dispose() {
+    _submissionCheckTimer?.cancel();
+    _notificationService.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initializeNotificationService() async {
+    try {
+      await _notificationService.initialize();
+    } catch (e) {
+      print('Error initializing notification service: $e');
+    }
+  }
+
+  Future<void> _fetchUserData() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (mounted) {
+        setState(() {
+          organizationCode = userDoc.data()?['organizationCode'];
+        });
+      }
+    }
   }
 
   // Start listening for new submissions automatically
@@ -47,7 +85,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
     _checkForNewSubmissions();
 
     // Set up periodic checks (every 10 seconds for faster detection)
-    Timer.periodic(Duration(seconds: 10), (timer) {
+    _submissionCheckTimer = Timer.periodic(Duration(seconds: 10), (timer) {
       if (mounted) {
         _checkForNewSubmissions();
       } else {
@@ -86,47 +124,54 @@ class _StudentHomePageState extends State<StudentHomePage> {
       submissionType = 'submission';
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.celebration, color: Colors.white),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text('🎉 You earned $bucketsAdded water bucket${bucketsAdded == 1 ? '' : 's'} for completing a $submissionType!'),
-            ),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(12),
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.celebration, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text('🎉 You earned $bucketsAdded water bucket${bucketsAdded == 1 ? '' : 's'} for completing a $submissionType!'),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.local_drink, size: 16, color: Colors.white),
-                  SizedBox(width: 4),
-                  Text(
-                    '+$bucketsAdded',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.local_drink, size: 16, color: Colors.white),
+                    SizedBox(width: 4),
+                    Text(
+                      '+$bucketsAdded',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+          backgroundColor: Colors.green[600],
+          duration: Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
         ),
-        backgroundColor: Colors.green[600],
-        duration: Duration(seconds: 4),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+      );
+    }
   }
 
   Future<void> _loadData() async {
     try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+
       final user = _authService.currentUser;
       if (user == null) {
         setState(() => _errorMessage = 'User not authenticated');
@@ -142,7 +187,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
 
       setState(() {
         _userData = userData;
-        _isStudent = userData['role'] == 'student'; // Check if user is a student
+        _isStudent = userData['role'] == 'student';
       });
 
       // Load organization data
@@ -166,7 +211,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
       // Load enrolled courses and assignments
       await _loadEnrolledCourses(orgCode, user.uid);
       await _loadAssignmentStats(orgCode, user.uid);
-      await _loadWaterBuckets(); // Load water bucket count
+      await _loadWaterBuckets();
     } catch (e) {
       debugPrint('Error loading data: $e');
       setState(() {
@@ -179,7 +224,6 @@ class _StudentHomePageState extends State<StudentHomePage> {
     }
   }
 
-  // ✅ FIXED: Use getGoalProgress() instead of getWaterBucketCount()
   Future<void> _loadWaterBuckets() async {
     try {
       // Only load water buckets if user is a student
@@ -187,19 +231,25 @@ class _StudentHomePageState extends State<StudentHomePage> {
       if (isStudent) {
         final progress = await _goalService.getGoalProgress();
         final bucketCount = progress?['waterBuckets'] ?? 0;
-        setState(() {
-          _waterBuckets = bucketCount;
-        });
+        if (mounted) {
+          setState(() {
+            _waterBuckets = bucketCount;
+          });
+        }
       } else {
-        setState(() {
-          _waterBuckets = 0; // Non-students have no buckets
-        });
+        if (mounted) {
+          setState(() {
+            _waterBuckets = 0;
+          });
+        }
       }
     } catch (e) {
       debugPrint('Error loading water buckets: $e');
-      setState(() {
-        _waterBuckets = 0;
-      });
+      if (mounted) {
+        setState(() {
+          _waterBuckets = 0;
+        });
+      }
     }
   }
 
@@ -242,14 +292,18 @@ class _StudentHomePageState extends State<StudentHomePage> {
         return bTime.compareTo(aTime);
       });
 
-      setState(() {
-        _enrolledCourses = coursesList;
-      });
+      if (mounted) {
+        setState(() {
+          _enrolledCourses = coursesList;
+        });
+      }
     } catch (e) {
       debugPrint('Error loading enrolled courses: $e');
-      setState(() {
-        _errorMessage = 'Error loading courses: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error loading courses: $e';
+        });
+      }
     }
   }
 
@@ -300,10 +354,12 @@ class _StudentHomePageState extends State<StudentHomePage> {
         }
       }
 
-      setState(() {
-        _pendingAssignments = pending;
-        _missedAssignments = missed;
-      });
+      if (mounted) {
+        setState(() {
+          _pendingAssignments = pending;
+          _missedAssignments = missed;
+        });
+      }
     } catch (e) {
       debugPrint('Error loading assignment stats: $e');
     }
@@ -358,13 +414,15 @@ class _StudentHomePageState extends State<StudentHomePage> {
     // Check if user is a student before allowing access
     final isStudent = await _goalService.isCurrentUserStudent();
     if (!isStudent) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🌱 Goal system is only available for students'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 3),
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🌱 Goal system is only available for students'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
       return;
     }
 
@@ -379,13 +437,37 @@ class _StudentHomePageState extends State<StudentHomePage> {
     });
   }
 
+  void _navigateToSetGoals() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SetGoalPage(
+          onGoalPinned: (String starredGoal) {
+            print('Pinned goal: $starredGoal');
+            // Refresh data when goal is pinned
+            _loadData();
+          },
+        ),
+      ),
+    ).then((_) {
+      // Reload data when returning from set goals
+      _loadData();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          title: Text('Student Home'),
+          backgroundColor: Colors.blueAccent,
+          foregroundColor: Colors.white,
+        ),
         body: Center(
           child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
           ),
         ),
       );
@@ -393,6 +475,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
 
     if (_errorMessage != null) {
       return Scaffold(
+        backgroundColor: Colors.grey[50],
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -458,7 +541,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                     border: Border.all(color: Colors.white, width: 1),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.orange.withOpacity(0.4),
+                        color: Colors.orange.withValues(alpha: 0.4),
                         blurRadius: 4,
                         offset: Offset(0, 2),
                       ),
@@ -480,7 +563,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
               ),
           ],
         ),
-      ) : null, // Don't show for non-students
+      ) : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
@@ -496,7 +579,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
             height: 32,
             errorBuilder: (context, error, stackTrace) => Icon(
               Icons.school,
-              color: Colors.purple[400],
+              color: Colors.blueAccent,
               size: 32,
             ),
           ),
@@ -516,12 +599,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
         onPressed: () => _scaffoldKey.currentState?.openDrawer(),
       ),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.notifications_outlined, color: Colors.black87),
-          onPressed: () {
-            // TODO: Implement notifications
-          },
-        ),
+        _notificationService.getNotificationBadgeIcon(),
+        SizedBox(width: 16),
       ],
     );
   }
@@ -536,7 +615,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
             DrawerHeader(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Colors.purple[600]!, Colors.purple[400]!],
+                  colors: [Colors.blueAccent, Colors.blue[400]!],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -550,7 +629,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                     child: Text(
                       _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'S',
                       style: TextStyle(
-                        color: Colors.purple[600],
+                        color: Colors.blueAccent,
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                       ),
@@ -568,7 +647,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   Text(
                     _userData?['email'] ?? '',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                       fontSize: 14,
                     ),
                   ),
@@ -588,7 +667,16 @@ class _StudentHomePageState extends State<StudentHomePage> {
               title: const Text('Calendar'),
               onTap: () {
                 Navigator.pop(context);
-                _navigateToCalendar(); // Navigate to calendar page
+                _navigateToCalendar();
+              },
+            ),
+            // Set Goals option for all users
+            ListTile(
+              leading: const Icon(Icons.flag, color: Colors.blueAccent),
+              title: const Text('Set Goals'),
+              onTap: () {
+                Navigator.pop(context);
+                _navigateToSetGoals();
               },
             ),
             // Goal System - ONLY FOR STUDENTS
@@ -674,14 +762,14 @@ class _StudentHomePageState extends State<StudentHomePage> {
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Colors.purple[600]!, Colors.purple[400]!],
+                colors: [Colors.blueAccent, Colors.blue[400]!],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.purple.withOpacity(0.3),
+                  color: Colors.blue.withValues(alpha: 0.3),
                   blurRadius: 10,
                   offset: const Offset(0, 5),
                 ),
@@ -703,7 +791,15 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   'You have ${_enrolledCourses.length} enrolled course${_enrolledCourses.length == 1 ? '' : 's'}',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Track your assignments, tutorials, and goals.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white.withValues(alpha: 0.8),
                   ),
                 ),
               ],
@@ -726,7 +822,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.green.withOpacity(0.3),
+                    color: Colors.green.withValues(alpha: 0.3),
                     blurRadius: 10,
                     offset: const Offset(0, 5),
                   ),
@@ -758,7 +854,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                                 : 'Complete assignments to earn water buckets!',
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.white.withOpacity(0.9),
+                              color: Colors.white.withValues(alpha: 0.9),
                             ),
                           ),
                         ],
@@ -792,131 +888,13 @@ class _StudentHomePageState extends State<StudentHomePage> {
               ),
             ),
 
-          // To Do Section
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'To do:',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[800],
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        // TODO: Navigate to assignment history
-                      },
-                      child: const Text(
-                        'View History',
-                        style: TextStyle(
-                          color: Colors.cyan,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '$_pendingAssignments',
-                            style: TextStyle(
-                              fontSize: 48,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.purple[400],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Work',
-                            style: TextStyle(
-                              fontSize: 18,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      height: 60,
-                      width: 1,
-                      color: Colors.grey[300],
-                    ),
-                    Expanded(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '$_missedAssignments',
-                            style: TextStyle(
-                              fontSize: 48,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.purple[400],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Missed',
-                            style: TextStyle(
-                              fontSize: 18,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-
           // Courses Section
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Your Courses',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              TextButton(
-                onPressed: () {
-                  // TODO: Navigate to all courses
-                },
-                child: Text(
-                  'View All',
-                  style: TextStyle(color: Colors.purple[400]),
-                ),
-              ),
-            ],
+          const Text(
+            'Your Courses',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -977,7 +955,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 5,
             offset: const Offset(0, 2),
           ),
@@ -1007,7 +985,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 width: 60,
                 height: 60,
                 decoration: BoxDecoration(
-                  color: Colors.purple[100],
+                  color: Colors.blue[100],
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
@@ -1018,7 +996,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                       child: Text(
                         course['code'] ?? course['title']?.substring(0, 2).toUpperCase() ?? 'CS',
                         style: TextStyle(
-                          color: Colors.purple[600],
+                          color: Colors.blueAccent,
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
                         ),
@@ -1124,7 +1102,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
             break;
         }
       },
-      selectedItemColor: Colors.purple[400],
+      selectedItemColor: Colors.blueAccent,
       unselectedItemColor: Colors.grey[600],
       type: BottomNavigationBarType.fixed,
       items: const [

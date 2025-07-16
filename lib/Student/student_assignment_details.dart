@@ -53,19 +53,22 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
 
       final user = _authService.currentUser;
       if (user == null) {
-        _showErrorDialog('Authentication Error', 'Please log in to view assignment details.');
+        _showErrorDialog('Authentication Error',
+            'Please log in to view assignment details.');
         return;
       }
 
       // Verify user data and permissions
       final userData = await _authService.getUserData(user.uid);
       if (userData == null) {
-        _showErrorDialog('User Data Error', 'Could not retrieve user information. Please try logging in again.');
+        _showErrorDialog('User Data Error',
+            'Could not retrieve user information. Please try logging in again.');
         return;
       }
 
       if (userData['role'] != 'student') {
-        _showErrorDialog('Permission Error', 'Only students can view assignment details.');
+        _showErrorDialog(
+            'Permission Error', 'Only students can view assignment details.');
         return;
       }
 
@@ -83,7 +86,8 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
       setState(() {
         isLoading = false;
       });
-      _showErrorDialog('Loading Error', 'Failed to load assignment details: $e');
+      _showErrorDialog(
+          'Loading Error', 'Failed to load assignment details: $e');
     }
   }
 
@@ -152,26 +156,30 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
   Future<void> _submitAssignment() async {
     final user = _authService.currentUser;
     if (user == null) {
-      _showErrorDialog('Authentication Error', 'Please log in to submit assignments.');
+      _showErrorDialog(
+          'Authentication Error', 'Please log in to submit assignments.');
       return;
     }
 
     // Verify user data first
     final userData = await _authService.getUserData(user.uid);
     if (userData == null) {
-      _showErrorDialog('User Data Error', 'Could not retrieve user information. Please try logging in again.');
+      _showErrorDialog('User Data Error',
+          'Could not retrieve user information. Please try logging in again.');
       return;
     }
 
     // Verify user is a student
     if (userData['role'] != 'student') {
-      _showErrorDialog('Permission Error', 'Only students can submit assignments.');
+      _showErrorDialog(
+          'Permission Error', 'Only students can submit assignments.');
       return;
     }
 
     // Verify organization membership
     if (userData['organizationCode'] != widget.organizationCode) {
-      _showErrorDialog('Organization Error', 'You are not enrolled in this organization.');
+      _showErrorDialog(
+          'Organization Error', 'You are not enrolled in this organization.');
       return;
     }
 
@@ -179,83 +187,86 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
     if (latestSubmission != null && latestSubmission!['grade'] != null) {
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              Icon(Icons.block, color: Colors.red, size: 24),
-              SizedBox(width: 8),
-              Text('Submission Not Allowed'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'This assignment has already been graded.',
-                style: TextStyle(fontWeight: FontWeight.w500),
+        builder: (context) =>
+            AlertDialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Icon(Icons.block, color: Colors.red, size: 24),
+                  SizedBox(width: 8),
+                  Text('Submission Not Allowed'),
+                ],
               ),
-              SizedBox(height: 12),
-              Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green[300]!),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.grade, color: Colors.green[700], size: 20),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Grade: ${latestSubmission!['grade']}/${widget.assignment['points'] ?? 100}',
-                            style: TextStyle(
-                              color: Colors.green[800],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          if (latestSubmission!['letterGrade'] != null)
-                            Text(
-                              'Letter Grade: ${latestSubmission!['letterGrade']}',
-                              style: TextStyle(
-                                color: Colors.green[700],
-                                fontSize: 12,
-                              ),
-                            ),
-                        ],
-                      ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'This assignment has already been graded.',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  SizedBox(height: 12),
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green[300]!),
                     ),
-                  ],
-                ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.grade, color: Colors.green[700], size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Grade: ${latestSubmission!['grade']}/${widget
+                                    .assignment['points'] ?? 100}',
+                                style: TextStyle(
+                                  color: Colors.green[800],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              if (latestSubmission!['letterGrade'] != null)
+                                Text(
+                                  'Letter Grade: ${latestSubmission!['letterGrade']}',
+                                  style: TextStyle(
+                                    color: Colors.green[700],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'No further submissions are allowed once an assignment has been graded.',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
               ),
-              SizedBox(height: 12),
-              Text(
-                'No further submissions are allowed once an assignment has been graded.',
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 14,
+              actions: [
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text('OK', style: TextStyle(color: Colors.white)),
                 ),
-              ),
-            ],
-          ),
-          actions: [
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: Text('OK', style: TextStyle(color: Colors.white)),
+              ],
             ),
-          ],
-        ),
       );
       return;
     }
@@ -266,7 +277,9 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
 
     // Show confirmation dialog
     final isResubmit = hasSubmitted && latestSubmission?['grade'] == null;
-    final confirmationTitle = isResubmit ? 'Confirm Resubmission' : 'Confirm Submission';
+    final confirmationTitle = isResubmit
+        ? 'Confirm Resubmission'
+        : 'Confirm Submission';
     final confirmationMessage = isResubmit
         ? 'Are you sure you want to resubmit this assignment? Your previous submission will be replaced.'
         : 'Are you sure you want to submit this assignment?';
@@ -274,91 +287,95 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
     // Add late submission warning if applicable
     String fullMessage = confirmationMessage;
     if (isLate) {
-      fullMessage += '\n\n⚠️ Note: This assignment is past due and will be marked as late.';
+      fullMessage +=
+      '\n\n⚠️ Note: This assignment is past due and will be marked as late.';
     }
 
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(
-              isResubmit ? Icons.refresh : Icons.upload_file,
-              color: Colors.orange[600],
-              size: 24,
-            ),
-            SizedBox(width: 8),
-            Text(confirmationTitle),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(fullMessage),
-            if (isResubmit && latestSubmission?['fileName'] != null) ...[
-              SizedBox(height: 16),
-              Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!),
+      builder: (context) =>
+          AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Icon(
+                  isResubmit ? Icons.refresh : Icons.upload_file,
+                  color: Colors.orange[600],
+                  size: 24,
                 ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.blue[600], size: 18),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Current submission:',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.blue[700],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Text(
-                            latestSubmission!['fileName'],
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.blue[600],
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
+                SizedBox(width: 8),
+                Text(confirmationTitle),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(fullMessage),
+                if (isResubmit && latestSubmission?['fileName'] != null) ...[
+                  SizedBox(height: 16),
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue[200]!),
                     ),
-                  ],
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.blue[600],
+                            size: 18),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Current submission:',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue[700],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              Text(
+                                latestSubmission!['fileName'],
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue[600],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isLate ? Colors.orange : Colors.orange[600],
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text(
+                  isResubmit ? 'Resubmit' : 'Submit',
+                  style: TextStyle(color: Colors.white),
                 ),
               ),
             ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel'),
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isLate ? Colors.orange : Colors.orange[600],
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text(
-              isResubmit ? 'Resubmit' : 'Submit',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
     );
 
     if (confirm != true) return;
@@ -366,7 +383,18 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png', 'zip', 'ppt', 'pptx'],
+        allowedExtensions: [
+          'pdf',
+          'doc',
+          'docx',
+          'txt',
+          'jpg',
+          'jpeg',
+          'png',
+          'zip',
+          'ppt',
+          'pptx'
+        ],
         withData: true,
       );
 
@@ -396,7 +424,9 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
             setState(() {
               uploadStatus = 'Removing previous file...';
             });
-            await FirebaseStorage.instance.ref(latestSubmission!['storagePath']).delete();
+            await FirebaseStorage.instance
+                .ref(latestSubmission!['storagePath'])
+                .delete();
           } catch (e) {
             print('Error deleting old file: $e');
             // Continue even if delete fails
@@ -404,8 +434,11 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
         }
 
         // Upload file to Firebase Storage
-        final fileName = '${DateTime.now().millisecondsSinceEpoch}_${result.files.single.name}';
-        final storagePath = 'submissions/${widget.courseId}/${widget.assignment['id']}/$fileName';
+        final fileName = '${DateTime
+            .now()
+            .millisecondsSinceEpoch}_${result.files.single.name}';
+        final storagePath = 'submissions/${widget.courseId}/${widget
+            .assignment['id']}/$fileName';
 
         final ref = FirebaseStorage.instance.ref().child(storagePath);
         final metadata = SettableMetadata(
@@ -428,7 +461,8 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
         uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
           setState(() {
             uploadProgress = snapshot.bytesTransferred / snapshot.totalBytes;
-            uploadStatus = 'Uploading... ${(uploadProgress * 100).toStringAsFixed(0)}%';
+            uploadStatus =
+            'Uploading... ${(uploadProgress * 100).toStringAsFixed(0)}%';
           });
         });
 
@@ -466,14 +500,15 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
           latestSubmission!['fileName'] = result.files.single.name;
           latestSubmission!['fileSize'] = result.files.single.size;
           latestSubmission!['storagePath'] = storagePath;
-          latestSubmission!['submissionVersion'] = (latestSubmission!['submissionVersion'] ?? 1) + 1;
+          latestSubmission!['submissionVersion'] =
+              (latestSubmission!['submissionVersion'] ?? 1) + 1;
           latestSubmission!['isLate'] = isLate;
           latestSubmission!['status'] = 'submitted';
-
         } else {
           // Create new submission with comprehensive data structure for security rules
           final submissionData = <String, dynamic>{
-            'studentId': user.uid,  // CRITICAL: This must match auth.uid for security rules
+            'studentId': user.uid,
+            // CRITICAL: This must match auth.uid for security rules
             'studentName': studentName,
             'studentEmail': userData['email'] ?? '',
             'submittedAt': FieldValue.serverTimestamp(),
@@ -530,7 +565,8 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
           final submissionDoc = await submissionRef.get();
           final submissionDocData = <String, dynamic>{
             'id': submissionDoc.id,
-            ...(submissionDoc.data() as Map<String, dynamic>? ?? <String, dynamic>{}),
+            ...(submissionDoc.data() as Map<String, dynamic>? ??
+                <String, dynamic>{}),
           };
 
           // 🎯 AWARD WATER BUCKETS: 4 buckets for assignment submission
@@ -540,7 +576,8 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                 widget.assignment['id'],
                 assignmentName: widget.assignment['title'] ?? 'Assignment'
             );
-            print('✅ Awarded 4 water buckets for assignment: ${widget.assignment['title']}');
+            print('✅ Awarded 4 water buckets for assignment: ${widget
+                .assignment['title']}');
           } catch (e) {
             print('❌ Error awarding water buckets: $e');
             // Don't fail the submission if reward fails
@@ -564,7 +601,9 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
               children: [
                 Icon(Icons.check_circle, color: Colors.white),
                 SizedBox(width: 8),
-                Expanded(child: Text(isResubmit ? 'Assignment resubmitted successfully' : 'Assignment submitted successfully!')),
+                Expanded(child: Text(isResubmit
+                    ? 'Assignment resubmitted successfully'
+                    : 'Assignment submitted successfully!')),
                 if (!isResubmit) ...[
                   SizedBox(width: 8),
                   Container(
@@ -578,7 +617,8 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                       children: [
                         Icon(Icons.local_drink, size: 16, color: Colors.white),
                         SizedBox(width: 4),
-                        Text('+4', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        Text('+4', style: TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ),
@@ -595,12 +635,13 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => StudentSubmissionView(
-                courseId: widget.courseId,
-                assignmentId: widget.assignment['id'],
-                assignmentData: widget.assignment,
-                organizationCode: widget.organizationCode,
-              ),
+              builder: (context) =>
+                  StudentSubmissionView(
+                    courseId: widget.courseId,
+                    assignmentId: widget.assignment['id'],
+                    assignmentData: widget.assignment,
+                    organizationCode: widget.organizationCode,
+                  ),
             ),
           ).then((_) {
             // Reload data when returning from submission view
@@ -623,61 +664,68 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(Icons.error, color: Colors.red, size: 24),
-            SizedBox(width: 8),
-            Expanded(child: Text(title)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            SizedBox(height: 12),
-            Container(
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange[300]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Troubleshooting Steps:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.orange[800],
-                    ),
+      builder: (context) =>
+          AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Icon(Icons.error, color: Colors.red, size: 24),
+                SizedBox(width: 8),
+                Expanded(child: Text(title)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(message),
+                SizedBox(height: 12),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[300]!),
                   ),
-                  SizedBox(height: 8),
-                  Text('1. Check your internet connection', style: TextStyle(fontSize: 12)),
-                  Text('2. Make sure you\'re logged in as a student', style: TextStyle(fontSize: 12)),
-                  Text('3. Verify you\'re enrolled in this course', style: TextStyle(fontSize: 12)),
-                  Text('4. Contact your instructor if the problem continues', style: TextStyle(fontSize: 12)),
-                ],
-              ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Troubleshooting Steps:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange[800],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text('1. Check your internet connection',
+                          style: TextStyle(fontSize: 12)),
+                      Text('2. Make sure you\'re logged in as a student',
+                          style: TextStyle(fontSize: 12)),
+                      Text('3. Verify you\'re enrolled in this course',
+                          style: TextStyle(fontSize: 12)),
+                      Text(
+                          '4. Contact your instructor if the problem continues',
+                          style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text('OK', style: TextStyle(color: Colors.white)),
               ),
-            ),
-            child: Text('OK', style: TextStyle(color: Colors.white)),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -686,7 +734,8 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
     String troubleshootingSteps = '';
 
     if (error.toString().contains('permission-denied')) {
-      errorMessage = 'Permission denied. You don\'t have permission to submit assignments.';
+      errorMessage =
+      'Permission denied. You don\'t have permission to submit assignments.';
       troubleshootingSteps = '''
 This usually happens when:
 • Database security rules haven't been properly configured
@@ -707,7 +756,8 @@ This might happen when:
 Please refresh the page and try again.
       ''';
     } else if (error.toString().contains('unavailable')) {
-      errorMessage = 'Database is temporarily unavailable. Please try again later.';
+      errorMessage =
+      'Database is temporarily unavailable. Please try again later.';
       troubleshootingSteps = '''
 This is usually a temporary issue:
 • Check your internet connection
@@ -715,7 +765,8 @@ This is usually a temporary issue:
 • Contact support if the problem persists
       ''';
     } else if (error.toString().contains('failed-precondition')) {
-      errorMessage = 'Data validation failed. Please check your submission details.';
+      errorMessage =
+      'Data validation failed. Please check your submission details.';
       troubleshootingSteps = '''
 This happens when:
 • Required fields are missing
@@ -728,77 +779,79 @@ Please try submitting again or contact support.
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(Icons.cloud_off, color: Colors.red, size: 24),
-            SizedBox(width: 8),
-            Text('Database Error'),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                errorMessage,
-                style: TextStyle(fontWeight: FontWeight.w500),
+      builder: (context) =>
+          AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Icon(Icons.cloud_off, color: Colors.red, size: 24),
+                SizedBox(width: 8),
+                Text('Database Error'),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    errorMessage,
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  SizedBox(height: 16),
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red[200]!),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'What to do:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red[800],
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          troubleshootingSteps.trim(),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.red[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              SizedBox(height: 16),
-              Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red[200]!),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Close'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  // Retry the submission
+                  _submitAssignment();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'What to do:',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.red[800],
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      troubleshootingSteps.trim(),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.red[700],
-                      ),
-                    ),
-                  ],
-                ),
+                child: Text('Try Again', style: TextStyle(color: Colors.white)),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Close'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // Retry the submission
-              _submitAssignment();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text('Try Again', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
     );
   }
 
@@ -846,7 +899,8 @@ Please try submitting again or contact support.
     }
 
     final dueDate = widget.assignment['dueDate'] as Timestamp?;
-    final isOverdue = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
+    final isOverdue = dueDate != null &&
+        dueDate.toDate().isBefore(DateTime.now());
 
     return Stack(
       children: [
@@ -874,12 +928,13 @@ Please try submitting again or contact support.
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => StudentSubmissionView(
-                          courseId: widget.courseId,
-                          assignmentId: widget.assignment['id'],
-                          assignmentData: widget.assignment,
-                          organizationCode: widget.organizationCode,
-                        ),
+                        builder: (context) =>
+                            StudentSubmissionView(
+                              courseId: widget.courseId,
+                              assignmentId: widget.assignment['id'],
+                              assignmentData: widget.assignment,
+                              organizationCode: widget.organizationCode,
+                            ),
                       ),
                     ).then((_) {
                       // Reload data when returning from submission view
@@ -933,7 +988,8 @@ Please try submitting again or contact support.
                         Row(
                           children: [
                             Container(
-                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(20),
@@ -941,7 +997,8 @@ Please try submitting again or contact support.
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.assignment, size: 16, color: Colors.white),
+                                  Icon(Icons.assignment, size: 16,
+                                      color: Colors.white),
                                   SizedBox(width: 4),
                                   Text(
                                     'Assignment',
@@ -957,7 +1014,8 @@ Please try submitting again or contact support.
                             if (isOverdue) ...[
                               SizedBox(width: 8),
                               Container(
-                                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
                                   color: Colors.red.withValues(alpha: 0.3),
                                   borderRadius: BorderRadius.circular(20),
@@ -975,13 +1033,16 @@ Please try submitting again or contact support.
                             if (hasSubmitted) ...[
                               SizedBox(width: 8),
                               Container(
-                                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withValues(alpha: 0.3),
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Text(
-                                  latestSubmission?['grade'] != null ? 'Graded' : 'Submitted',
+                                  latestSubmission?['grade'] != null
+                                      ? 'Graded'
+                                      : 'Submitted',
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
@@ -1004,11 +1065,14 @@ Please try submitting again or contact support.
                         SizedBox(height: 8),
                         Row(
                           children: [
-                            Icon(Icons.library_books, color: Colors.white.withValues(alpha: 0.9), size: 18),
+                            Icon(Icons.library_books,
+                                color: Colors.white.withValues(alpha: 0.9),
+                                size: 18),
                             SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                '${widget.courseData['code'] ?? ''} - ${widget.courseData['title'] ?? ''}',
+                                '${widget.courseData['code'] ?? ''} - ${widget
+                                    .courseData['title'] ?? ''}',
                                 style: TextStyle(
                                   fontSize: 16,
                                   color: Colors.white.withValues(alpha: 0.9),
@@ -1047,7 +1111,8 @@ Please try submitting again or contact support.
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 onPressed: _submitAssignment,
-                                icon: Icon(Icons.upload_file, color: Colors.white),
+                                icon: Icon(
+                                    Icons.upload_file, color: Colors.white),
                                 label: Text(
                                   'Submit Assignment',
                                   style: TextStyle(
@@ -1076,7 +1141,8 @@ Please try submitting again or contact support.
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.local_drink, color: Colors.orange[600], size: 20),
+                                  Icon(Icons.local_drink,
+                                      color: Colors.orange[600], size: 20),
                                   SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
@@ -1091,55 +1157,60 @@ Please try submitting again or contact support.
                                 ],
                               ),
                             ),
-                          ] else if (latestSubmission?['grade'] == null) ...[
-                            // Submitted but not graded - show resubmit option
-                            Container(
-                              padding: EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.blue[50],
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.blue[300]!),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
-                                  SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Assignment Submitted',
-                                          style: TextStyle(
-                                            color: Colors.blue[700],
-                                            fontWeight: FontWeight.bold,
+                          ] else
+                            if (latestSubmission?['grade'] == null) ...[
+                              // Submitted but not graded - show resubmit option
+                              Container(
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue[50],
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.blue[300]!),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.info_outline,
+                                        color: Colors.blue[700], size: 20),
+                                    SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment
+                                            .start,
+                                        children: [
+                                          Text(
+                                            'Assignment Submitted',
+                                            style: TextStyle(
+                                              color: Colors.blue[700],
+                                              fontWeight: FontWeight.bold,
+                                            ),
                                           ),
-                                        ),
-                                        SizedBox(height: 4),
-                                        Text(
-                                          'You can resubmit until graded',
-                                          style: TextStyle(
-                                            color: Colors.blue[600],
-                                            fontSize: 12,
+                                          SizedBox(height: 4),
+                                          Text(
+                                            'You can resubmit until graded',
+                                            style: TextStyle(
+                                              color: Colors.blue[600],
+                                              fontSize: 12,
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  ElevatedButton(
-                                    onPressed: _submitAssignment,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blue[600],
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
+                                        ],
                                       ),
                                     ),
-                                    child: Text('Resubmit', style: TextStyle(color: Colors.white)),
-                                  ),
-                                ],
+                                    ElevatedButton(
+                                      onPressed: _submitAssignment,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue[600],
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                              8),
+                                        ),
+                                      ),
+                                      child: Text('Resubmit', style: TextStyle(
+                                          color: Colors.white)),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
                         ],
                       ),
                     )
@@ -1168,7 +1239,8 @@ Please try submitting again or contact support.
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.check_circle, color: Colors.green[700], size: 24),
+                            Icon(Icons.check_circle, color: Colors.green[700],
+                                size: 24),
                             SizedBox(width: 12),
                             Expanded(
                               child: Column(
@@ -1186,19 +1258,24 @@ Please try submitting again or contact support.
                                   Row(
                                     children: [
                                       Text(
-                                        'Grade: ${latestSubmission!['grade']}/${widget.assignment['points'] ?? 100}',
+                                        'Grade: ${latestSubmission!['grade']}/${widget
+                                            .assignment['points'] ?? 100}',
                                         style: TextStyle(
                                           color: Colors.green[600],
                                           fontSize: 14,
                                         ),
                                       ),
-                                      if (latestSubmission!['letterGrade'] != null) ...[
+                                      if (latestSubmission!['letterGrade'] !=
+                                          null) ...[
                                         SizedBox(width: 12),
                                         Container(
-                                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 2),
                                           decoration: BoxDecoration(
-                                            color: _getLetterGradeColor(latestSubmission!['letterGrade']),
-                                            borderRadius: BorderRadius.circular(12),
+                                            color: _getLetterGradeColor(
+                                                latestSubmission!['letterGrade']),
+                                            borderRadius: BorderRadius.circular(
+                                                12),
                                           ),
                                           child: Text(
                                             latestSubmission!['letterGrade'],
@@ -1220,12 +1297,14 @@ Please try submitting again or contact support.
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => StudentSubmissionView(
-                                      courseId: widget.courseId,
-                                      assignmentId: widget.assignment['id'],
-                                      assignmentData: widget.assignment,
-                                      organizationCode: widget.organizationCode,
-                                    ),
+                                    builder: (context) =>
+                                        StudentSubmissionView(
+                                          courseId: widget.courseId,
+                                          assignmentId: widget.assignment['id'],
+                                          assignmentData: widget.assignment,
+                                          organizationCode: widget
+                                              .organizationCode,
+                                        ),
                                   ),
                                 ).then((_) {
                                   _loadData();
@@ -1261,7 +1340,8 @@ Please try submitting again or contact support.
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.info_outline, color: Colors.orange[600], size: 24),
+                            Icon(Icons.info_outline, color: Colors.orange[600],
+                                size: 24),
                             SizedBox(width: 12),
                             Text(
                               'Assignment Information',
@@ -1318,7 +1398,8 @@ Please try submitting again or contact support.
                             border: Border.all(color: Colors.orange[200]!),
                           ),
                           child: Text(
-                            widget.assignment['description'] ?? 'No description provided.',
+                            widget.assignment['description'] ??
+                                'No description provided.',
                             style: TextStyle(
                               fontSize: 15,
                               color: Colors.grey[700],
@@ -1351,7 +1432,8 @@ Please try submitting again or contact support.
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.rule, color: Colors.purple[600], size: 24),
+                              Icon(Icons.rule, color: Colors.purple[600],
+                                  size: 24),
                               SizedBox(width: 12),
                               Text(
                                 'Evaluation Rubric',
@@ -1375,7 +1457,8 @@ Please try submitting again or contact support.
 
                           // Rubric criteria
                           if (rubricData!['criteria'] != null) ...[
-                            ...(rubricData!['criteria'] as List).map((criterion) {
+                            ...(rubricData!['criteria'] as List).map((
+                                criterion) {
                               final weight = criterion['weight'] ?? 0;
                               final levels = criterion['levels'] as List? ?? [];
 
@@ -1385,13 +1468,15 @@ Please try submitting again or contact support.
                                 decoration: BoxDecoration(
                                   color: Colors.purple[50],
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.purple[200]!),
+                                  border: Border.all(
+                                      color: Colors.purple[200]!),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      mainAxisAlignment: MainAxisAlignment
+                                          .spaceBetween,
                                       children: [
                                         Expanded(
                                           child: Text(
@@ -1404,10 +1489,12 @@ Please try submitting again or contact support.
                                           ),
                                         ),
                                         Container(
-                                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 12, vertical: 4),
                                           decoration: BoxDecoration(
                                             color: Colors.purple[600],
-                                            borderRadius: BorderRadius.circular(12),
+                                            borderRadius: BorderRadius.circular(
+                                                12),
                                           ),
                                           child: Text(
                                             '$weight%',
@@ -1421,7 +1508,9 @@ Please try submitting again or contact support.
                                       ],
                                     ),
                                     if (criterion['description'] != null &&
-                                        criterion['description'].toString().isNotEmpty) ...[
+                                        criterion['description']
+                                            .toString()
+                                            .isNotEmpty) ...[
                                       SizedBox(height: 4),
                                       Text(
                                         criterion['description'],
@@ -1439,11 +1528,14 @@ Please try submitting again or contact support.
                                       runSpacing: 8,
                                       children: levels.map<Widget>((level) {
                                         return Container(
-                                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 12, vertical: 6),
                                           decoration: BoxDecoration(
                                             color: Colors.white,
-                                            borderRadius: BorderRadius.circular(20),
-                                            border: Border.all(color: Colors.purple[300]!),
+                                            borderRadius: BorderRadius.circular(
+                                                20),
+                                            border: Border.all(
+                                                color: Colors.purple[300]!),
                                           ),
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
@@ -1507,7 +1599,8 @@ Please try submitting again or contact support.
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.attach_file, color: Colors.purple[600], size: 24),
+                              Icon(Icons.attach_file, color: Colors.purple[600],
+                                  size: 24),
                               SizedBox(width: 12),
                               Text(
                                 'Reference Materials',
@@ -1520,7 +1613,8 @@ Please try submitting again or contact support.
                             ],
                           ),
                           SizedBox(height: 16),
-                          ...(widget.assignment['attachments'] as List).map((attachment) {
+                          ...(widget.assignment['attachments'] as List).map((
+                              attachment) {
                             final name = attachment['name'] ?? 'File';
                             final url = attachment['url'] ?? '';
 
@@ -1534,7 +1628,8 @@ Please try submitting again or contact support.
                                   decoration: BoxDecoration(
                                     color: Colors.grey[50],
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.grey[300]!),
+                                    border: Border.all(
+                                        color: Colors.grey[300]!),
                                   ),
                                   child: Row(
                                     children: [
@@ -1550,7 +1645,8 @@ Please try submitting again or contact support.
                                           style: TextStyle(
                                             color: Colors.blue[600],
                                             fontWeight: FontWeight.w500,
-                                            decoration: TextDecoration.underline,
+                                            decoration: TextDecoration
+                                                .underline,
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -1601,7 +1697,8 @@ Please try submitting again or contact support.
                     children: [
                       CircularProgressIndicator(
                         value: uploadProgress > 0 ? uploadProgress : null,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.orange[600]!),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.orange[600]!),
                         strokeWidth: 3,
                       ),
                       SizedBox(height: 20),
@@ -1645,7 +1742,9 @@ Please try submitting again or contact support.
                       ],
                       SizedBox(height: 12),
                       Text(
-                        hasSubmitted ? 'Updating your submission...' : 'Processing your submission...',
+                        hasSubmitted
+                            ? 'Updating your submission...'
+                            : 'Processing your submission...',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey[600],
@@ -1715,7 +1814,10 @@ Please try submitting again or contact support.
   }
 
   IconData _getFileIcon(String fileName) {
-    final extension = fileName.split('.').last.toLowerCase();
+    final extension = fileName
+        .split('.')
+        .last
+        .toLowerCase();
     switch (extension) {
       case 'pdf':
         return Icons.picture_as_pdf;
@@ -1756,11 +1858,13 @@ Please try submitting again or contact support.
     final difference = now.difference(date);
 
     String dateStr = '${date.day}/${date.month}/${date.year}';
-    String timeStr = '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    String timeStr = '${date.hour.toString().padLeft(2, '0')}:${date.minute
+        .toString().padLeft(2, '0')}';
 
     if (difference.inDays == 0 && date.day == now.day) {
       return 'Today at $timeStr';
-    } else if (difference.inDays == 1 || (difference.inDays == 0 && date.day != now.day)) {
+    } else if (difference.inDays == 1 ||
+        (difference.inDays == 0 && date.day != now.day)) {
       return 'Yesterday at $timeStr';
     } else {
       return '$dateStr at $timeStr';

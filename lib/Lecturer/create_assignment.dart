@@ -8,6 +8,268 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File;
 import 'dart:async';
 
+// Add these enums if they don't exist in your project
+enum EventType { normal, recurring, holiday }
+enum RecurrenceType { none, daily, weekly, monthly, yearly }
+
+// NotificationService class for centralized notification management
+class NotificationService {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  // Create notification for new items (assignments, materials, etc.)
+  Future<void> createNewItemNotification({
+    required String itemType,
+    required String itemTitle,
+    required DateTime dueDate,
+    required String sourceId,
+    String? courseId,
+    String? courseName,
+    String? organizationCode,
+  }) async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Get organization code if not provided
+      String? orgCode = organizationCode;
+      if (orgCode == null) {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(currentUser.uid)
+            .get();
+        orgCode = userDoc.data()?['organizationCode'];
+      }
+
+      if (orgCode == null) {
+        throw Exception('Organization code not found');
+      }
+
+      // Get enrolled students if this is a course-related item
+      if (courseId != null) {
+        final enrollmentsSnapshot = await _firestore
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('enrollments')
+            .get();
+
+        // Create notifications for all enrolled students
+        for (var enrollment in enrollmentsSnapshot.docs) {
+          final studentId = enrollment.data()['studentId'];
+
+          await _createStudentNotification(
+            organizationCode: orgCode,
+            studentId: studentId,
+            itemType: itemType,
+            itemTitle: itemTitle,
+            sourceId: sourceId,
+            courseId: courseId,
+            courseName: courseName,
+          );
+        }
+      } else {
+        // For personal items (like goals), create notification for current user
+        await _createStudentNotification(
+          organizationCode: orgCode,
+          studentId: currentUser.uid,
+          itemType: itemType,
+          itemTitle: itemTitle,
+          sourceId: sourceId,
+        );
+      }
+
+      print('✅ Created notifications for $itemType: $itemTitle');
+    } catch (e) {
+      print('Error creating notifications: $e');
+    }
+  }
+
+  // Helper method to create individual student notification
+  Future<void> _createStudentNotification({
+    required String organizationCode,
+    required String studentId,
+    required String itemType,
+    required String itemTitle,
+    required String sourceId,
+    String? courseId,
+    String? courseName,
+  }) async {
+    // Determine notification title and body based on item type
+    String notificationTitle;
+    String notificationBody;
+
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        notificationTitle = '📝 New Assignment Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle assignment has been posted';
+        break;
+      case 'tutorial':
+        notificationTitle = '📚 New Tutorial Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle tutorial has been posted';
+        break;
+      case 'learning':
+        notificationTitle = '📖 New Learning Material Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle learning material has been posted';
+        break;
+      case 'goal':
+        notificationTitle = '🎯 New Goal Created';
+        notificationBody = '$itemTitle has been set with a deadline';
+        break;
+      default:
+        notificationTitle = '📢 New Item Posted';
+        notificationBody = '$itemTitle has been posted';
+    }
+
+    await _firestore
+        .collection('organizations')
+        .doc(organizationCode)
+        .collection('students')
+        .doc(studentId)
+        .collection('notifications')
+        .add({
+      'title': notificationTitle,
+      'body': notificationBody,
+      'type': 'NotificationType.${itemType}',
+      'sourceId': sourceId,
+      'sourceType': itemType,
+      'courseId': courseId,
+      'createdAt': FieldValue.serverTimestamp(),
+      'isRead': false,
+    });
+  }
+
+  // Method to create calendar events for enrolled students
+  Future<void> createCalendarEventsForEnrolledStudents({
+    required String sourceId,
+    required String itemTitle,
+    required DateTime dueDate,
+    required String itemType,
+    required String courseId,
+    String? organizationCode,
+  }) async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) return;
+
+      // Get organization code if not provided
+      String? orgCode = organizationCode;
+      if (orgCode == null) {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(currentUser.uid)
+            .get();
+        orgCode = userDoc.data()?['organizationCode'];
+      }
+
+      if (orgCode == null) return;
+
+      final enrollmentsSnapshot = await _firestore
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('enrollments')
+          .get();
+
+      for (var enrollment in enrollmentsSnapshot.docs) {
+        final studentId = enrollment.data()['studentId'];
+
+        await _firestore
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('students')
+            .doc(studentId)
+            .collection('calendar_events')
+            .add({
+          'title': _getCalendarEventTitle(itemType, itemTitle),
+          'description': _getCalendarEventDescription(itemType),
+          'startTime': Timestamp.fromDate(dueDate),
+          'endTime': Timestamp.fromDate(dueDate),
+          'color': _getCalendarEventColor(itemType),
+          'calendar': _getCalendarCategory(itemType),
+          'eventType': EventType.normal.index,
+          'recurrenceType': RecurrenceType.none.index,
+          'reminderMinutes': 1440, // 24 hours before
+          'location': '',
+          'isRecurring': false,
+          'originalEventId': '',
+          'sourceId': sourceId,
+          'sourceType': itemType,
+          'courseId': courseId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      print('✅ Created calendar events for $itemType: $itemTitle');
+    } catch (e) {
+      print('Error creating calendar events: $e');
+    }
+  }
+
+  // Helper methods for calendar event properties
+  String _getCalendarEventTitle(String itemType, String itemTitle) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return '📝 Assignment: $itemTitle Due';
+      case 'tutorial':
+        return '📚 Tutorial: $itemTitle Due';
+      case 'goal':
+        return '🎯 Goal: $itemTitle Due';
+      default:
+        return '📅 $itemTitle Due';
+    }
+  }
+
+  String _getCalendarEventDescription(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return 'Assignment deadline';
+      case 'tutorial':
+        return 'Tutorial deadline';
+      case 'goal':
+        return 'Goal deadline';
+      default:
+        return 'Item deadline';
+    }
+  }
+
+  int _getCalendarEventColor(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return Colors.orange.value;
+      case 'tutorial':
+        return Colors.blue.value;
+      case 'goal':
+        return Colors.green.value;
+      default:
+        return Colors.purple.value;
+    }
+  }
+
+  String _getCalendarCategory(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return 'assignments';
+      case 'tutorial':
+        return 'tutorials';
+      case 'goal':
+        return 'goals';
+      default:
+        return 'general';
+    }
+  }
+}
+
 class CreateAssignmentPage extends StatefulWidget {
   final String courseId;
   final Map<String, dynamic> courseData;
@@ -42,6 +304,9 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   double _uploadProgress = 0;
   String _uploadStatus = '';
   StreamSubscription? _uploadSubscription;
+
+  // Initialize NotificationService
+  final NotificationService _notificationService = NotificationService();
 
   @override
   void initState() {
@@ -280,6 +545,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     }
   }
 
+  // Enhanced _saveAssignment method with NotificationService integration
   Future<void> _saveAssignment() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -357,6 +623,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       }
 
       // Save or update assignment in Firestore
+      String? assignmentId;
       if (widget.editMode && widget.assignmentId != null) {
         // Update existing assignment
         await FirebaseFirestore.instance
@@ -368,6 +635,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
             .doc(widget.assignmentId)
             .update(assignmentData);
 
+        assignmentId = widget.assignmentId;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -378,7 +646,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         }
       } else {
         // Create new assignment
-        await FirebaseFirestore.instance
+        final docRef = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(organizationCode)
             .collection('courses')
@@ -386,6 +654,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
             .collection('assignments')
             .add(assignmentData);
 
+        assignmentId = docRef.id;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -395,6 +664,26 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
           );
         }
       }
+
+      // Use NotificationService for calendar events and notifications
+      await _notificationService.createCalendarEventsForEnrolledStudents(
+        sourceId: assignmentId!,
+        itemTitle: _titleController.text.trim(),
+        dueDate: dueDateTime,
+        itemType: 'assignment',
+        courseId: widget.courseId,
+        organizationCode: organizationCode,
+      );
+
+      await _notificationService.createNewItemNotification(
+        itemType: 'assignment',
+        itemTitle: _titleController.text.trim(),
+        dueDate: dueDateTime,
+        sourceId: assignmentId,
+        courseId: widget.courseId,
+        courseName: widget.courseData['title'] ?? widget.courseData['name'],
+        organizationCode: organizationCode,
+      );
 
       // Navigate back
       if (mounted) {

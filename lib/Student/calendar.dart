@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
 import '../Authentication/auth_services.dart';
 
 enum CalendarView { month, week, day, agenda }
@@ -24,14 +25,110 @@ class _CalendarPageState extends State<CalendarPage> {
   List<CalendarEvent> _searchResults = [];
   bool _isSearching = false;
 
+  // Add StreamSubscription for real-time listener
+  StreamSubscription<QuerySnapshot>? _eventsSubscription;
+
   @override
   void initState() {
     super.initState();
-    _loadEvents();
+    _startEventsListener();
+  }
+
+  // New method to start real-time listener
+  void _startEventsListener() {
+    final user = _authService.currentUser;
+    if (user == null) {
+      print('No user found');
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    _authService.getUserData(user.uid).then((userData) {
+      if (userData == null) {
+        print('No user data found');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final orgCode = userData['organizationCode'];
+      if (orgCode == null) {
+        print('No organization code found');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      print('Starting real-time event listener for user: ${user.uid}, org: $orgCode');
+
+      _eventsSubscription = FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('calendar_events')
+          .snapshots()
+          .listen((snapshot) {
+        print('Received ${snapshot.docs.length} event documents');
+
+        Map<DateTime, List<CalendarEvent>> events = {};
+
+        for (var change in snapshot.docChanges) {
+          final data = change.doc.data();
+          if (data == null) continue;
+
+          try {
+            final event = CalendarEvent.fromMap(change.doc.id, data);
+            print('Processing event: ${event.title} for ${event.startTime}');
+
+            if (change.type == DocumentChangeType.removed) {
+              // Remove event from map
+              final eventDate = DateTime(event.startTime.year, event.startTime.month, event.startTime.day);
+              events[eventDate]?.removeWhere((e) => e.id == event.id);
+              continue;
+            }
+
+            // Handle recurring events
+            if (event.recurrenceType != RecurrenceType.none) {
+              final recurringEvents = _generateRecurringEvents(event);
+              for (var recurringEvent in recurringEvents) {
+                final eventDate = DateTime(
+                  recurringEvent.startTime.year,
+                  recurringEvent.startTime.month,
+                  recurringEvent.startTime.day,
+                );
+                events[eventDate] = events[eventDate] ?? [];
+                events[eventDate]!.add(recurringEvent);
+              }
+            } else {
+              final eventDate = DateTime(event.startTime.year, event.startTime.month, event.startTime.day);
+              events[eventDate] = events[eventDate] ?? [];
+              if (!events[eventDate]!.any((e) => e.id == event.id)) {
+                events[eventDate]!.add(event);
+              }
+            }
+          } catch (e) {
+            print('Error processing event ${change.doc.id}: $e');
+          }
+        }
+
+        // Sort events by start time for each date
+        events.forEach((date, eventList) {
+          eventList.sort((a, b) => a.startTime.compareTo(b.startTime));
+        });
+
+        setState(() {
+          _events = events;
+          _isLoading = false;
+        });
+      }, onError: (e) {
+        print('Error in event listener: $e');
+        setState(() => _isLoading = false);
+      });
+    });
   }
 
   @override
   void dispose() {
+    _eventsSubscription?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -184,6 +281,9 @@ class _CalendarPageState extends State<CalendarPage> {
         location: event.location,
         isRecurring: true,
         originalEventId: event.id,
+        sourceId: event.sourceId,
+        sourceType: event.sourceType,
+        courseId: event.courseId,
       ));
 
       switch (event.recurrenceType) {
@@ -235,6 +335,7 @@ class _CalendarPageState extends State<CalendarPage> {
     return events;
   }
 
+  // Updated _addEvent without _loadEvents call
   Future<void> _addEvent(CalendarEvent event) async {
     try {
       final user = _authService.currentUser;
@@ -253,13 +354,13 @@ class _CalendarPageState extends State<CalendarPage> {
           .doc(user.uid)
           .collection('calendar_events')
           .add(event.toMap());
-
-      _loadEvents();
+      // No need to call _loadEvents; listener will handle updates
     } catch (e) {
       print('Error adding event: $e');
     }
   }
 
+  // Updated _updateEvent without _loadEvents call
   Future<void> _updateEvent(CalendarEvent event) async {
     try {
       final user = _authService.currentUser;
@@ -281,13 +382,13 @@ class _CalendarPageState extends State<CalendarPage> {
           .collection('calendar_events')
           .doc(eventId)
           .update(event.toMap());
-
-      _loadEvents();
+      // No need to call _loadEvents; listener will handle updates
     } catch (e) {
       print('Error updating event: $e');
     }
   }
 
+  // Updated _deleteEvent without _loadEvents call
   Future<void> _deleteEvent(String eventId) async {
     try {
       final user = _authService.currentUser;
@@ -307,8 +408,7 @@ class _CalendarPageState extends State<CalendarPage> {
           .collection('calendar_events')
           .doc(eventId)
           .delete();
-
-      _loadEvents();
+      // No need to call _loadEvents; listener will handle updates
     } catch (e) {
       print('Error deleting event: $e');
     }
@@ -876,12 +976,12 @@ class _CalendarPageState extends State<CalendarPage> {
                 ),
               ),
               Text(
-                '${_selectedDate.day}',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.black87,
-                )
+                  '${_selectedDate.day}',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.black87,
+                  )
               ),
             ],
           ),
@@ -1245,6 +1345,9 @@ class CalendarEvent {
   final String location;
   final bool isRecurring;
   final String originalEventId;
+  final String? sourceId; // Add this
+  final String? sourceType; // Add this (assignment, tutorial, goal)
+  final String? courseId; // Add this
 
   CalendarEvent({
     required this.id,
@@ -1260,6 +1363,9 @@ class CalendarEvent {
     this.location = '',
     this.isRecurring = false,
     this.originalEventId = '',
+    this.sourceId,
+    this.sourceType,
+    this.courseId,
   });
 
   factory CalendarEvent.fromMap(String id, Map<String, dynamic> map) {
@@ -1277,6 +1383,9 @@ class CalendarEvent {
       location: map['location'] ?? '',
       isRecurring: map['isRecurring'] ?? false,
       originalEventId: map['originalEventId'] ?? '',
+      sourceId: map['sourceId'],
+      sourceType: map['sourceType'],
+      courseId: map['courseId'],
     );
   }
 
@@ -1294,6 +1403,9 @@ class CalendarEvent {
       'location': location,
       'isRecurring': isRecurring,
       'originalEventId': originalEventId,
+      'sourceId': sourceId,
+      'sourceType': sourceType,
+      'courseId': courseId,
     };
   }
 }
@@ -1498,6 +1610,9 @@ class _NoteDialogState extends State<NoteDialog> {
                 recurrenceType: RecurrenceType.none,
                 reminderMinutes: 15,
                 location: '',
+                sourceId: widget.event?.sourceId,
+                sourceType: widget.event?.sourceType,
+                courseId: widget.event?.courseId,
               );
 
               widget.onSave(event);
@@ -1530,6 +1645,9 @@ class EventDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Check if this is a system-created event
+    final isSystemEvent = event.sourceType != null;
+
     return AlertDialog(
       title: Row(
         children: [
@@ -1563,16 +1681,36 @@ class EventDetailsDialog extends StatelessWidget {
           Text(
             '${event.startTime.day}/${event.startTime.month}/${event.startTime.year} at ${TimeOfDay.fromDateTime(event.startTime).format(context)}',
           ),
-          SizedBox(height: 16),
-          Text('Color:', style: TextStyle(fontWeight: FontWeight.bold)),
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: event.color,
-              shape: BoxShape.circle,
+          if (event.sourceType != null) ...[
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _getSourceColor(event.sourceType!).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: _getSourceColor(event.sourceType!)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _getSourceIcon(event.sourceType!),
+                    size: 16,
+                    color: _getSourceColor(event.sourceType!),
+                  ),
+                  SizedBox(width: 4),
+                  Text(
+                    _getSourceLabel(event.sourceType!),
+                    style: TextStyle(
+                      color: _getSourceColor(event.sourceType!),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
       actions: [
@@ -1580,21 +1718,62 @@ class EventDetailsDialog extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
           child: Text('Close'),
         ),
-        TextButton(
-          onPressed: () {
-            Navigator.pop(context);
-            onEdit();
-          },
-          child: Text('Edit'),
-        ),
-        TextButton(
-          onPressed: () {
-            Navigator.pop(context);
-            onDelete();
-          },
-          child: Text('Delete', style: TextStyle(color: Colors.red)),
-        ),
+        if (!isSystemEvent) ...[
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              onEdit();
+            },
+            child: Text('Edit'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              onDelete();
+            },
+            child: Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ],
     );
+  }
+
+  Color _getSourceColor(String sourceType) {
+    switch (sourceType) {
+      case 'assignment':
+        return Colors.orange;
+      case 'tutorial':
+        return Colors.blue;
+      case 'goal':
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getSourceIcon(String sourceType) {
+    switch (sourceType) {
+      case 'assignment':
+        return Icons.assignment;
+      case 'tutorial':
+        return Icons.quiz;
+      case 'goal':
+        return Icons.flag;
+      default:
+        return Icons.event;
+    }
+  }
+
+  String _getSourceLabel(String sourceType) {
+    switch (sourceType) {
+      case 'assignment':
+        return 'Assignment Deadline';
+      case 'tutorial':
+        return 'Tutorial Deadline';
+      case 'goal':
+        return 'Goal Target Date';
+      default:
+        return 'Event';
+    }
   }
 }

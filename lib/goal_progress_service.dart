@@ -1,4 +1,3 @@
-// 🚀 COMPLETE GoalProgressService - All existing features + new submission methods
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -739,6 +738,31 @@ class GoalProgressService {
     }
   }
 
+  // Get actual water consumption count from records
+  Future<int> getActualWaterConsumptionCount() async {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null || !await _verifyStudentAccess()) return 0;
+
+    try {
+      final consumptionSnapshot = await _firestore
+          .collection('goalProgress')
+          .doc(userId)
+          .collection('waterConsumption')
+          .get();
+
+      int totalConsumptions = 0;
+      for (var doc in consumptionSnapshot.docs) {
+        final data = doc.data();
+        totalConsumptions += (data['bucketsUsed'] as int? ?? 0);
+      }
+
+      return totalConsumptions;
+    } catch (e) {
+      print('❌ Error getting water consumption count: $e');
+      return 0;
+    }
+  }
+
   // 🎯 TUTORIAL SUBMISSION: Awards exactly 1 water bucket (5% tree growth)
   // ✅ ABSOLUTE GUARANTEE: This submission will NEVER be rewarded more than once
   Future<void> awardTutorialSubmission(String submissionId, String materialId, {String? materialName}) async {
@@ -1150,9 +1174,17 @@ class GoalProgressService {
       // Auto-sync before returning data
       await autoSyncWaterBuckets();
 
-      // Return fresh data after sync
+      // Get fresh data after sync
       final freshDoc = await _firestore.collection('goalProgress').doc(userId).get();
-      return freshDoc.data();
+      final data = freshDoc.data()!;
+
+      // 🔧 FIX: Calculate actual water consumption count for tree painter
+      final actualWaterConsumptionCount = await getActualWaterConsumptionCount();
+
+      // Add the actual consumption count to the data
+      data['actualWaterConsumptionCount'] = actualWaterConsumptionCount;
+
+      return data;
     } else {
       await initializeGoalProgress();
       return await getGoalProgress();

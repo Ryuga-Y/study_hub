@@ -1,11 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
-import '../community/bloc.dart';
-import '../community/feed_screen.dart';
-import '../community/models.dart';
 import 'course_page.dart';
 import 'create_course.dart';
 
@@ -162,98 +158,6 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
     if (confirm == true) {
       await _authService.signOut();
       Navigator.pushReplacementNamed(context, '/');
-    }
-  }
-
-  // Create CommunityUser from userData
-  CommunityUser _createCommunityUser() {
-    final user = _authService.currentUser;
-    if (user == null || _userData == null) {
-      throw Exception('User data not available');
-    }
-
-    return CommunityUser(
-      uid: user.uid,
-      fullName: _userData!['fullName'] ?? 'Unknown',
-      email: _userData!['email'] ?? '',
-      avatarUrl: _userData!['avatarUrl'],
-      bio: _userData!['bio'],
-      organizationCode: _userData!['organizationCode'] ?? '',
-      role: _userData!['role'] ?? 'lecturer',
-      postCount: _userData!['postCount'] ?? 0,
-      friendCount: _userData!['friendCount'] ?? 0,
-      joinDate: _userData!['createdAt'] != null
-          ? (_userData!['createdAt'] as Timestamp).toDate()
-          : DateTime.now(),
-      isActive: _userData!['isActive'] ?? true,
-    );
-  }
-
-  Future<void> _navigateToCommunity() async {
-    try {
-      final organizationCode = _userData?['organizationCode'] ?? '';
-      if (organizationCode.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Organization code not found'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-
-      // Create community user object
-      final communityUser = _createCommunityUser();
-
-      // Get or create CommunityBloc
-      CommunityBloc communityBloc;
-      try {
-        // Try to get existing bloc
-        communityBloc = BlocProvider.of<CommunityBloc>(context);
-      } catch (e) {
-        // If no bloc exists, create a new one
-        communityBloc = CommunityBloc();
-      }
-
-      // Initialize the bloc with user profile
-      communityBloc.add(LoadUserProfile(communityUser.uid));
-
-      // Close loading dialog
-      Navigator.pop(context);
-
-      // Navigate to community feed
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => BlocProvider.value(
-            value: communityBloc,
-            child: FeedScreen(
-              organizationCode: organizationCode,
-            ),
-          ),
-        ),
-      );
-    } catch (e) {
-      // Close loading dialog if open
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error accessing community: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
   }
 
@@ -580,7 +484,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   ),
                   SizedBox(height: 24),
                   CustomButton(
-                    text: 'Create Course',
+                    text: 'Create Lecturer',
                     onPressed: () async {
                       final result = await Navigator.push(
                         context,
@@ -670,7 +574,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      course['title'] ?? 'Untitled Course',
+                      course['title'] ?? 'Untitled Lecturer',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -743,8 +647,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           // Already on courses page
             break;
           case 1:
-          // Navigate to community (FeedScreen)
-            _navigateToCommunity();
+          // TODO: Navigate to community
             break;
           case 2:
           // TODO: Navigate to chat
