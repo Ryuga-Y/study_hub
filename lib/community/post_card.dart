@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:study_hub/community/profile_screen.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../community/models.dart';
-
+import '../community/bloc.dart';
 
 class PostCard extends StatefulWidget {
   final Post post;
@@ -50,170 +51,183 @@ class _PostCardState extends State<PostCard> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.white,
-      margin: EdgeInsets.only(bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          _buildHeader(),
+    return BlocBuilder<CommunityBloc, CommunityState>(
+      builder: (context, state) {
+        final currentUserId = state.currentUserProfile?.uid;
 
-          // Caption
-          if (widget.post.caption.isNotEmpty)
-            _buildCaption(),
+        return Container(
+          color: Colors.white,
+          margin: EdgeInsets.only(bottom: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              _buildHeader(),
 
-          // Media
-          if (widget.post.mediaUrls.isNotEmpty)
-            _buildMediaSection(),
+              // Caption
+              if (widget.post.caption.isNotEmpty)
+                _buildCaption(),
 
-          // Stats
-          _buildStats(),
+              // Media
+              if (widget.post.mediaUrls.isNotEmpty)
+                _buildMediaSection(),
 
-          // Actions
-          _buildActions(),
+              // Stats
+              _buildStats(),
 
-          // Reactions overlay
-          if (_showReactions)
-            _buildReactionsOverlay(),
-        ],
-      ),
+              // Actions
+              _buildActions(currentUserId),
+
+              // Reactions overlay
+              if (_showReactions)
+                _buildReactionsOverlay(),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildHeader() {
-    return Padding(
-      padding: EdgeInsets.all(12),
-      child: Row(
-        children: [
-          // Avatar
-          GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ProfileScreen(
-                    userId: widget.post.userId,
-                    isCurrentUser: false,
-                  ),
+    return BlocBuilder<CommunityBloc, CommunityState>(
+      builder: (context, state) {
+        final currentUserId = state.currentUserProfile?.uid;
+
+        return Padding(
+          padding: EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Avatar
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ProfileScreen(
+                        userId: widget.post.userId,
+                        isCurrentUser: widget.post.userId == currentUserId,
+                      ),
+                    ),
+                  );
+                },
+                child: CircleAvatar(
+                  radius: 20,
+                  backgroundImage: widget.post.userAvatar != null
+                      ? CachedNetworkImageProvider(widget.post.userAvatar!)
+                      : null,
+                  child: widget.post.userAvatar == null
+                      ? Icon(Icons.person)
+                      : null,
                 ),
-              );
-            },
-            child: CircleAvatar(
-              radius: 20,
-              backgroundImage: widget.post.userAvatar != null
-                  ? CachedNetworkImageProvider(widget.post.userAvatar!)
-                  : null,
-              child: widget.post.userAvatar == null
-                  ? Icon(Icons.person)
-                  : null,
-            ),
-          ),
+              ),
 
-          SizedBox(width: 12),
+              SizedBox(width: 12),
 
-          // User info
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+              // User info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ProfileScreen(
-                              userId: widget.post.userId,
-                              isCurrentUser: false,
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ProfileScreen(
+                                  userId: widget.post.userId,
+                                  isCurrentUser: widget.post.userId == currentUserId,
+                                ),
+                              ),
+                            );
+                          },
+                          child: Text(
+                            widget.post.userName,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
                             ),
                           ),
-                        );
-                      },
-                      child: Text(
-                        widget.post.userName,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
                         ),
-                      ),
+                        SizedBox(width: 8),
+                        if (widget.post.isEdited)
+                          Text(
+                            '• edited',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                      ],
                     ),
-                    SizedBox(width: 8),
-                    if (widget.post.isEdited)
-                      Text(
-                        '• edited',
-                        style: TextStyle(
-                          fontSize: 12,
+                    SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Text(
+                          timeago.format(widget.post.createdAt),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Icon(
+                          widget.post.privacy == PostPrivacy.public
+                              ? Icons.public
+                              : widget.post.privacy == PostPrivacy.friendsOnly
+                              ? Icons.people
+                              : Icons.lock,
+                          size: 12,
                           color: Colors.grey[600],
                         ),
-                      ),
-                  ],
-                ),
-                SizedBox(height: 2),
-                Row(
-                  children: [
-                    Text(
-                      timeago.format(widget.post.createdAt),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                    SizedBox(width: 8),
-                    Icon(
-                      widget.post.privacy == PostPrivacy.public
-                          ? Icons.public
-                          : widget.post.privacy == PostPrivacy.friendsOnly
-                          ? Icons.people
-                          : Icons.lock,
-                      size: 12,
-                      color: Colors.grey[600],
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
+              ),
 
-          // More button
-          if (widget.onDelete != null || widget.onEdit != null)
-            PopupMenuButton<String>(
-              icon: Icon(Icons.more_horiz, color: Colors.grey[700]),
-              itemBuilder: (context) => [
-                if (widget.onEdit != null)
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit),
-                        SizedBox(width: 8),
-                        Text('Edit'),
-                      ],
-                    ),
-                  ),
-                if (widget.onDelete != null)
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete, color: Colors.red),
-                        SizedBox(width: 8),
-                        Text('Delete', style: TextStyle(color: Colors.red)),
-                      ],
-                    ),
-                  ),
-              ],
-              onSelected: (value) {
-                if (value == 'edit' && widget.onEdit != null) {
-                  widget.onEdit!();
-                } else if (value == 'delete' && widget.onDelete != null) {
-                  widget.onDelete!();
-                }
-              },
-            ),
-        ],
-      ),
+              // More button
+              if (widget.post.userId == currentUserId &&
+                  (widget.onDelete != null || widget.onEdit != null))
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.more_horiz, color: Colors.grey[700]),
+                  itemBuilder: (context) => [
+                    if (widget.onEdit != null)
+                      PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit),
+                            SizedBox(width: 8),
+                            Text('Edit'),
+                          ],
+                        ),
+                      ),
+                    if (widget.onDelete != null)
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete, color: Colors.red),
+                            SizedBox(width: 8),
+                            Text('Delete', style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                  ],
+                  onSelected: (value) {
+                    if (value == 'edit' && widget.onEdit != null) {
+                      widget.onEdit!();
+                    } else if (value == 'delete' && widget.onDelete != null) {
+                      widget.onDelete!();
+                    }
+                  },
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -300,7 +314,7 @@ class _PostCardState extends State<PostCard> {
             child: Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
+                color: Colors.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Row(
@@ -391,7 +405,9 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  Widget _buildActions() {
+  Widget _buildActions(String? currentUserId) {
+    final isLiked = currentUserId != null && widget.post.likedBy.contains(currentUserId);
+
     return Container(
       decoration: BoxDecoration(
         border: Border(
@@ -403,13 +419,9 @@ class _PostCardState extends State<PostCard> {
         children: [
           // Like button
           _buildActionButton(
-            icon: widget.post.likedBy.contains('currentUserId') // Replace with actual user ID
-                ? Icons.favorite
-                : Icons.favorite_outline,
+            icon: isLiked ? Icons.favorite : Icons.favorite_outline,
             label: 'Like',
-            color: widget.post.likedBy.contains('currentUserId')
-                ? Colors.red
-                : null,
+            color: isLiked ? Colors.red : null,
             onTap: widget.onLike,
             onLongPress: () {
               setState(() => _showReactions = true);
@@ -475,7 +487,7 @@ class _PostCardState extends State<PostCard> {
     return GestureDetector(
       onTap: () => setState(() => _showReactions = false),
       child: Container(
-        color: Colors.black.withOpacity(0.3),
+        color: Colors.black.withValues(alpha: 0.3),
         child: Center(
           child: Container(
             padding: EdgeInsets.all(12),
@@ -484,7 +496,7 @@ class _PostCardState extends State<PostCard> {
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
+                  color: Colors.black.withValues(alpha: 0.2),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
