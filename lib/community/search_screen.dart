@@ -5,7 +5,6 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../community/bloc.dart';
 import '../community/models.dart';
 import 'profile_screen.dart';
-import 'post_screen.dart';
 
 enum SearchScreenTab { search, friendRequests, notifications }
 
@@ -366,7 +365,7 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: _getRoleColor(user.role).withOpacity(0.1),
+                            color: _getRoleColor(user.role).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -452,7 +451,7 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
             borderRadius: BorderRadius.circular(8),
           ),
         ),
-        child: Text('Add Friend'),
+        child: Text('Add Friend',style: TextStyle(color: Colors.white),),
       );
     }
   }
@@ -574,7 +573,7 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: Text('Accept'),
+                        child: Text('Accept',style: TextStyle(color: Colors.white ),),
                       ),
                     ),
                     SizedBox(width: 12),
@@ -718,7 +717,7 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.1),
+                color: iconColor.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(

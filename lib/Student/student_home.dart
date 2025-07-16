@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_bloc/flutter_bloc.dart'; // Add this import
 import 'dart:async'; // Add Timer import
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
+import '../community/bloc.dart'; // Add this import
+import '../community/feed_screen.dart'; // Add this import
+import '../community/models.dart'; // Add this import
 import 'student_course.dart';
 import 'calendar.dart'; // Import the calendar page
 import '../Stu_goal.dart'; // Import the goal page
@@ -98,7 +102,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -379,6 +383,108 @@ class _StudentHomePageState extends State<StudentHomePage> {
     });
   }
 
+  // Create CommunityUser from userData (adapted for students)
+  CommunityUser _createCommunityUser() {
+    final user = _authService.currentUser;
+    if (user == null || _userData == null) {
+      throw Exception('User data not available');
+    }
+
+    return CommunityUser(
+      uid: user.uid,
+      fullName: _userData!['fullName'] ?? 'Unknown',
+      email: _userData!['email'] ?? '',
+      avatarUrl: _userData!['avatarUrl'],
+      bio: _userData!['bio'],
+      organizationCode: _userData!['organizationCode'] ?? '',
+      role: _userData!['role'] ?? 'student',
+      postCount: _userData!['postCount'] ?? 0,
+      friendCount: _userData!['friendCount'] ?? 0,
+      joinDate: _userData!['createdAt'] != null
+          ? (_userData!['createdAt'] as Timestamp).toDate()
+          : DateTime.now(),
+      isActive: _userData!['isActive'] ?? true,
+    );
+  }
+
+  Future<void> _navigateToCommunity() async {
+    try {
+      final organizationCode = _userData?['organizationCode'] ?? '';
+      if (organizationCode.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Organization code not found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Create community user object
+      final communityUser = _createCommunityUser();
+
+      // Get or create CommunityBloc
+      CommunityBloc communityBloc;
+      try {
+        // Try to get existing bloc
+        communityBloc = BlocProvider.of<CommunityBloc>(context);
+      } catch (e) {
+        // If no bloc exists, create a new one
+        communityBloc = CommunityBloc();
+      }
+
+      // Initialize the bloc with user profile
+      communityBloc.add(LoadUserProfile(communityUser.uid));
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      // Navigate to community feed
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => BlocProvider.value(
+            value: communityBloc,
+            child: FeedScreen(
+              organizationCode: organizationCode,
+            ),
+          ),
+        ),
+      ).then((_) {
+        // Reset bottom navigation to Courses tab when returning from community
+        setState(() {
+          _currentIndex = 0;
+        });
+      });
+    } catch (e) {
+      // Close loading dialog if open
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error accessing community: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+
+      // Reset navigation index on error as well
+      setState(() {
+        _currentIndex = 0;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -458,7 +564,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                     border: Border.all(color: Colors.white, width: 1),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.orange.withOpacity(0.4),
+                        color: Colors.orange.withValues(alpha: 0.4),
                         blurRadius: 4,
                         offset: Offset(0, 2),
                       ),
@@ -568,7 +674,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   Text(
                     _userData?['email'] ?? '',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                       fontSize: 14,
                     ),
                   ),
@@ -681,7 +787,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.purple.withOpacity(0.3),
+                  color: Colors.purple.withValues(alpha: 0.3),
                   blurRadius: 10,
                   offset: const Offset(0, 5),
                 ),
@@ -703,7 +809,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   'You have ${_enrolledCourses.length} enrolled course${_enrolledCourses.length == 1 ? '' : 's'}',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                   ),
                 ),
               ],
@@ -726,7 +832,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.green.withOpacity(0.3),
+                    color: Colors.green.withValues(alpha: 0.3),
                     blurRadius: 10,
                     offset: const Offset(0, 5),
                   ),
@@ -758,7 +864,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                                 : 'Complete assignments to earn water buckets!',
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.white.withOpacity(0.9),
+                              color: Colors.white.withValues(alpha: 0.9),
                             ),
                           ),
                         ],
@@ -801,7 +907,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: Colors.grey.withValues(alpha: 0.1),
                   blurRadius: 10,
                   offset: const Offset(0, 5),
                 ),
@@ -977,7 +1083,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 5,
             offset: const Offset(0, 2),
           ),
@@ -1110,7 +1216,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
           // Already on courses page
             break;
           case 1:
-          // TODO: Navigate to community
+          // Navigate to community (FeedScreen)
+            _navigateToCommunity();
             break;
           case 2:
           // TODO: Navigate to chat

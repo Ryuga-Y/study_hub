@@ -241,7 +241,12 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
             ),
           ),
         ),
-      );
+      ).then((_) {
+        // Reset bottom navigation to Courses tab when returning from community
+        setState(() {
+          _currentIndex = 0;
+        });
+      });
     } catch (e) {
       // Close loading dialog if open
       if (Navigator.canPop(context)) {
@@ -254,6 +259,11 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           backgroundColor: Colors.red,
         ),
       );
+
+      // Reset navigation index on error as well
+      setState(() {
+        _currentIndex = 0;
+      });
     }
   }
 
@@ -340,14 +350,10 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
       elevation: 0,
       title: Row(
         children: [
-          Image.asset(
-            'assets/images/logo.png',
-            height: 32,
-            errorBuilder: (context, error, stackTrace) => Icon(
-              Icons.school,
-              color: Colors.purple[400],
-              size: 32,
-            ),
+          Icon(
+            Icons.school,
+            color: Colors.purple[400],
+            size: 32,
           ),
           SizedBox(width: 12),
           Text(
