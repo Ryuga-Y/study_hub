@@ -245,6 +245,7 @@ class Friend {
   final DateTime createdAt;
   final DateTime? acceptedAt;
   final List<String> mutualFriends;
+  final bool isReceived;
 
   Friend({
     required this.id,
@@ -256,10 +257,16 @@ class Friend {
     required this.createdAt,
     this.acceptedAt,
     this.mutualFriends = const [],
+    this.isReceived = false,
   });
 
   factory Friend.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+
+    // Add debug logging
+    print('DEBUG: Friend.fromFirestore - Doc ID: ${doc.id}');
+    print('DEBUG: Friend.fromFirestore - Data: $data');
+
     return Friend(
       id: doc.id,
       userId: data['userId'] ?? '',
@@ -273,6 +280,7 @@ class Friend {
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       acceptedAt: (data['acceptedAt'] as Timestamp?)?.toDate(),
       mutualFriends: List<String>.from(data['mutualFriends'] ?? []),
+      isReceived: data['isReceived'] ?? false,
     );
   }
 
@@ -286,9 +294,11 @@ class Friend {
       'createdAt': Timestamp.fromDate(createdAt),
       'acceptedAt': acceptedAt != null ? Timestamp.fromDate(acceptedAt!) : null,
       'mutualFriends': mutualFriends,
+      'isReceived': isReceived,
     };
   }
 }
+
 
 // Notification model
 class CommunityNotification {

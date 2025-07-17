@@ -400,7 +400,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             borderRadius: BorderRadius.circular(8),
           ),
         ),
-        child: Text('Add Friend'),
+        child: Text('Add Friend',style: TextStyle(color: Colors.white),),
       );
     }
   }

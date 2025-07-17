@@ -159,31 +159,38 @@ class CommunityService {
     }
 
     return query.snapshots().asyncMap((snapshot) async {
-      // Get user's friends
+      // Get user's friends list once
       final friendIds = await _getFriendIds(userId);
 
-      // Filter posts based on privacy and organization
-      final posts = <Post>[];
+      // Get all posts and filter based on visibility
+      final List<Post> posts = [];
+
       for (final doc in snapshot.docs) {
         final post = Post.fromFirestore(doc);
 
-        // Check if post should be visible
-        bool shouldShow = false;
-
-        // Check organization
+        // Get post creator's organization
         final userDoc = await _firestore.collection('users').doc(post.userId).get();
         final userOrgCode = userDoc.data()?['organizationCode'];
+
+        // Skip if not same organization
         if (userOrgCode != organizationCode) continue;
 
-        // Check privacy
+        // Determine if post should be visible
+        bool shouldShow = false;
+
         switch (post.privacy) {
           case PostPrivacy.public:
+          // Public posts are visible to everyone in the same organization
             shouldShow = true;
             break;
+
           case PostPrivacy.friendsOnly:
+          // Friends-only posts are visible to the poster and their friends
             shouldShow = post.userId == userId || friendIds.contains(post.userId);
             break;
+
           case PostPrivacy.private:
+          // Private posts are only visible to the poster
             shouldShow = post.userId == userId;
             break;
         }
@@ -388,6 +395,8 @@ class CommunityService {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
 
+      print('DEBUG: Sending friend request from $userId to $friendId');
+
       // Check if already friends or request exists
       final existingRequest = await _firestore
           .collection('friends')
@@ -403,42 +412,92 @@ class CommunityService {
       final userData = await _firestore.collection('users').doc(userId).get();
       final friendData = await _firestore.collection('users').doc(friendId).get();
 
-      // Create friend request
-      final requestRef = _firestore.collection('friends').doc();
-      final friend = Friend(
-        id: requestRef.id,
-        userId: userId,
-        friendId: friendId,
-        friendName: friendData.data()?['fullName'] ?? 'Unknown',
-        friendAvatar: friendData.data()?['avatarUrl'],
-        status: FriendStatus.pending,
-        createdAt: DateTime.now(),
-      );
+      if (!userData.exists || !friendData.exists) {
+        throw Exception('User data not found');
+      }
 
-      await requestRef.set(friend.toMap());
+      final userDataMap = userData.data()!;
+      final friendDataMap = friendData.data()!;
 
-      // Create reverse record for friend
-      final reverseRef = _firestore.collection('friends').doc();
-      await reverseRef.set({
+      // Create batch for atomic operation
+      final batch = _firestore.batch();
+
+      // Create request FROM user TO friend (sender's perspective)
+      final sentRequestRef = _firestore.collection('friends').doc();
+      batch.set(sentRequestRef, {
+        'userId': userId,
+        'friendId': friendId,
+        'friendName': friendDataMap['fullName'] ?? 'Unknown',
+        'friendAvatar': friendDataMap['avatarUrl'],
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+        'isReceived': false, // This is the sent request
+      });
+
+      // Create request FROM friend TO user (recipient's perspective)
+      final receivedRequestRef = _firestore.collection('friends').doc();
+      batch.set(receivedRequestRef, {
         'userId': friendId,
         'friendId': userId,
-        'friendName': userData.data()?['fullName'] ?? 'Unknown',
-        'friendAvatar': userData.data()?['avatarUrl'],
+        'friendName': userDataMap['fullName'] ?? 'Unknown',
+        'friendAvatar': userDataMap['avatarUrl'],
         'status': 'pending',
-        'createdAt': Timestamp.now(),
-        'isReceived': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isReceived': true, // This is the received request that can be accepted
       });
+
+      // Commit the batch
+      await batch.commit();
+
+      print('DEBUG: Friend request documents created successfully');
+      print('DEBUG: Sent request ID: ${sentRequestRef.id}');
+      print('DEBUG: Received request ID: ${receivedRequestRef.id}');
 
       // Send notification
       await _createNotification(
         userId: friendId,
         type: NotificationType.friendRequest,
         title: 'New Friend Request',
-        message: '${userData.data()?['fullName']} sent you a friend request',
+        message: '${userDataMap['fullName']} sent you a friend request',
         actionUserId: userId,
       );
+
     } catch (e) {
+      print('Error sending friend request: $e');
       throw Exception('Failed to send friend request: $e');
+    }
+  }
+
+  Future<void> debugFriendRequestData(String requestId) async {
+    try {
+      final userId = currentUserId;
+      print('=== FRIEND REQUEST DEBUG ===');
+      print('Current User ID: $userId');
+      print('Request ID: $requestId');
+
+      // Get the friend request document
+      final requestDoc = await _firestore.collection('friends').doc(requestId).get();
+      print('Request document exists: ${requestDoc.exists}');
+
+      if (requestDoc.exists) {
+        final data = requestDoc.data()!;
+        print('Request document data: $data');
+        print('- userId (sender): ${data['userId']}');
+        print('- friendId (recipient): ${data['friendId']}');
+        print('- isReceived: ${data['isReceived']}');
+        print('- status: ${data['status']}');
+        print('- friendName: ${data['friendName']}');
+
+        // Check validation conditions
+        print('--- VALIDATION CHECK ---');
+        print('Is current user the recipient? ${data['friendId'] == userId}');
+        print('Is marked as received? ${data['isReceived'] == true}');
+        print('Both conditions met? ${data['friendId'] == userId && data['isReceived'] == true}');
+      }
+
+      print('=== END DEBUG ===');
+    } catch (e) {
+      print('Debug error: $e');
     }
   }
 
@@ -447,51 +506,75 @@ class CommunityService {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
 
-      // Update both friend records
-      final batch = _firestore.batch();
+      await _firestore.runTransaction((transaction) async {
+        // Get the friend request document
+        final requestDoc = await transaction.get(_firestore.collection('friends').doc(requestId));
+        if (!requestDoc.exists) {
+          throw Exception('Friend request not found');
+        }
 
-      // Update received request
-      batch.update(_firestore.collection('friends').doc(requestId), {
-        'status': 'accepted',
-        'acceptedAt': Timestamp.now(),
+        final requestData = requestDoc.data()!;
+
+        // Validate request - Fixed the validation logic
+        if (requestData['friendId'] != userId || requestData['isReceived'] != true) {
+          throw Exception('You can only accept requests sent to you');
+        }
+
+        final senderId = requestData['userId']; // The actual sender
+        final recipientId = userId; // Current user accepting
+
+        // Update friend request status
+        transaction.update(requestDoc.reference, {
+          'status': 'accepted',
+          'acceptedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Find and update reverse request
+        final reverseQuery = await _firestore
+            .collection('friends')
+            .where('userId', isEqualTo: senderId)
+            .where('friendId', isEqualTo: recipientId)
+            .where('status', isEqualTo: 'pending')
+            .get();
+
+        for (final doc in reverseQuery.docs) {
+          if (doc.id != requestId) {
+            transaction.update(doc.reference, {
+              'status': 'accepted',
+              'acceptedAt': FieldValue.serverTimestamp(),
+            });
+          }
+        }
+
+        // Update friend counts
+        transaction.update(_firestore.collection('users').doc(recipientId), {
+          'friendCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        transaction.update(_firestore.collection('users').doc(senderId), {
+          'friendCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       });
 
-      // Find and update sent request
-      final requestDoc = await _firestore.collection('friends').doc(requestId).get();
-      final requestData = requestDoc.data()!;
+      // Send notification outside transaction
+      final userData = await _firestore.collection('users').doc(userId).get();
+      if (userData.exists) {
+        final requestDoc = await _firestore.collection('friends').doc(requestId).get();
+        final senderId = requestDoc.data()!['userId']; // Fixed: get the actual sender
 
-      final sentRequestQuery = await _firestore
-          .collection('friends')
-          .where('userId', isEqualTo: requestData['friendId'])
-          .where('friendId', isEqualTo: requestData['userId'])
-          .get();
-
-      if (sentRequestQuery.docs.isNotEmpty) {
-        batch.update(sentRequestQuery.docs.first.reference, {
-          'status': 'accepted',
-          'acceptedAt': Timestamp.now(),
-        });
+        await _createNotification(
+          userId: senderId,
+          type: NotificationType.friendAccepted,
+          title: 'Friend Request Accepted',
+          message: '${userData.data()?['fullName']} accepted your friend request',
+          actionUserId: userId,
+        );
       }
 
-      await batch.commit();
-
-      // Update friend counts
-      await _firestore.collection('users').doc(userId).update({
-        'friendCount': FieldValue.increment(1),
-      });
-      await _firestore.collection('users').doc(requestData['friendId']).update({
-        'friendCount': FieldValue.increment(1),
-      });
-
-      // Send notification
-      await _createNotification(
-        userId: requestData['friendId'],
-        type: NotificationType.friendAccepted,
-        title: 'Friend Request Accepted',
-        message: '${requestData['friendName']} accepted your friend request',
-        actionUserId: userId,
-      );
     } catch (e) {
+      print('Error accepting friend request: $e');
       throw Exception('Failed to accept friend request: $e');
     }
   }
@@ -596,13 +679,18 @@ class CommunityService {
 
     return _firestore
         .collection('friends')
-        .where('userId', isEqualTo: userId)
+        .where('userId', isEqualTo: userId) // Requests where current user is the recipient
         .where('status', isEqualTo: 'pending')
-        .where('isReceived', isEqualTo: true)
+        .where('isReceived', isEqualTo: true) // Only received requests
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) =>
-        snapshot.docs.map((doc) => Friend.fromFirestore(doc)).toList());
+        .map((snapshot) {
+      print('DEBUG: Found ${snapshot.docs.length} pending requests for user $userId');
+      return snapshot.docs.map((doc) {
+        print('DEBUG: Pending request: ${doc.id} - ${doc.data()}');
+        return Friend.fromFirestore(doc);
+      }).toList();
+    });
   }
 
   // User Operations
@@ -739,14 +827,25 @@ class CommunityService {
   }
 
   Future<bool> _areFriends(String userId1, String userId2) async {
-    final query = await _firestore
+    // Check both directions of the friendship
+    final query1 = await _firestore
         .collection('friends')
         .where('userId', isEqualTo: userId1)
         .where('friendId', isEqualTo: userId2)
         .where('status', isEqualTo: 'accepted')
         .get();
 
-    return query.docs.isNotEmpty;
+    if (query1.docs.isNotEmpty) return true;
+
+    // Also check the reverse direction
+    final query2 = await _firestore
+        .collection('friends')
+        .where('userId', isEqualTo: userId2)
+        .where('friendId', isEqualTo: userId1)
+        .where('status', isEqualTo: 'accepted')
+        .get();
+
+    return query2.docs.isNotEmpty;
   }
 
   Future<void> _createNotification({
