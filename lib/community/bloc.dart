@@ -590,6 +590,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
 
   Future<void> _onAcceptFriendRequest(AcceptFriendRequest event, Emitter<CommunityState> emit) async {
     try {
+      print('DEBUG: BLoC - Accepting friend request: ${event.requestId}');
+
       await _service.acceptFriendRequest(event.requestId);
 
       emit(state.copyWith(successMessage: 'Friend request accepted!'));
@@ -598,9 +600,11 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       add(LoadFriends());
       add(LoadPendingRequests());
     } catch (e) {
+      print('DEBUG: BLoC - Error accepting friend request: $e');
       emit(state.copyWith(error: e.toString()));
     }
   }
+
 
   Future<void> _onDeclineFriendRequest(DeclineFriendRequest event, Emitter<CommunityState> emit) async {
     try {

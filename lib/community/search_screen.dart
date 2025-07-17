@@ -462,29 +462,11 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.person_add_disabled,
-              size: 64,
-              color: Colors.grey[300],
-            ),
+            Icon(Icons.person_add_disabled, size: 64, color: Colors.grey[300]),
             SizedBox(height: 16),
-            Text(
-              'No friend requests',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[600],
-              ),
-            ),
+            Text('No friend requests', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.grey[600])),
             SizedBox(height: 8),
-            Text(
-              'When someone sends you a friend request,\nit will appear here',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[500],
-              ),
-              textAlign: TextAlign.center,
-            ),
+            Text('When someone sends you a friend request,\nit will appear here', style: TextStyle(fontSize: 14, color: Colors.grey[500]), textAlign: TextAlign.center),
           ],
         ),
       );
@@ -495,11 +477,14 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
       itemCount: state.pendingRequests.length,
       itemBuilder: (context, index) {
         final request = state.pendingRequests[index];
+
+        // Add debug logging
+        print('DEBUG: UI - Rendering request: ${request.id}');
+        print('DEBUG: UI - Request data: userId=${request.userId}, friendId=${request.friendId}, isReceived=${request.isReceived}');
+
         return Card(
           margin: EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: Padding(
             padding: EdgeInsets.all(12),
             child: Column(
@@ -512,88 +497,55 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                       backgroundImage: request.friendAvatar != null
                           ? CachedNetworkImageProvider(request.friendAvatar!)
                           : null,
-                      child: request.friendAvatar == null
-                          ? Icon(Icons.person, size: 32)
-                          : null,
+                      child: request.friendAvatar == null ? Icon(Icons.person, size: 32) : null,
                     ),
-
                     SizedBox(width: 12),
-
                     // Request info
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            request.friendName,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          Text(request.friendName, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                           SizedBox(height: 4),
-                          Text(
-                            'Sent ${timeago.format(request.createdAt)}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[600],
-                            ),
-                          ),
+                          Text('Sent ${timeago.format(request.createdAt)}', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
                           if (request.mutualFriends.isNotEmpty) ...[
                             SizedBox(height: 4),
-                            Text(
-                              '${request.mutualFriends.length} mutual friends',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[500],
-                              ),
-                            ),
+                            Text('${request.mutualFriends.length} mutual friends', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
                           ],
                         ],
                       ),
                     ),
                   ],
                 ),
-
                 SizedBox(height: 12),
-
                 // Action buttons
                 Row(
                   children: [
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () {
-                          context.read<CommunityBloc>().add(
-                            AcceptFriendRequest(request.id),
-                          );
+                          print('DEBUG: UI - Accept button pressed for request: ${request.id}');
+                          context.read<CommunityBloc>().add(AcceptFriendRequest(request.id));
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.purple[600],
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
-                        child: Text('Accept',style: TextStyle(color: Colors.white ),),
+                        child: Text('Accept', style: TextStyle(color: Colors.white)),
                       ),
                     ),
                     SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () {
-                          context.read<CommunityBloc>().add(
-                            DeclineFriendRequest(request.id),
-                          );
+                          print('DEBUG: UI - Decline button pressed for request: ${request.id}');
+                          context.read<CommunityBloc>().add(DeclineFriendRequest(request.id));
                         },
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(color: Colors.grey[300]!),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
-                        child: Text(
-                          'Decline',
-                          style: TextStyle(color: Colors.black87),
-                        ),
+                        child: Text('Decline', style: TextStyle(color: Colors.black87)),
                       ),
                     ),
                   ],
