@@ -28,6 +28,7 @@ class BronzeTreePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // IMPORTANT: Always use consistent center point
     final double centerX = size.width / 2;
     final double groundY = size.height * 0.9;
 
@@ -85,21 +86,24 @@ class BronzeTreePainter extends CustomPainter {
       groundPaint,
     );
 
-    // Add simple grass
+    // Add simple grass at fixed positions
     final Paint grassPaint = Paint()
       ..color = Colors.green[700]!
       ..strokeWidth = 2;
 
-    for (int i = 0; i < size.width.toInt(); i += 15) {
-      double grassHeight = 5 + math.Random(i).nextDouble() * 10;
+    // Draw grass at deterministic positions
+    for (int i = 0; i < 20; i++) {
+      double x = (i / 20) * size.width;
+      double grassHeight = 5 + (i % 3) * 5; // Fixed pattern: 5, 10, 15, 5, 10, 15...
+
       canvas.drawLine(
-        Offset(i.toDouble(), groundY),
-        Offset(i.toDouble() + 2, groundY - grassHeight),
+        Offset(x, groundY),
+        Offset(x + 2, groundY - grassHeight),
         grassPaint,
       );
       canvas.drawLine(
-        Offset(i.toDouble() + 3, groundY),
-        Offset(i.toDouble() + 5, groundY - grassHeight * 0.8),
+        Offset(x + 3, groundY),
+        Offset(x + 5, groundY - grassHeight * 0.8),
         grassPaint,
       );
     }
@@ -153,12 +157,7 @@ class BronzeTreePainter extends CustomPainter {
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
-    final Paint lightBarkPaint = Paint()
-      ..color = Color(0xFFA0522D)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-
-    // Vertical bark lines
+    // Vertical bark lines at fixed positions
     int numLines = math.min(8, growthLevel ~/ 3);
     for (int i = 0; i < numLines; i++) {
       double x = centerX - baseWidth/2 + 3 + (i * (baseWidth - 6) / 8);
@@ -168,6 +167,7 @@ class BronzeTreePainter extends CustomPainter {
       Path barkLine = Path();
       barkLine.moveTo(x, bottomY);
 
+      // Use deterministic wave pattern
       int segments = 8;
       for (int j = 1; j <= segments; j++) {
         double segmentY = bottomY - (bottomY - topY) * (j / segments);
@@ -199,12 +199,15 @@ class BronzeTreePainter extends CustomPainter {
   void _drawMainBranches(Canvas canvas, double centerX, double trunkTop, Paint paint, int growth) {
     paint.strokeWidth = 8;
 
-    // Draw main branches progressively
-    List<List<Offset>> mainBranches = [
-      // First main branches (appear at growth 5-10)
-      [Offset(centerX - 3, trunkTop + 15), Offset(centerX - 15, trunkTop + 5), Offset(centerX - 30, trunkTop - 10)],
-      [Offset(centerX + 3, trunkTop + 15), Offset(centerX + 15, trunkTop + 5), Offset(centerX + 30, trunkTop - 10)],
-    ];
+    // Fixed branch positions
+    List<List<Offset>> mainBranches = [];
+
+    if (growth >= 5) {
+      mainBranches.addAll([
+        [Offset(centerX - 3, trunkTop + 15), Offset(centerX - 15, trunkTop + 5), Offset(centerX - 30, trunkTop - 10)],
+        [Offset(centerX + 3, trunkTop + 15), Offset(centerX + 15, trunkTop + 5), Offset(centerX + 30, trunkTop - 10)],
+      ]);
+    }
 
     if (growth >= 8) {
       mainBranches.addAll([
@@ -230,7 +233,6 @@ class BronzeTreePainter extends CustomPainter {
 
     List<List<Offset>> secondaryBranches = [];
 
-    // Add secondary branches progressively
     if (growth >= 15) {
       secondaryBranches.addAll([
         [Offset(centerX - 45, trunkTop - 20), Offset(centerX - 55, trunkTop - 30), Offset(centerX - 65, trunkTop - 35)],
@@ -262,7 +264,6 @@ class BronzeTreePainter extends CustomPainter {
 
     List<List<Offset>> detailBranches = [];
 
-    // Add detail branches progressively
     if (growth >= 25) {
       detailBranches.addAll([
         [Offset(centerX - 65, trunkTop - 35), Offset(centerX - 70, trunkTop - 40), Offset(centerX - 75, trunkTop - 45)],
@@ -287,7 +288,7 @@ class BronzeTreePainter extends CustomPainter {
   void _drawFineBranches(Canvas canvas, double centerX, double trunkTop, Paint paint, int growth) {
     paint.strokeWidth = 2;
 
-    // Generate fine branches at endpoints based on growth
+    // Fixed endpoints
     List<Offset> endpoints = [
       Offset(centerX - 90, trunkTop - 8),
       Offset(centerX - 75, trunkTop - 45),
@@ -302,7 +303,7 @@ class BronzeTreePainter extends CustomPainter {
     for (int i = 0; i < numTwigs && i < endpoints.length; i++) {
       Offset endpoint = endpoints[i];
 
-      // Draw small twigs
+      // Draw small twigs at fixed angles
       for (int j = 0; j < 3; j++) {
         double angle = (j - 1) * 0.5;
         double length = 8 + j * 2;
@@ -343,7 +344,7 @@ class BronzeTreePainter extends CustomPainter {
   List<BranchPoint> _getBranchEndpoints(double centerX, double trunkTop) {
     List<BranchPoint> endpoints = [];
 
-    // Define leaf positions that will be filled progressively
+    // Define fixed leaf positions
     List<Offset> leafPositions = [
       // Early leaves (growth 1-15)
       Offset(centerX - 30, trunkTop - 10),
@@ -413,16 +414,18 @@ class BronzeTreePainter extends CustomPainter {
     // Animate newest leaf
     double scale = leafScale;
     if (index == growthLevel - 1) {
-      scale = leafScale * 0.8 + 0.2; // Smooth scale-in animation
+      scale = leafScale * 0.8 + 0.2;
     }
     canvas.scale(scale);
 
-    // Varied leaf colors
-    Color leafColor = index % 5 == 0 ? Color(0xFF228B22) :
-    index % 5 == 1 ? Color(0xFF32CD32) :
-    index % 5 == 2 ? Color(0xFF90EE90) :
-    index % 5 == 3 ? Color(0xFF006400) :
-    Color(0xFF9ACD32);
+    // Fixed leaf colors based on index
+    Color leafColor = [
+      Color(0xFF228B22),
+      Color(0xFF32CD32),
+      Color(0xFF90EE90),
+      Color(0xFF006400),
+      Color(0xFF9ACD32),
+    ][index % 5];
 
     Paint leafPaint = Paint()
       ..color = leafColor
@@ -462,13 +465,13 @@ class BronzeTreePainter extends CustomPainter {
     // Get branch endpoints for flower positions
     List<BranchPoint> branchEndpoints = _getBranchEndpoints(centerX, trunkTop);
 
-    // Select 5 branch endpoints for flowers (increased from 3)
+    // Fixed flower indices
     List<int> flowerIndices = [
-      branchEndpoints.length - 1,  // Top branch
-      branchEndpoints.length - 3,  // Upper left
-      branchEndpoints.length - 5,  // Upper right
-      branchEndpoints.length - 7,  // Mid left
-      branchEndpoints.length - 9,  // Mid right
+      branchEndpoints.length - 1,
+      branchEndpoints.length - 3,
+      branchEndpoints.length - 5,
+      branchEndpoints.length - 7,
+      branchEndpoints.length - 9,
     ];
 
     // Draw each flower at branch endpoints
@@ -485,10 +488,12 @@ class BronzeTreePainter extends CustomPainter {
     double flowerCenterX = position.dx;
     double flowerCenterY = position.dy;
 
-    // Bronze flower colors
-    Color petalColor = flowerIndex % 3 == 0 ? Color(0xFFDAA520) :
-    flowerIndex % 3 == 1 ? Color(0xFFFFD700) :
-    Color(0xFFDEB887);
+    // Fixed bronze flower colors
+    Color petalColor = [
+      Color(0xFFDAA520),
+      Color(0xFFFFD700),
+      Color(0xFFDEB887),
+    ][flowerIndex % 3];
 
     final Paint petalPaint = Paint()
       ..color = petalColor
@@ -499,7 +504,7 @@ class BronzeTreePainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
 
-    // Draw petals
+    // Draw 8 petals
     for (int i = 0; i < 8; i++) {
       double angle = (i * 2 * math.pi / 8) + rotation * 0.1;
       double petalLength = 16 * flowerBloom;

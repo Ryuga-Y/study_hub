@@ -28,13 +28,13 @@ class StuGoal extends StatefulWidget {
   _StuGoalState createState() => _StuGoalState();
 }
 
-class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
+class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin, WidgetsBindingObserver {
   // Firebase service
   final GoalProgressService _goalService = GoalProgressService();
 
   // Local state (synced with Firebase)
   int wateringCount = 0;
-  // 🔧 ADD: New field to track actual water consumption count
+  // 🔧 FIX: New field to track actual water consumption count
   int actualWaterConsumptionCount = 0;
   double treeGrowth = 0.0;
   String goal = "No goal selected - Press 'Set Goal' to choose one";
@@ -71,16 +71,79 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _initializeAnimations();
-    _loadGoalProgress();
-    _startListeningForSubmissions(); // Add automatic submission detection
-    _startRealtimeGoalProgressListener(); // Add real-time Firebase listener
-    _startAutoSyncTimer(); // 🔄 NEW: Start auto-sync timer
+    // Add this line to observe app lifecycle
+    WidgetsBinding.instance.addObserver(this);
 
-    // Check for missed rewards on startup
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkForMissedRewards();
+    _initializeAnimations();
+
+    // Load goal progress first, then start listeners
+    _loadGoalProgress().then((_) {
+      if (mounted) {
+        _startListeningForSubmissions();
+        _startRealtimeGoalProgressListener();
+        _startAutoSyncTimer();
+
+        // Check for missed rewards after initial load
+        _checkForMissedRewards();
+      }
     });
+  }
+
+  @override
+  void dispose() {
+    // Remove observer
+    WidgetsBinding.instance.removeObserver(this);
+
+    // Save state before disposing
+    _saveCurrentState();
+
+    _growthController.dispose();
+    _flowerController.dispose();
+    _leafController.dispose();
+    _levelUpController.dispose();
+    _waterAnimationController.dispose();
+    _bucketPulseController.dispose();
+    super.dispose();
+  }
+
+  // Add this new method to handle app lifecycle changes
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    // Save state when app goes to background or is paused
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.inactive) {
+      _saveCurrentState();
+    }
+
+    // Reload state when app resumes
+    if (state == AppLifecycleState.resumed) {
+      _loadGoalProgress();
+    }
+  }
+
+  // Add this method to save current state
+  Future<void> _saveCurrentState() async {
+    try {
+      if (!mounted) return;
+
+      // Force a sync to ensure latest state is saved
+      await _goalService.updateGoalProgress({
+        'wateringCount': wateringCount,
+        'treeGrowth': treeGrowth,
+        'waterBuckets': waterBuckets,
+        'currentTreeLevel': currentTreeLevel.toString().split('.').last,
+        'completedTrees': completedTrees,
+        'totalProgress': totalProgress,
+        'lastSaved': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      print('✅ Goal progress state saved');
+    } catch (e) {
+      print('❌ Error saving goal progress state: $e');
+    }
   }
 
   // Add this new method:
@@ -253,7 +316,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     }
   }
 
-  // Start real-time listener for goal progress changes
+  // 🔧 MERGED: Start real-time listener for goal progress changes with fixes applied
   void _startRealtimeGoalProgressListener() {
     _goalService.getGoalProgressStream().listen((snapshot) async {
       if (snapshot.exists && mounted) {
@@ -524,15 +587,17 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     }
   }
 
-  // 🔧 UPDATE: Load goal progress method
+  // 🔧 MERGED: Load goal progress method with fixes applied
   Future<void> _loadGoalProgress() async {
     try {
       final progress = await _goalService.getGoalProgress();
       if (progress != null && mounted) {
+        // First, get the actual water consumption count BEFORE setting state
+        final actualCount = await _goalService.getActualWaterConsumptionCount();
+
         setState(() {
           wateringCount = progress['wateringCount'] ?? 0;
-          // 🔧 FIX: Load actual water consumption count
-          actualWaterConsumptionCount = progress['actualWaterConsumptionCount'] ?? 0;
+          actualWaterConsumptionCount = actualCount; // Use the calculated count
 
           treeGrowth = (progress['treeGrowth'] ?? 0.0).toDouble();
           goal = progress['currentGoal'] ?? "No goal selected - Press 'Set Goal' to choose one";
@@ -563,6 +628,14 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
         // Trigger bucket pulse animation if there are water buckets
         if (waterBuckets > 0) {
           _triggerBucketPulse();
+        }
+
+        // Force a rebuild of the tree UI after state is set
+        if (mounted) {
+          // Small delay to ensure the tree painter gets the correct values
+          Future.delayed(Duration(milliseconds: 100), () {
+            if (mounted) setState(() {});
+          });
         }
       } else {
         setState(() {
@@ -1033,42 +1106,69 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
     }
   }
 
+  // 🔧 MERGED: Fixed tree painter method using actual water consumption count
   Widget _getCurrentTreePainter() {
-    // 🔧 FIX: Use actual water consumption count instead of wateringCount
-    final int leafCount = actualWaterConsumptionCount;
+    // Use wateringCount for current tree only (not total consumption)
+    // This ensures consistent appearance for the same progress
+    final int leafCount = wateringCount;
+
+    // For initial display, use static values (no animations) if animations haven't started
+    final double flowerBloomValue = treeGrowth >= 1.0 ? 1.0 : _flowerBloomAnimation.value;
+    final double leafScaleValue = wateringCount > 0 ? 1.0 : _leafScaleAnimation.value;
 
     switch (currentTreeLevel) {
       case TreeLevel.bronze:
-        return CustomPaint(
-          painter: BronzeTreePainter(
-            growthLevel: leafCount, // 🔧 Use actual consumption count
-            totalGrowth: treeGrowth,
-            flowerBloom: _flowerBloomAnimation.value,
-            flowerRotation: _flowerRotationAnimation.value,
-            leafScale: _leafScaleAnimation.value,
-            waterDropAnimation: _waterDropAnimation.value,
+        return Center(
+          child: Container(
+            width: 300,
+            height: 320,
+            child: CustomPaint(
+              size: Size(300, 320),
+              painter: BronzeTreePainter(
+                growthLevel: leafCount,
+                totalGrowth: treeGrowth,
+                flowerBloom: flowerBloomValue,
+                flowerRotation: _flowerRotationAnimation.value,
+                leafScale: leafScaleValue,
+                waterDropAnimation: _waterDropAnimation.value,
+              ),
+            ),
           ),
         );
       case TreeLevel.silver:
-        return CustomPaint(
-          painter: SilverTreePainter(
-            growthLevel: leafCount, // 🔧 Use actual consumption count
-            totalGrowth: treeGrowth,
-            flowerBloom: _flowerBloomAnimation.value,
-            flowerRotation: _flowerRotationAnimation.value,
-            leafScale: _leafScaleAnimation.value,
-            waterDropAnimation: _waterDropAnimation.value,
+        return Center(
+          child: Container(
+            width: 300,
+            height: 320,
+            child: CustomPaint(
+              size: Size(300, 320),
+              painter: SilverTreePainter(
+                growthLevel: leafCount,
+                totalGrowth: treeGrowth,
+                flowerBloom: flowerBloomValue,
+                flowerRotation: _flowerRotationAnimation.value,
+                leafScale: leafScaleValue,
+                waterDropAnimation: _waterDropAnimation.value,
+              ),
+            ),
           ),
         );
       case TreeLevel.gold:
-        return CustomPaint(
-          painter: GoldTreePainter(
-            growthLevel: leafCount, // 🔧 Use actual consumption count
-            totalGrowth: treeGrowth,
-            flowerBloom: _flowerBloomAnimation.value,
-            flowerRotation: _flowerRotationAnimation.value,
-            leafScale: _leafScaleAnimation.value,
-            waterDropAnimation: _waterDropAnimation.value,
+        return Center(
+          child: Container(
+            width: 300,
+            height: 320,
+            child: CustomPaint(
+              size: Size(300, 320),
+              painter: GoldTreePainter(
+                growthLevel: leafCount,
+                totalGrowth: treeGrowth,
+                flowerBloom: flowerBloomValue,
+                flowerRotation: _flowerRotationAnimation.value,
+                leafScale: leafScaleValue,
+                waterDropAnimation: _waterDropAnimation.value,
+              ),
+            ),
           ),
         );
     }
@@ -1155,17 +1255,6 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
       case TreeLevel.gold:
         return "🥇 Gold Tree";
     }
-  }
-
-  @override
-  void dispose() {
-    _growthController.dispose();
-    _flowerController.dispose();
-    _leafController.dispose();
-    _levelUpController.dispose();
-    _waterAnimationController.dispose();
-    _bucketPulseController.dispose();
-    super.dispose();
   }
 
   @override
@@ -1305,11 +1394,7 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin {
                 builder: (context, child) {
                   return Transform.scale(
                     scale: _scaleAnimation.value,
-                    child: Container(
-                      width: 300,
-                      height: 320,
-                      child: _getCurrentTreePainter(),
-                    ),
+                    child: _getCurrentTreePainter(),
                   );
                 },
               ),

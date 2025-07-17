@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:math' as math; // 🔧 FIX: Add missing math import
 
 enum TreeLevel { bronze, silver, gold }
 
@@ -738,8 +739,64 @@ class GoalProgressService {
     }
   }
 
-  // Get actual water consumption count from records
+  // 🔀 MERGED: Get actual water consumption count from records (with enhanced calculation)
   Future<int> getActualWaterConsumptionCount() async {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null || !await _verifyStudentAccess()) return 0;
+
+    try {
+      // Get current progress to know which tree we're on
+      final progressDoc = await _firestore.collection('goalProgress').doc(userId).get();
+      if (!progressDoc.exists) return 0;
+
+      final currentData = progressDoc.data()!;
+      final currentTreeLevel = currentData['currentTreeLevel'] ?? 'bronze';
+      final completedTrees = currentData['completedTrees'] ?? 0;
+      final currentWateringCount = currentData['wateringCount'] ?? 0;
+
+      // Method 1: Calculate based on tree progress (more accurate for UI display)
+      int baseConsumption = 0;
+      if (completedTrees > 0) {
+        baseConsumption = completedTrees * 20; // Each completed tree = 20 waterings
+      }
+
+      // 🔧 FIX: Ensure currentWateringCount is treated as int
+      final int wateringCountInt = (currentWateringCount is int) ? currentWateringCount : (currentWateringCount as num).toInt();
+
+      // Add current tree's watering count
+      int progressBasedConsumption = baseConsumption + wateringCountInt;
+
+      // Method 2: Get actual consumption from detailed records (for verification)
+      final consumptionSnapshot = await _firestore
+          .collection('goalProgress')
+          .doc(userId)
+          .collection('waterConsumption')
+          .get();
+
+      int recordBasedConsumption = 0;
+      for (var doc in consumptionSnapshot.docs) {
+        final data = doc.data();
+        recordBasedConsumption += (data['bucketsUsed'] as int? ?? 0);
+      }
+
+      // 🔧 FIX: Use math.max from imported math library
+      int actualConsumption = math.max(progressBasedConsumption, recordBasedConsumption);
+
+      print('🔍 Water consumption calculation:');
+      print('   Progress-based: $progressBasedConsumption (completed: $completedTrees × 20 + current: $wateringCountInt)');
+      print('   Record-based: $recordBasedConsumption');
+      print('   Using: $actualConsumption');
+
+      return actualConsumption;
+
+    } catch (e) {
+      print('❌ Error getting water consumption count: $e');
+      return 0;
+    }
+  }
+
+  // Helper method to get simple consumption count from records only
+  Future<int> getSimpleWaterConsumptionCount() async {
     final userId = _auth.currentUser?.uid;
     if (userId == null || !await _verifyStudentAccess()) return 0;
 
@@ -758,7 +815,7 @@ class GoalProgressService {
 
       return totalConsumptions;
     } catch (e) {
-      print('❌ Error getting water consumption count: $e');
+      print('❌ Error getting simple water consumption count: $e');
       return 0;
     }
   }
@@ -1159,7 +1216,7 @@ class GoalProgressService {
     return newRewards;
   }
 
-  // Get current goal progress as a future
+  // In the getGoalProgress() method, make sure wateringCount is included:
   Future<Map<String, dynamic>?> getGoalProgress() async {
     final userId = _auth.currentUser?.uid;
     if (userId == null) throw Exception('User not authenticated');
@@ -1171,18 +1228,13 @@ class GoalProgressService {
     final doc = await _firestore.collection('goalProgress').doc(userId).get();
 
     if (doc.exists) {
-      // Auto-sync before returning data
       await autoSyncWaterBuckets();
-
-      // Get fresh data after sync
       final freshDoc = await _firestore.collection('goalProgress').doc(userId).get();
       final data = freshDoc.data()!;
 
-      // 🔧 FIX: Calculate actual water consumption count for tree painter
-      final actualWaterConsumptionCount = await getActualWaterConsumptionCount();
-
-      // Add the actual consumption count to the data
-      data['actualWaterConsumptionCount'] = actualWaterConsumptionCount;
+      // Ensure wateringCount is properly included
+      data['wateringCount'] = data['wateringCount'] ?? 0;
+      data['treeGrowth'] = data['treeGrowth'] ?? 0.0;
 
       return data;
     } else {

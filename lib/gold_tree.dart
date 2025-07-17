@@ -28,31 +28,232 @@ class GoldTreePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double centerX = size.width / 2;
-    final double groundY = size.height * 0.9;
+    // IMPORTANT: Always use consistent center point
+    final centerX = size.width / 2;
+    final centerY = size.height;
 
     // Draw water drop animation
     if (waterDropAnimation > 0) {
-      _drawWaterDropAnimation(canvas, size, centerX, groundY);
+      _drawWaterDropAnimation(canvas, size, centerX, centerY);
     }
 
-    // Draw ground line only
-    _drawGroundLine(canvas, size, groundY);
+    // Draw grass (consistent positioning)
+    final grassPaint = Paint()
+      ..color = Colors.green
+      ..style = PaintingStyle.fill;
 
-    // Draw the gold tree
-    _drawGoldTree(canvas, size, centerX, groundY);
+    for (int i = 0; i < 20; i++) {
+      double x = (i / 20) * size.width;
+      canvas.drawRect(
+        Rect.fromLTWH(x, size.height - 10, 5, 10),
+        grassPaint,
+      );
+    }
 
-    // Draw golden leaves based on growth
-    _drawGoldLeavesOnBranches(canvas, size, centerX, groundY);
+    // Draw trunk (always centered) - Gold tree has wider trunk
+    final trunkPaint = Paint()
+      ..color = Color(0xFFDAA520) // Golden rod
+      ..style = PaintingStyle.fill;
 
-    // Draw luxury gold flowers if 100% complete
-    if (totalGrowth >= 1.0) {
-      _drawMultipleGoldFlowers(canvas, size, centerX, groundY);
+    final trunkWidth = 35.0; // Wider than bronze/silver
+    final trunkHeight = 140.0; // Taller than bronze/silver
+
+    canvas.drawRect(
+      Rect.fromLTWH(
+        centerX - trunkWidth / 2, // Center the trunk
+        centerY - trunkHeight,
+        trunkWidth,
+        trunkHeight,
+      ),
+      trunkPaint,
+    );
+
+    // Add golden highlights to trunk
+    if (growthLevel > 2) {
+      final goldHighlight = Paint()
+        ..color = Color(0xFFFFD700)
+        ..style = PaintingStyle.fill;
+
+      canvas.drawRect(
+        Rect.fromLTWH(
+          centerX - trunkWidth / 2 + 4,
+          centerY - trunkHeight,
+          8,
+          trunkHeight,
+        ),
+        goldHighlight,
+      );
+    }
+
+    // Draw branches and leaves based on growth level
+    // Use deterministic positions based on growthLevel
+    final branchPaint = Paint()
+      ..color = Color(0xFFDAA520)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10; // Thicker branches for gold
+
+    // Calculate consistent branch positions
+    if (growthLevel > 0) {
+      // Left branch (always same position for same growth level)
+      final leftBranchPath = Path()
+        ..moveTo(centerX, centerY - trunkHeight + 25)
+        ..quadraticBezierTo(
+          centerX - 35,
+          centerY - trunkHeight - 15,
+          centerX - 70,
+          centerY - trunkHeight - 35,
+        );
+      canvas.drawPath(leftBranchPath, branchPaint);
+    }
+
+    if (growthLevel > 3) {
+      // Right branch (always same position)
+      final rightBranchPath = Path()
+        ..moveTo(centerX, centerY - trunkHeight + 45)
+        ..quadraticBezierTo(
+          centerX + 35,
+          centerY - trunkHeight - 15,
+          centerX + 70,
+          centerY - trunkHeight - 35,
+        );
+      canvas.drawPath(rightBranchPath, branchPaint);
+    }
+
+    if (growthLevel > 6) {
+      // Upper left branch
+      branchPaint.strokeWidth = 8;
+      final upperLeftBranchPath = Path()
+        ..moveTo(centerX, centerY - trunkHeight + 15)
+        ..quadraticBezierTo(
+          centerX - 25,
+          centerY - trunkHeight - 25,
+          centerX - 50,
+          centerY - trunkHeight - 55,
+        );
+      canvas.drawPath(upperLeftBranchPath, branchPaint);
+    }
+
+    if (growthLevel > 9) {
+      // Upper right branch
+      final upperRightBranchPath = Path()
+        ..moveTo(centerX, centerY - trunkHeight + 15)
+        ..quadraticBezierTo(
+          centerX + 25,
+          centerY - trunkHeight - 25,
+          centerX + 50,
+          centerY - trunkHeight - 55,
+        );
+      canvas.drawPath(upperRightBranchPath, branchPaint);
+    }
+
+    if (growthLevel > 12) {
+      // Secondary branches
+      branchPaint.strokeWidth = 6;
+
+      // Left secondary
+      final leftSecondaryPath = Path()
+        ..moveTo(centerX - 70, centerY - trunkHeight - 35)
+        ..quadraticBezierTo(
+          centerX - 85,
+          centerY - trunkHeight - 45,
+          centerX - 100,
+          centerY - trunkHeight - 50,
+        );
+      canvas.drawPath(leftSecondaryPath, branchPaint);
+
+      // Right secondary
+      final rightSecondaryPath = Path()
+        ..moveTo(centerX + 70, centerY - trunkHeight - 35)
+        ..quadraticBezierTo(
+          centerX + 85,
+          centerY - trunkHeight - 45,
+          centerX + 100,
+          centerY - trunkHeight - 50,
+        );
+      canvas.drawPath(rightSecondaryPath, branchPaint);
+    }
+
+    if (growthLevel > 15) {
+      // Top center branch
+      branchPaint.strokeWidth = 5;
+      final topBranchPath = Path()
+        ..moveTo(centerX, centerY - trunkHeight + 5)
+        ..quadraticBezierTo(
+          centerX,
+          centerY - trunkHeight - 30,
+          centerX,
+          centerY - trunkHeight - 65,
+        );
+      canvas.drawPath(topBranchPath, branchPaint);
+    }
+
+    // Draw leaves at fixed positions based on growth level
+    final leafPaint = Paint()
+      ..color = Colors.green
+      ..style = PaintingStyle.fill;
+
+    // Define fixed leaf positions for gold tree
+    final leafPositions = [
+      Offset(centerX - 70, centerY - trunkHeight - 35), // Left branch end
+      Offset(centerX - 55, centerY - trunkHeight - 30), // Left branch middle
+      Offset(centerX + 70, centerY - trunkHeight - 35), // Right branch end
+      Offset(centerX + 55, centerY - trunkHeight - 30), // Right branch middle
+      Offset(centerX - 50, centerY - trunkHeight - 55), // Upper left
+      Offset(centerX + 50, centerY - trunkHeight - 55), // Upper right
+      Offset(centerX, centerY - trunkHeight - 65), // Top center
+      Offset(centerX - 100, centerY - trunkHeight - 50), // Left secondary
+      Offset(centerX + 100, centerY - trunkHeight - 50), // Right secondary
+      Offset(centerX - 85, centerY - trunkHeight - 45), // Left secondary mid
+      Offset(centerX + 85, centerY - trunkHeight - 45), // Right secondary mid
+      Offset(centerX - 35, centerY - trunkHeight - 20), // Left mid
+      Offset(centerX + 35, centerY - trunkHeight - 20), // Right mid
+      Offset(centerX, centerY - trunkHeight - 15), // Top center lower
+      Offset(centerX - 25, centerY - trunkHeight - 40), // Left upper mid
+      Offset(centerX + 25, centerY - trunkHeight - 40), // Right upper mid
+    ];
+
+    // Draw leaves up to growth level (gold tree gets more leaves)
+    int leavesToDraw = (growthLevel * 0.8).floor().clamp(0, leafPositions.length);
+    for (int i = 0; i < leavesToDraw; i++) {
+      if (i < leafPositions.length) {
+        // Use golden leaf colors
+        Color leafColor = i % 3 == 0 ? Color(0xFFFFD700) : // Gold
+        i % 3 == 1 ? Color(0xFF32CD32) : // Lime green
+        Color(0xFFFFF8DC); // Cornsilk
+
+        Paint currentLeafPaint = Paint()
+          ..color = leafColor
+          ..style = PaintingStyle.fill;
+
+        _drawLeaf(canvas, leafPositions[i], 18 * leafScale, currentLeafPaint);
+      }
+    }
+
+    // Draw multiple flowers at 100% growth (fixed positions)
+    if (totalGrowth >= 1.0 && flowerBloom > 0) {
+      final flowerPositions = [
+        Offset(centerX, centerY - trunkHeight - 65), // Top center
+        Offset(centerX - 50, centerY - trunkHeight - 55), // Upper left
+        Offset(centerX + 50, centerY - trunkHeight - 55), // Upper right
+        Offset(centerX - 70, centerY - trunkHeight - 35), // Left branch
+        Offset(centerX + 70, centerY - trunkHeight - 35), // Right branch
+        Offset(centerX - 100, centerY - trunkHeight - 50), // Left secondary
+        Offset(centerX + 100, centerY - trunkHeight - 50), // Right secondary
+      ];
+
+      for (int i = 0; i < flowerPositions.length; i++) {
+        _drawFlower(
+            canvas,
+            flowerPositions[i],
+            25 * flowerBloom,
+            i
+        );
+      }
     }
   }
 
-  void _drawWaterDropAnimation(Canvas canvas, Size size, double centerX, double groundY) {
-    double dropY = 30 + (waterDropAnimation * (groundY - 80));
+  void _drawWaterDropAnimation(Canvas canvas, Size size, double centerX, double centerY) {
+    double dropY = 30 + (waterDropAnimation * (centerY - 80));
     double opacity = 1.0 - (waterDropAnimation * 0.7);
 
     // Golden water drop
@@ -79,7 +280,7 @@ class GoldTreePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3;
 
-      canvas.drawCircle(Offset(centerX, groundY), splashRadius, splashPaint);
+      canvas.drawCircle(Offset(centerX, centerY - 10), splashRadius, splashPaint);
 
       // Add golden sparkles
       Paint goldSparklePaint = Paint()
@@ -90,7 +291,7 @@ class GoldTreePainter extends CustomPainter {
         double angle = i * math.pi / 4;
         double sparkleDistance = splashRadius * 0.9;
         double x = centerX + sparkleDistance * math.cos(angle);
-        double y = groundY + sparkleDistance * math.sin(angle);
+        double y = centerY - 10 + sparkleDistance * math.sin(angle);
         canvas.drawCircle(Offset(x, y), 3, goldSparklePaint);
 
         // Add star effect
@@ -147,7 +348,7 @@ class GoldTreePainter extends CustomPainter {
       ..strokeWidth = 2;
 
     for (int i = 0; i < size.width.toInt(); i += 10) {
-      double grassHeight = 10 + math.Random(i).nextDouble() * 15;
+      double grassHeight = 10 + (i % 5) * 3; // Fixed pattern
 
       // Main grass blade
       canvas.drawLine(
@@ -960,14 +1161,107 @@ class GoldTreePainter extends CustomPainter {
     }
   }
 
+  void _drawLeaf(Canvas canvas, Offset position, double size, Paint paint) {
+    final leafPath = Path()
+      ..moveTo(position.dx, position.dy - size)
+      ..quadraticBezierTo(
+        position.dx - size * 0.7, position.dy - size * 0.4,
+        position.dx, position.dy,
+      )
+      ..quadraticBezierTo(
+        position.dx + size * 0.7, position.dy - size * 0.4,
+        position.dx, position.dy - size,
+      );
+    canvas.drawPath(leafPath, paint);
+
+    // Add gold shimmer to golden leaves
+    if (paint.color == Color(0xFFFFD700)) {
+      Paint shimmerPaint = Paint()
+        ..color = Color(0xFFFFF8DC).withOpacity(0.6)
+        ..style = PaintingStyle.fill;
+
+      final shimmerPath = Path()
+        ..moveTo(position.dx, position.dy - size * 0.8)
+        ..quadraticBezierTo(
+          position.dx - size * 0.3, position.dy - size * 0.5,
+          position.dx, position.dy - size * 0.2,
+        )
+        ..quadraticBezierTo(
+          position.dx + size * 0.3, position.dy - size * 0.5,
+          position.dx, position.dy - size * 0.8,
+        );
+      canvas.drawPath(shimmerPath, shimmerPaint);
+    }
+
+    // Add leaf veins
+    Paint veinPaint = Paint()
+      ..color = Color(0xFF006400)
+      ..strokeWidth = 1.2;
+
+    canvas.drawLine(
+      Offset(position.dx, position.dy - size * 0.9),
+      Offset(position.dx, position.dy + size * 0.3),
+      veinPaint,
+    );
+  }
+
+  void _drawFlower(Canvas canvas, Offset center, double size, int flowerIndex) {
+    // Draw luxury gold flower petals
+    final petalPaint = Paint()
+      ..color = Color(0xFFFFF8DC) // Cornsilk
+      ..style = PaintingStyle.fill;
+
+    final petalOutlinePaint = Paint()
+      ..color = Color(0xFFFFD700) // Gold outline
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    // Draw 12 petals for luxury gold flower
+    for (int i = 0; i < 12; i++) {
+      canvas.save();
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate((i * 30 + flowerRotation * 10 + flowerIndex * 15) * 3.14159 / 180); // Fixed rotation angles
+
+      final petalPath = Path()
+        ..moveTo(0, 0)
+        ..quadraticBezierTo(size * 0.4, -size * 0.8, 0, -size)
+        ..quadraticBezierTo(-size * 0.4, -size * 0.8, 0, 0);
+
+      canvas.drawPath(petalPath, petalPaint);
+      canvas.drawPath(petalPath, petalOutlinePaint);
+      canvas.restore();
+    }
+
+    // Draw luxury gold flower center
+    canvas.drawCircle(center, size * 0.4, Paint()..color = Color(0xFFFFD700));
+    canvas.drawCircle(center, size * 0.25, Paint()..color = Color(0xFFB8860B));
+
+    // Add sparkle effect for gold flowers
+    if (flowerBloom > 0.8) {
+      final sparklePaint = Paint()
+        ..color = Colors.white
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round;
+
+      for (int i = 0; i < 8; i++) {
+        double angle = i * 3.14159 / 4 + flowerRotation * 0.1;
+        double sparkleDistance = size * 0.6;
+        double x = center.dx + sparkleDistance * math.cos(angle);
+        double y = center.dy + sparkleDistance * math.sin(angle);
+
+        canvas.drawLine(Offset(x - 4, y), Offset(x + 4, y), sparklePaint);
+        canvas.drawLine(Offset(x, y - 4), Offset(x, y + 4), sparklePaint);
+      }
+    }
+  }
+
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return oldDelegate is GoldTreePainter &&
-        (oldDelegate.growthLevel != growthLevel ||
-            oldDelegate.totalGrowth != totalGrowth ||
-            oldDelegate.flowerBloom != flowerBloom ||
-            oldDelegate.flowerRotation != flowerRotation ||
-            oldDelegate.leafScale != leafScale ||
-            oldDelegate.waterDropAnimation != waterDropAnimation);
+  bool shouldRepaint(GoldTreePainter oldDelegate) {
+    return growthLevel != oldDelegate.growthLevel ||
+        totalGrowth != oldDelegate.totalGrowth ||
+        flowerBloom != oldDelegate.flowerBloom ||
+        leafScale != oldDelegate.leafScale ||
+        flowerRotation != oldDelegate.flowerRotation ||
+        waterDropAnimation != oldDelegate.waterDropAnimation;
   }
 }

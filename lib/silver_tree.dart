@@ -28,6 +28,7 @@ class SilverTreePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // IMPORTANT: Always use consistent center point
     final double centerX = size.width / 2;
     final double groundY = size.height * 0.9;
 
@@ -72,7 +73,7 @@ class SilverTreePainter extends CustomPainter {
 
       canvas.drawCircle(Offset(centerX, groundY), splashRadius, splashPaint);
 
-      // Add silver sparkles
+      // Add silver sparkles at fixed positions
       Paint sparklePaint = Paint()
         ..color = Color(0xFFC0C0C0).withOpacity(0.6 * (1 - (waterDropAnimation - 0.8) * 5))
         ..style = PaintingStyle.fill;
@@ -110,7 +111,7 @@ class SilverTreePainter extends CustomPainter {
       silverAccent,
     );
 
-    // Add enhanced grass with silver tips
+    // Add enhanced grass with silver tips at fixed positions
     final Paint grassPaint = Paint()
       ..color = Colors.green[600]!
       ..strokeWidth = 2.5;
@@ -119,27 +120,28 @@ class SilverTreePainter extends CustomPainter {
       ..color = Color(0xFFB0C4DE)
       ..strokeWidth = 1.5;
 
-    for (int i = 0; i < size.width.toInt(); i += 12) {
-      double grassHeight = 8 + math.Random(i).nextDouble() * 12;
+    for (int i = 0; i < 25; i++) {
+      double x = (i / 25) * size.width;
+      double grassHeight = 8 + (i % 4) * 3; // Fixed pattern
 
       // Main grass blade
       canvas.drawLine(
-        Offset(i.toDouble(), groundY),
-        Offset(i.toDouble() + 2, groundY - grassHeight),
+        Offset(x, groundY),
+        Offset(x + 2, groundY - grassHeight),
         grassPaint,
       );
 
       // Silver tip
       canvas.drawLine(
-        Offset(i.toDouble() + 2, groundY - grassHeight),
-        Offset(i.toDouble() + 2.5, groundY - grassHeight - 3),
+        Offset(x + 2, groundY - grassHeight),
+        Offset(x + 2.5, groundY - grassHeight - 3),
         silverGrassTip,
       );
 
       // Second blade
       canvas.drawLine(
-        Offset(i.toDouble() + 4, groundY),
-        Offset(i.toDouble() + 6, groundY - grassHeight * 0.8),
+        Offset(x + 4, groundY),
+        Offset(x + 6, groundY - grassHeight * 0.8),
         grassPaint,
       );
     }
@@ -157,7 +159,7 @@ class SilverTreePainter extends CustomPainter {
 
   void _drawSilverGrowingTrunk(Canvas canvas, Size size, double centerX, double groundY) {
     final Paint trunkPaint = Paint()
-      ..color = Color(0xFF708090) // Slate gray (silver tone)
+      ..color = Color(0xFF708090)
       ..style = PaintingStyle.fill;
 
     // Calculate trunk height based on growth - taller than bronze
@@ -265,11 +267,11 @@ class SilverTreePainter extends CustomPainter {
   }
 
   void _drawSilverMainBranches(Canvas canvas, double centerX, double trunkTop, Paint paint, int growth) {
-    paint.strokeWidth = 10; // Thicker than bronze
+    paint.strokeWidth = 10;
 
     List<List<Offset>> mainBranches = [];
 
-    // Early main branches
+    // Fixed branch positions
     if (growth >= 3) {
       mainBranches.addAll([
         [Offset(centerX - 4, trunkTop + 20), Offset(centerX - 20, trunkTop + 8), Offset(centerX - 40, trunkTop - 12)],
@@ -459,7 +461,7 @@ class SilverTreePainter extends CustomPainter {
   List<BranchPoint> _getSilverBranchEndpoints(double centerX, double trunkTop) {
     List<BranchPoint> endpoints = [];
 
-    // Enhanced leaf positions for silver tree
+    // Enhanced fixed leaf positions for silver tree
     List<Offset> leafPositions = [
       // Early leaves (growth 1-10)
       Offset(centerX - 40, trunkTop - 12),
@@ -541,20 +543,22 @@ class SilverTreePainter extends CustomPainter {
     }
     canvas.scale(scale);
 
-    // Silver-themed leaf colors
-    Color leafColor = index % 7 == 0 ? Color(0xFF228B22) :
-    index % 7 == 1 ? Color(0xFF32CD32) :
-    index % 7 == 2 ? Color(0xFF90EE90) :
-    index % 7 == 3 ? Color(0xFF006400) :
-    index % 7 == 4 ? Color(0xFF9ACD32) :
-    index % 7 == 5 ? Color(0xFF8FBC8F) :
-    Color(0xFF98FB98);
+    // Silver-themed leaf colors - fixed pattern
+    Color leafColor = [
+      Color(0xFF228B22),
+      Color(0xFF32CD32),
+      Color(0xFF90EE90),
+      Color(0xFF006400),
+      Color(0xFF9ACD32),
+      Color(0xFF8FBC8F),
+      Color(0xFF98FB98),
+    ][index % 7];
 
     Paint leafPaint = Paint()
       ..color = leafColor
       ..style = PaintingStyle.fill;
 
-    double leafSize = 14 + (index % 4) * 2; // Bigger than bronze
+    double leafSize = 14 + (index % 4) * 2;
 
     // Draw enhanced leaf shape
     Path leafPath = Path();
@@ -619,14 +623,14 @@ class SilverTreePainter extends CustomPainter {
     // Get branch endpoints for flower positions
     List<BranchPoint> branchEndpoints = _getSilverBranchEndpoints(centerX, trunkTop);
 
-    // Select 6 branch endpoints for flowers (increased from 4)
+    // Select 6 branch endpoints for flowers
     List<int> flowerIndices = [
-      branchEndpoints.length - 1,   // Top branch
-      branchEndpoints.length - 3,   // Upper left
-      branchEndpoints.length - 5,   // Upper right
-      branchEndpoints.length - 7,   // Mid left
-      branchEndpoints.length - 9,   // Mid right
-      branchEndpoints.length - 11,  // Lower center
+      branchEndpoints.length - 1,
+      branchEndpoints.length - 3,
+      branchEndpoints.length - 5,
+      branchEndpoints.length - 7,
+      branchEndpoints.length - 9,
+      branchEndpoints.length - 11,
     ];
 
     // Draw each flower at branch endpoints
@@ -645,11 +649,11 @@ class SilverTreePainter extends CustomPainter {
 
     // Silver flower colors
     final Paint petalPaint = Paint()
-      ..color = Color(0xFFE6E6FA) // Lavender
+      ..color = Color(0xFFE6E6FA)
       ..style = PaintingStyle.fill;
 
     final Paint petalOutlinePaint = Paint()
-      ..color = Color(0xFF9370DB) // Medium purple
+      ..color = Color(0xFF9370DB)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
 
