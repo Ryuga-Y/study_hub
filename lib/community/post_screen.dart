@@ -442,8 +442,34 @@ class _PostScreenState extends State<PostScreen> {
             title: Text('Delete Comment', style: TextStyle(color: Colors.red)),
             onTap: () {
               Navigator.pop(context);
-              // Implement delete comment
+              _showDeleteCommentDialog(comment);
             },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteCommentDialog(Comment comment) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Comment'),
+        content: Text('Are you sure you want to delete this comment?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              context.read<CommunityBloc>().add(DeleteComment(
+                commentId: comment.id,
+                postId: widget.post.id,
+              ));
+              Navigator.pop(context);
+            },
+            child: Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),

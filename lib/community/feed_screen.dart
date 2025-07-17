@@ -150,10 +150,9 @@ class _FeedScreenState extends State<FeedScreen> {
           body: IndexedStack(
             index: _currentIndex,
             children: [
-              _buildFeedTab(state),
-              SearchScreen(organizationCode: widget.organizationCode),
-              Container(), // Placeholder for future features
-              ProfileScreen(
+              _buildFeedTab(state),                    // Index 0 - Home
+              SearchScreen(organizationCode: widget.organizationCode), // Index 1 - Search
+              ProfileScreen(                          // Index 2 - Profile (moved from index 3)
                 userId: state.currentUserProfile?.uid ?? _authService.currentUser?.uid ?? '',
                 isCurrentUser: true,
               ),
@@ -350,28 +349,6 @@ class _FeedScreenState extends State<FeedScreen> {
           icon: Icon(Icons.search_outlined),
           activeIcon: Icon(Icons.search),
           label: 'Search',
-        ),
-        BottomNavigationBarItem(
-          icon: Stack(
-            children: [
-              Icon(Icons.favorite_outline),
-              if (state.pendingRequests.isNotEmpty)
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          activeIcon: Icon(Icons.favorite),
-          label: 'Activity',
         ),
         BottomNavigationBarItem(
           icon: state.currentUserProfile?.avatarUrl != null

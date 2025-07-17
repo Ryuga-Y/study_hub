@@ -315,6 +315,27 @@ class CommunityService {
     }
   }
 
+  Future<void> syncFriendCount(String userId) async {
+    try {
+      // Get actual friend count
+      final friendsQuery = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: userId)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      final actualFriendCount = friendsQuery.docs.length;
+
+      // Update user document with correct count
+      await _firestore.collection('users').doc(userId).update({
+        'friendCount': actualFriendCount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error syncing friend count: $e');
+    }
+  }
+
   // Comment Operations
   Future<String> addComment({
     required String postId,
@@ -522,13 +543,13 @@ class CommunityService {
 
         final requestData = requestDoc.data()!;
 
-        // Validate request - Fixed the validation logic
+        // Validate request
         if (requestData['friendId'] != userId || requestData['isReceived'] != true) {
           throw Exception('You can only accept requests sent to you');
         }
 
-        final senderId = requestData['userId']; // The actual sender
-        final recipientId = userId; // Current user accepting
+        final senderId = requestData['userId'];
+        final recipientId = userId;
 
         // Update friend request status
         transaction.update(requestDoc.reference, {
@@ -553,14 +574,21 @@ class CommunityService {
           }
         }
 
+        // Get current friend counts
+        final recipientDoc = await transaction.get(_firestore.collection('users').doc(recipientId));
+        final senderDoc = await transaction.get(_firestore.collection('users').doc(senderId));
+
+        final recipientCurrentCount = recipientDoc.data()?['friendCount'] ?? 0;
+        final senderCurrentCount = senderDoc.data()?['friendCount'] ?? 0;
+
         // Update friend counts
         transaction.update(_firestore.collection('users').doc(recipientId), {
-          'friendCount': FieldValue.increment(1),
+          'friendCount': recipientCurrentCount + 1,
           'updatedAt': FieldValue.serverTimestamp(),
         });
 
         transaction.update(_firestore.collection('users').doc(senderId), {
-          'friendCount': FieldValue.increment(1),
+          'friendCount': senderCurrentCount + 1,
           'updatedAt': FieldValue.serverTimestamp(),
         });
       });
@@ -569,7 +597,8 @@ class CommunityService {
       final userData = await _firestore.collection('users').doc(userId).get();
       if (userData.exists) {
         final requestDoc = await _firestore.collection('friends').doc(requestId).get();
-        final senderId = requestDoc.data()!['userId']; // Fixed: get the actual sender
+        final requestData = requestDoc.data()!;
+        final senderId = requestData['userId'];
 
         await _createNotification(
           userId: senderId,
@@ -579,6 +608,12 @@ class CommunityService {
           actionUserId: userId,
         );
       }
+
+      // Sync friend counts after transaction
+      await syncFriendCount(userId);
+      final requestDoc = await _firestore.collection('friends').doc(requestId).get();
+      final requestData = requestDoc.data()!;
+      await syncFriendCount(requestData['userId']);
 
     } catch (e) {
       print('Error accepting friend request: $e');
@@ -622,40 +657,52 @@ class CommunityService {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
 
-      // Delete both friend records
-      final batch = _firestore.batch();
+      await _firestore.runTransaction((transaction) async {
+        // Delete both friend records
+        final userFriendQuery = await _firestore
+            .collection('friends')
+            .where('userId', isEqualTo: userId)
+            .where('friendId', isEqualTo: friendId)
+            .get();
 
-      // Delete user's friend record
-      final userFriendQuery = await _firestore
-          .collection('friends')
-          .where('userId', isEqualTo: userId)
-          .where('friendId', isEqualTo: friendId)
-          .get();
+        if (userFriendQuery.docs.isNotEmpty) {
+          transaction.delete(userFriendQuery.docs.first.reference);
+        }
 
-      if (userFriendQuery.docs.isNotEmpty) {
-        batch.delete(userFriendQuery.docs.first.reference);
-      }
+        // Delete friend's record
+        final friendRecordQuery = await _firestore
+            .collection('friends')
+            .where('userId', isEqualTo: friendId)
+            .where('friendId', isEqualTo: userId)
+            .get();
 
-      // Delete friend's record
-      final friendRecordQuery = await _firestore
-          .collection('friends')
-          .where('userId', isEqualTo: friendId)
-          .where('friendId', isEqualTo: userId)
-          .get();
+        if (friendRecordQuery.docs.isNotEmpty) {
+          transaction.delete(friendRecordQuery.docs.first.reference);
+        }
 
-      if (friendRecordQuery.docs.isNotEmpty) {
-        batch.delete(friendRecordQuery.docs.first.reference);
-      }
+        // Get current friend counts
+        final userDoc = await transaction.get(_firestore.collection('users').doc(userId));
+        final friendDoc = await transaction.get(_firestore.collection('users').doc(friendId));
 
-      await batch.commit();
+        final userCurrentCount = userDoc.data()?['friendCount'] ?? 0;
+        final friendCurrentCount = friendDoc.data()?['friendCount'] ?? 0;
 
-      // Update friend counts
-      await _firestore.collection('users').doc(userId).update({
-        'friendCount': FieldValue.increment(-1),
+        // Update friend counts (ensure they don't go below 0)
+        transaction.update(_firestore.collection('users').doc(userId), {
+          'friendCount': userCurrentCount > 0 ? userCurrentCount - 1 : 0,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        transaction.update(_firestore.collection('users').doc(friendId), {
+          'friendCount': friendCurrentCount > 0 ? friendCurrentCount - 1 : 0,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       });
-      await _firestore.collection('users').doc(friendId).update({
-        'friendCount': FieldValue.increment(-1),
-      });
+
+      // Sync friend counts after transaction
+      await syncFriendCount(userId);
+      await syncFriendCount(friendId);
+
     } catch (e) {
       throw Exception('Failed to remove friend: $e');
     }
@@ -763,6 +810,37 @@ class CommunityService {
       }
     } catch (e) {
       throw Exception('Failed to update profile: $e');
+    }
+  }
+
+  Future<void> deleteComment({
+    required String commentId,
+    required String postId,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Get comment to verify ownership
+      final commentDoc = await _firestore.collection('comments').doc(commentId).get();
+      if (!commentDoc.exists) {
+        throw Exception('Comment not found');
+      }
+
+      final commentData = commentDoc.data()!;
+      if (commentData['userId'] != userId) {
+        throw Exception('Unauthorized');
+      }
+
+      // Delete the comment
+      await _firestore.collection('comments').doc(commentId).delete();
+
+      // Update post comment count
+      await _firestore.collection('posts').doc(postId).update({
+        'commentCount': FieldValue.increment(-1),
+      });
+    } catch (e) {
+      throw Exception('Failed to delete comment: $e');
     }
   }
 

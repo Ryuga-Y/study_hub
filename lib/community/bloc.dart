@@ -110,6 +110,16 @@ class AddComment extends CommunityEvent {
   List<Object?> get props => [postId, content, parentId, mentions];
 }
 
+class DeleteComment extends CommunityEvent {
+  final String commentId;
+  final String postId;
+
+  DeleteComment({required this.commentId, required this.postId});
+
+  @override
+  List<Object> get props => [commentId, postId];
+}
+
 // Friend Events
 class LoadFriends extends CommunityEvent {}
 
@@ -179,6 +189,15 @@ class UpdateUserProfile extends CommunityEvent {
 
   @override
   List<Object?> get props => [bio, avatarFile];
+}
+
+class SyncFriendCount extends CommunityEvent {
+  final String userId;
+
+  SyncFriendCount(this.userId);
+
+  @override
+  List<Object> get props => [userId];
 }
 
 // Notification Events
@@ -312,6 +331,7 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     // Comment Events
     on<LoadComments>(_onLoadComments);
     on<AddComment>(_onAddComment);
+    on<DeleteComment>(_onDeleteComment);
 
     // Friend Events
     on<LoadFriends>(_onLoadFriends);
@@ -325,6 +345,7 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<SearchUsers>(_onSearchUsers);
     on<LoadUserProfile>(_onLoadUserProfile);
     on<UpdateUserProfile>(_onUpdateUserProfile);
+    on<SyncFriendCount>(_onSyncFriendCount);
 
     // Notification Events
     on<LoadNotifications>(_onLoadNotifications);
@@ -574,6 +595,39 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
+  Future<void> _onDeleteComment(DeleteComment event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.deleteComment(
+        commentId: event.commentId,
+        postId: event.postId,
+      );
+
+      // Update the local state by removing the comment
+      final updatedComments = Map<String, List<Comment>>.from(state.postComments);
+      final postComments = updatedComments[event.postId] ?? [];
+
+      // Remove the comment from the list
+      final filteredComments = postComments.where((comment) => comment.id != event.commentId).toList();
+      updatedComments[event.postId] = filteredComments;
+
+      // Update the post's comment count
+      final updatedPosts = state.feedPosts.map((post) {
+        if (post.id == event.postId) {
+          return post.copyWith(commentCount: post.commentCount > 0 ? post.commentCount - 1 : 0);
+        }
+        return post;
+      }).toList();
+
+      emit(state.copyWith(
+        postComments: updatedComments,
+        feedPosts: updatedPosts,
+        successMessage: 'Comment deleted successfully!',
+      ));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
   // Friend Handlers
   Future<void> _onLoadFriends(LoadFriends event, Emitter<CommunityState> emit) async {
     try {
@@ -634,7 +688,6 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-
   Future<void> _onDeclineFriendRequest(DeclineFriendRequest event, Emitter<CommunityState> emit) async {
     try {
       await _service.declineFriendRequest(event.requestId);
@@ -688,6 +741,10 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
 
   Future<void> _onLoadUserProfile(LoadUserProfile event, Emitter<CommunityState> emit) async {
     try {
+      if (event.userId == _service.currentUserId) {
+        await _service.syncFriendCount(event.userId);
+      }
+
       await emit.forEach(
         _service.getUserStream(event.userId),
         onData: (user) {
@@ -714,6 +771,17 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       emit(state.copyWith(successMessage: 'Profile updated successfully!'));
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  Future<void> _onSyncFriendCount(SyncFriendCount event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.syncFriendCount(event.userId);
+
+      // Reload user profile to get updated count
+      add(LoadUserProfile(event.userId));
+    } catch (e) {
+      emit(state.copyWith(error: 'Failed to sync friend count: $e'));
     }
   }
 
