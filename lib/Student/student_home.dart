@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'dart:async'; // Add Timer import
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
+import '../community/bloc.dart';
+import '../community/feed_screen.dart';
+import '../community/models.dart';
 import 'student_course.dart';
 import 'calendar.dart'; // Import the calendar page
 import '../Stu_goal.dart'; // Import the goal page
@@ -98,7 +102,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -377,6 +381,108 @@ class _StudentHomePageState extends State<StudentHomePage> {
       // Reload water buckets when returning from goal system
       _loadWaterBuckets();
     });
+  }
+
+  // Create CommunityUser from userData (adapted for students)
+  CommunityUser _createCommunityUser() {
+    final user = _authService.currentUser;
+    if (user == null || _userData == null) {
+      throw Exception('User data not available');
+    }
+
+    return CommunityUser(
+      uid: user.uid,
+      fullName: _userData!['fullName'] ?? 'Unknown',
+      email: _userData!['email'] ?? '',
+      avatarUrl: _userData!['avatarUrl'],
+      bio: _userData!['bio'],
+      organizationCode: _userData!['organizationCode'] ?? '',
+      role: _userData!['role'] ?? 'student',
+      postCount: _userData!['postCount'] ?? 0,
+      friendCount: _userData!['friendCount'] ?? 0,
+      joinDate: _userData!['createdAt'] != null
+          ? (_userData!['createdAt'] as Timestamp).toDate()
+          : DateTime.now(),
+      isActive: _userData!['isActive'] ?? true,
+    );
+  }
+
+  Future<void> _navigateToCommunity() async {
+    try {
+      final organizationCode = _userData?['organizationCode'] ?? '';
+      if (organizationCode.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Organization code not found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Create community user object
+      final communityUser = _createCommunityUser();
+
+      // Get or create CommunityBloc
+      CommunityBloc communityBloc;
+      try {
+        // Try to get existing bloc
+        communityBloc = BlocProvider.of<CommunityBloc>(context);
+      } catch (e) {
+        // If no bloc exists, create a new one
+        communityBloc = CommunityBloc();
+      }
+
+      // Initialize the bloc with user profile
+      communityBloc.add(LoadUserProfile(communityUser.uid));
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      // Navigate to community feed
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => BlocProvider.value(
+            value: communityBloc,
+            child: FeedScreen(
+              organizationCode: organizationCode,
+            ),
+          ),
+        ),
+      ).then((_) {
+        // Reset bottom navigation to Courses tab when returning from community
+        setState(() {
+          _currentIndex = 0;
+        });
+      });
+    } catch (e) {
+      // Close loading dialog if open
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error accessing community: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+
+      // Reset navigation index on error as well
+      setState(() {
+        _currentIndex = 0;
+      });
+    }
   }
 
   @override
@@ -992,7 +1098,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
           // Already on courses page
             break;
           case 1:
-          // TODO: Navigate to community
+          // Navigate to community (FeedScreen)
+            _navigateToCommunity();
             break;
           case 2:
           // TODO: Navigate to chat

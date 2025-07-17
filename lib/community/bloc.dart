@@ -456,18 +456,22 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
 
   Future<void> _onToggleLike(ToggleLike event, Emitter<CommunityState> emit) async {
     try {
-      await _service.toggleLike(event.postId);
-
-      // Update post in local state
+      // Get current user ID
       final currentUserId = _service.currentUserId;
+      if (currentUserId == null) return;
+
+      // Optimistically update local state first
       final updatedPosts = state.feedPosts.map((post) {
-        if (post.id == event.postId && currentUserId != null) {
+        if (post.id == event.postId) {
           final likedBy = List<String>.from(post.likedBy);
-          if (likedBy.contains(currentUserId)) {
+          final isCurrentlyLiked = likedBy.contains(currentUserId);
+
+          if (isCurrentlyLiked) {
             likedBy.remove(currentUserId);
           } else {
             likedBy.add(currentUserId);
           }
+
           return post.copyWith(
             likedBy: likedBy,
             likeCount: likedBy.length,
@@ -476,7 +480,32 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
         return post;
       }).toList();
 
+      // Emit the optimistic update
       emit(state.copyWith(feedPosts: updatedPosts));
+
+      // Then make the actual API call
+      try {
+        await _service.toggleLike(event.postId);
+      } catch (e) {
+        // If the API call fails, revert the optimistic update
+        // by re-fetching or reverting to previous state
+        print('Error toggling like: $e');
+
+        // Revert to previous state
+        final revertedPosts = state.feedPosts.map((post) {
+          if (post.id == event.postId) {
+            // Find the original post
+            final originalPost = state.feedPosts.firstWhere((p) => p.id == event.postId);
+            return originalPost;
+          }
+          return post;
+        }).toList();
+
+        emit(state.copyWith(
+          feedPosts: revertedPosts,
+          error: 'Failed to update like',
+        ));
+      }
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
     }

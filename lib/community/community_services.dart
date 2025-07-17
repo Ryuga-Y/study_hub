@@ -250,12 +250,18 @@ class CommunityService {
       if (userId == null) throw Exception('User not authenticated');
 
       final postRef = _firestore.collection('posts').doc(postId);
+
+      // Get current post data first
       final postDoc = await postRef.get();
+      if (!postDoc.exists) {
+        throw Exception('Post not found');
+      }
+
       final postData = postDoc.data()!;
-
       List<String> likedBy = List<String>.from(postData['likedBy'] ?? []);
+      final isLiked = likedBy.contains(userId);
 
-      if (likedBy.contains(userId)) {
+      if (isLiked) {
         // Unlike
         likedBy.remove(userId);
         await postRef.update({
@@ -284,6 +290,7 @@ class CommunityService {
         }
       }
     } catch (e) {
+      print('Error toggling like: $e');
       throw Exception('Failed to toggle like: $e');
     }
   }
