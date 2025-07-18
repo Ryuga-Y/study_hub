@@ -131,6 +131,175 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
     }
   }
 
+  // Debug function for enrollment and calendar debugging
+  Future<void> debugEnrollmentAndCalendar() async {
+    try {
+      // Get the first course for debugging, or show dialog to select
+      if (_courses.isEmpty) {
+        _showMessage('No courses found to debug');
+        return;
+      }
+
+      String? selectedCourseId;
+      Map<String, dynamic>? selectedCourseData;
+
+      if (_courses.length == 1) {
+        selectedCourseId = _courses[0]['id'];
+        selectedCourseData = _courses[0];
+      } else {
+        // Show course selection dialog
+        final result = await _showCourseSelectionDialog();
+        if (result != null) {
+          selectedCourseId = result['id'];
+          selectedCourseData = result;
+        } else {
+          return; // User cancelled
+        }
+      }
+
+      final organizationCode = selectedCourseData!['organizationCode'] ?? _userData?['organizationCode'];
+      if (organizationCode == null) {
+        print('❌ No organization code found');
+        _showMessage('No organization code found');
+        return;
+      }
+
+      print('🔍 Debugging enrollment and calendar creation...');
+      print('📍 Organization: $organizationCode');
+      print('📚 Course: $selectedCourseId');
+
+      // Check enrollments
+      final enrollmentsSnapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('courses')
+          .doc(selectedCourseId)
+          .collection('enrollments')
+          .get();
+
+      print('👥 Found ${enrollmentsSnapshot.docs.length} enrolled students');
+
+      List<String> debugResults = [];
+      debugResults.add('🔍 Debug Results for Course: ${selectedCourseData['title']}');
+      debugResults.add('📍 Organization: $organizationCode');
+      debugResults.add('📚 Course ID: $selectedCourseId');
+      debugResults.add('👥 Found ${enrollmentsSnapshot.docs.length} enrolled students\n');
+
+      for (var enrollment in enrollmentsSnapshot.docs) {
+        final studentId = enrollment.data()['studentId'];
+        print('  - Student ID: $studentId');
+        debugResults.add('Student ID: $studentId');
+
+        // Check if student document exists
+        final studentDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(studentId)
+            .get();
+
+        if (studentDoc.exists) {
+          print('    ✅ Student document exists');
+          print('    📧 Email: ${studentDoc.data()?['email']}');
+          debugResults.add('  ✅ Student document exists');
+          debugResults.add('  📧 Email: ${studentDoc.data()?['email']}');
+
+          // Check calendar_events subcollection
+          final eventsSnapshot = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(organizationCode)
+              .collection('students')
+              .doc(studentId)
+              .collection('calendar_events')
+              .get();
+
+          print('    📅 Student has ${eventsSnapshot.docs.length} calendar events');
+          debugResults.add('  📅 Student has ${eventsSnapshot.docs.length} calendar events');
+
+          // List first 3 events
+          for (var i = 0; i < eventsSnapshot.docs.length && i < 3; i++) {
+            final event = eventsSnapshot.docs[i].data();
+            print('      - Event: ${event['title']} (${event['sourceType']})');
+            debugResults.add('    - Event: ${event['title']} (${event['sourceType']})');
+          }
+        } else {
+          print('    ❌ Student document NOT found in users collection');
+          debugResults.add('  ❌ Student document NOT found in users collection');
+        }
+        debugResults.add(''); // Empty line for readability
+      }
+
+      // Show debug results in a dialog
+      _showDebugResultsDialog(debugResults);
+
+    } catch (e) {
+      print('❌ Error in debug: $e');
+      _showMessage('Error in debug: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> _showCourseSelectionDialog() async {
+    return showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Select Course to Debug'),
+        content: Container(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _courses.length,
+            itemBuilder: (context, index) {
+              final course = _courses[index];
+              return ListTile(
+                title: Text(course['title'] ?? 'Untitled Course'),
+                subtitle: Text(course['code'] ?? course['id']),
+                onTap: () => Navigator.pop(context, course),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDebugResultsDialog(List<String> results) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Debug Results'),
+        content: Container(
+          width: double.maxFinite,
+          height: 400,
+          child: SingleChildScrollView(
+            child: Text(
+              results.join('\n'),
+              style: TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
   Future<void> _handleLogout() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -446,6 +615,16 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
               onTap: () {
                 Navigator.pop(context);
                 // TODO: Navigate to settings page
+              },
+            ),
+            Divider(),
+            // Debug button added to drawer
+            ListTile(
+              leading: Icon(Icons.bug_report, color: Colors.orange),
+              title: Text('Debug Enrollments', style: TextStyle(color: Colors.orange)),
+              onTap: () {
+                Navigator.pop(context);
+                debugEnrollmentAndCalendar();
               },
             ),
             Divider(),

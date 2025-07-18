@@ -409,8 +409,8 @@ class _SetGoalPageState extends State<SetGoalPage> {
           .add({
         'title': '🎯 Goal: $goalTitle',
         'description': 'Goal deadline',
-        'startTime': Timestamp.fromDate(targetDate),
-        'endTime': Timestamp.fromDate(targetDate),
+        'startTime': Timestamp.fromDate(targetDate.toUtc()), // Convert to UTC for storage
+        'endTime': Timestamp.fromDate(targetDate.toUtc()),   // Convert to UTC for storage
         'color': Colors.purple.value,
         'calendar': 'goals',
         'eventType': EventType.normal.index,

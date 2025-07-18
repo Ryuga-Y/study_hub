@@ -13,6 +13,7 @@ import '../goal_progress_service.dart'; // Import the enhanced goal service
 // Add these enums for calendar event types
 enum EventType { normal, recurring }
 enum RecurrenceType { none, daily, weekly, monthly }
+enum CalendarView { month, week, day }
 
 class StudentCoursePage extends StatefulWidget {
   final String courseId;
@@ -49,6 +50,11 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
   String? errorMessage;
   int _currentIndex = 2;
 
+  // Calendar view state (if needed)
+  DateTime _selectedDate = DateTime.now();
+  DateTime _focusedDate = DateTime.now();
+  CalendarView _currentView = CalendarView.month;
+
   @override
   void initState() {
     super.initState();
@@ -82,17 +88,15 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         _organizationCode = userData['organizationCode'];
       });
 
-      // First, fetch materials and assignments
+      // Fetch assignments, materials, and submissions
       await Future.wait([
         _fetchAssignments(),
         _fetchMaterials(),
       ]);
 
-      // Create calendar events for assignments and tutorials
-      await _createAssignmentCalendarEvents();
-      await _createTutorialCalendarEvents();
+      print('✅ Loaded ${assignments.length} assignments and ${materials.length} materials');
 
-      // Then fetch submissions (which depend on assignments and materials being loaded)
+      // Fetch submissions (which depend on assignments and materials being loaded)
       await Future.wait([
         _fetchSubmissions(user.uid),
         _fetchTutorialSubmissions(user.uid),
@@ -106,6 +110,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         isLoading = false;
       });
     } catch (e) {
+      print('❌ Error loading data: $e');
       setState(() {
         errorMessage = 'Error loading data: $e';
         isLoading = false;
@@ -113,7 +118,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     }
   }
 
-  // Add this method to initState() after _loadData()
   void _startRealtimeListeners() {
     if (_organizationCode == null) return;
 
@@ -136,17 +140,20 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           // Check if this is a new assignment (not initial load)
           final isNew = assignments.where((a) => a['id'] == assignmentId).isEmpty;
 
-          if (isNew && assignmentData['dueDate'] != null) {
-            // Create calendar event for new assignment
-            await _createSingleCalendarEvent(
-              itemId: assignmentId,
-              title: assignmentData['title'] ?? 'Assignment',
-              dueDate: (assignmentData['dueDate'] as Timestamp).toDate(),
-              type: 'assignment',
-            );
-
+          if (isNew) {
             // Show notification for new assignment
             _showNewItemNotification('assignment', assignmentData['title'] ?? 'Assignment');
+
+            // Create calendar event for the new assignment
+            if (assignmentData['dueDate'] != null) {
+              await _createCalendarEvent(
+                title: assignmentData['title'] ?? 'Assignment',
+                dueDate: (assignmentData['dueDate'] as Timestamp).toDate(),
+                type: 'assignment',
+                sourceId: assignmentId,
+                courseId: widget.courseId,
+              );
+            }
           }
         }
       }
@@ -181,19 +188,20 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           // Check if this is a new tutorial (not initial load)
           final isNew = materials.where((m) => m['id'] == materialId).isEmpty;
 
-          if (isNew &&
-              materialData['materialType'] == 'tutorial' &&
-              materialData['dueDate'] != null) {
-            // Create calendar event for new tutorial
-            await _createSingleCalendarEvent(
-              itemId: materialId,
-              title: materialData['title'] ?? 'Tutorial',
-              dueDate: (materialData['dueDate'] as Timestamp).toDate(),
-              type: 'tutorial',
-            );
-
+          if (isNew && materialData['materialType'] == 'tutorial') {
             // Show notification for new tutorial
             _showNewItemNotification('tutorial', materialData['title'] ?? 'Tutorial');
+
+            // Create calendar event for the new tutorial
+            if (materialData['dueDate'] != null) {
+              await _createCalendarEvent(
+                title: materialData['title'] ?? 'Tutorial',
+                dueDate: (materialData['dueDate'] as Timestamp).toDate(),
+                type: 'tutorial',
+                sourceId: materialId,
+                courseId: widget.courseId,
+              );
+            }
           }
         }
       }
@@ -210,61 +218,47 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     });
   }
 
-  // Create a single calendar event
-  Future<void> _createSingleCalendarEvent({
-    required String itemId,
+  // Calendar event creation function
+  Future<void> _createCalendarEvent({
     required String title,
     required DateTime dueDate,
     required String type,
+    required String sourceId,
+    required String courseId,
   }) async {
-    final user = _authService.currentUser;
-    if (user == null || _organizationCode == null) return;
-
     try {
-      // Check if event already exists
-      final existingEvents = await FirebaseFirestore.instance
+      if (_organizationCode == null) return;
+
+      // For items due at 11:59 PM, create a 1-minute duration event
+      final startTime = dueDate;
+      final endTime = startTime.add(Duration(minutes: 1));
+
+      await FirebaseFirestore.instance
           .collection('organizations')
           .doc(_organizationCode)
           .collection('students')
-          .doc(user.uid)
+          .doc(_authService.currentUser!.uid)
           .collection('calendar_events')
-          .where('sourceId', isEqualTo: itemId)
-          .where('sourceType', isEqualTo: type)
-          .get();
+          .add({
+        'title': type == 'assignment' ? '📝 Assignment: $title' : '📖 Tutorial: $title',
+        'description': '$type deadline',
+        'startTime': Timestamp.fromDate(startTime),
+        'endTime': Timestamp.fromDate(endTime),
+        'color': type == 'assignment' ? Colors.red.value : Colors.red.value,
+        'calendar': type == 'assignment' ? 'assignments' : 'tutorials',
+        'eventType': 0, // EventType.normal
+        'recurrenceType': 0, // RecurrenceType.none
+        'reminderMinutes': 60,
+        'location': '',
+        'isRecurring': false,
+        'originalEventId': '',
+        'sourceId': sourceId,
+        'sourceType': type,
+        'courseId': courseId,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
 
-      if (existingEvents.docs.isEmpty) {
-        // Create calendar event
-        await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(_organizationCode)
-            .collection('students')
-            .doc(user.uid)
-            .collection('calendar_events')
-            .add({
-          'title': type == 'assignment'
-              ? '📝 $title Due'
-              : '📚 $title Due',
-          'description': type == 'assignment'
-              ? 'Assignment deadline'
-              : 'Tutorial deadline',
-          'startTime': Timestamp.fromDate(dueDate),
-          'endTime': Timestamp.fromDate(dueDate),
-          'color': type == 'assignment' ? Colors.orange.r : Colors.blue.r,
-          'calendar': type == 'assignment' ? 'assignments' : 'tutorials',
-          'eventType': EventType.normal.index,
-          'recurrenceType': RecurrenceType.none.index,
-          'reminderMinutes': 1440, // 24 hours before
-          'location': '',
-          'isRecurring': false,
-          'originalEventId': '',
-          'sourceId': itemId,
-          'sourceType': type,
-          'courseId': widget.courseId,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
-        print('✅ Created calendar event for $type: $title');
-      }
+      print('✅ Created calendar event for $type: $title');
     } catch (e) {
       print('Error creating calendar event: $e');
     }
@@ -292,14 +286,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         ),
         backgroundColor: type == 'assignment' ? Colors.orange : Colors.blue,
         duration: Duration(seconds: 4),
-        action: SnackBarAction(
-          label: 'View',
-          textColor: Colors.white,
-          onPressed: () {
-            // Refresh the view
-            setState(() {});
-          },
-        ),
       ),
     );
   }
@@ -353,139 +339,6 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       });
     } catch (e) {
       print('Error fetching materials: $e');
-    }
-  }
-
-  // Add this method to automatically create calendar events for assignments
-  Future<void> _createAssignmentCalendarEvents() async {
-    if (_organizationCode == null) return;
-
-    final user = _authService.currentUser;
-    if (user == null) return;
-
-    try {
-      // Get existing calendar events to avoid duplicates
-      final existingEventsSnapshot = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(_organizationCode)
-          .collection('students')
-          .doc(user.uid)
-          .collection('calendar_events')
-          .get();
-
-      // Create a set of existing assignment IDs
-      Set<String> existingAssignmentIds = {};
-      for (var doc in existingEventsSnapshot.docs) {
-        final data = doc.data();
-        if (data['eventType'] == 'assignment' && data['sourceId'] != null) {
-          existingAssignmentIds.add(data['sourceId']);
-        }
-      }
-
-      // Create calendar events for new assignments
-      for (var assignment in assignments) {
-        if (!existingAssignmentIds.contains(assignment['id'])) {
-          final dueDate = assignment['dueDate'] as Timestamp?;
-          if (dueDate != null) {
-            // Create calendar event
-            await FirebaseFirestore.instance
-                .collection('organizations')
-                .doc(_organizationCode)
-                .collection('students')
-                .doc(user.uid)
-                .collection('calendar_events')
-                .add({
-              'title': '📝 ${assignment['title'] ?? 'Assignment'} Due',
-              'description': assignment['description'] ?? 'Assignment deadline',
-              'startTime': dueDate,
-              'endTime': dueDate,
-              'color': Colors.orange.r,
-              'calendar': 'assignments',
-              'eventType': EventType.normal.index,
-              'recurrenceType': RecurrenceType.none.index,
-              'reminderMinutes': 1440, // 24 hours before
-              'location': '',
-              'isRecurring': false,
-              'originalEventId': '',
-              'sourceId': assignment['id'], // Link to assignment
-              'sourceType': 'assignment',
-              'courseId': widget.courseId,
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-
-            print('✅ Created calendar event for assignment: ${assignment['title']}');
-          }
-        }
-      }
-    } catch (e) {
-      print('Error creating assignment calendar events: $e');
-    }
-  }
-
-  // Add this method to automatically create calendar events for tutorials
-  Future<void> _createTutorialCalendarEvents() async {
-    if (_organizationCode == null) return;
-
-    final user = _authService.currentUser;
-    if (user == null) return;
-
-    try {
-      // Get existing calendar events to avoid duplicates
-      final existingEventsSnapshot = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(_organizationCode)
-          .collection('students')
-          .doc(user.uid)
-          .collection('calendar_events')
-          .get();
-
-      // Create a set of existing tutorial IDs
-      Set<String> existingTutorialIds = {};
-      for (var doc in existingEventsSnapshot.docs) {
-        final data = doc.data();
-        if (data['eventType'] == 'tutorial' && data['sourceId'] != null) {
-          existingTutorialIds.add(data['sourceId']);
-        }
-      }
-
-      // Create calendar events for tutorials with due dates
-      for (var material in materials) {
-        if (material['materialType'] == 'tutorial' &&
-            !existingTutorialIds.contains(material['id'])) {
-          final dueDate = material['dueDate'] as Timestamp?;
-          if (dueDate != null) {
-            // Create calendar event
-            await FirebaseFirestore.instance
-                .collection('organizations')
-                .doc(_organizationCode)
-                .collection('students')
-                .doc(user.uid)
-                .collection('calendar_events')
-                .add({
-              'title': '📚 ${material['title'] ?? 'Tutorial'} Due',
-              'description': material['description'] ?? 'Tutorial deadline',
-              'startTime': dueDate,
-              'endTime': dueDate,
-              'color': Colors.blue.r,
-              'calendar': 'tutorials',
-              'eventType': EventType.normal.index,
-              'recurrenceType': RecurrenceType.none.index,
-              'reminderMinutes': 1440, // 24 hours before
-              'location': '',
-              'isRecurring': false,
-              'originalEventId': '',
-              'sourceId': material['id'], // Link to tutorial
-              'sourceType': 'tutorial',
-              'courseId': widget.courseId,
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-
-            print('✅ Created calendar event for tutorial: ${material['title']}');
-          }
-        }
-      }
-    } catch (e) {
-      print('Error creating tutorial calendar events: $e');
     }
   }
 
@@ -2050,63 +1903,47 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
   }
 
   Widget _buildContentTab() {
-    return RefreshIndicator(
-      onRefresh: () async {
-        // First fetch assignments and materials
-        await Future.wait([
-          _fetchAssignments(),
-          _fetchMaterials(),
-        ]);
-
-        // Then fetch submissions after materials are loaded
-        await Future.wait([
-          _fetchSubmissions(_authService.currentUser!.uid),
-          _fetchTutorialSubmissions(_authService.currentUser!.uid),
-        ]);
-      },
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(16),
-        child: Column(
-          children: [
-            if (assignments.isNotEmpty) ...[
-              _buildSectionHeader('Assignments', Icons.assignment),
-              // Updated to use the streaming version
-              ...assignments.map((assignment) => _buildAssignmentCardWithStream(assignment)),
-              SizedBox(height: 24),
-            ],
-
-            if (materials.isNotEmpty) ...[
-              _buildSectionHeader('Materials', Icons.description),
-              ...materials.map((material) => _buildMaterialCardWithStream(material)),
-            ],
-
-            if (assignments.isEmpty && materials.isEmpty)
-              Container(
-                padding: EdgeInsets.all(40),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.folder_open,
-                      size: 64,
-                      color: Colors.grey[400],
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      'No content available yet.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            SizedBox(height: 100),
+    return SingleChildScrollView(
+      physics: AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.all(16),
+      child: Column(
+        children: [
+          if (assignments.isNotEmpty) ...[
+            _buildSectionHeader('Assignments', Icons.assignment),
+            ...assignments.map((assignment) => _buildAssignmentCardWithStream(assignment)),
+            SizedBox(height: 24),
           ],
-        ),
+
+          if (materials.isNotEmpty) ...[
+            _buildSectionHeader('Materials', Icons.description),
+            ...materials.map((material) => _buildMaterialCardWithStream(material)),
+          ],
+
+          if (assignments.isEmpty && materials.isEmpty)
+            Container(
+              padding: EdgeInsets.all(40),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.folder_open,
+                    size: 64,
+                    color: Colors.grey[400],
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'No content available yet.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          SizedBox(height: 100),
+        ],
       ),
     );
   }
@@ -2413,15 +2250,12 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         ],
       ),
     )
-        : RefreshIndicator(
-      onRefresh: () => _fetchClassmates(_authService.currentUser!.uid),
-      child: ListView.builder(
-        padding: EdgeInsets.all(16),
-        itemCount: classmates.length,
-        itemBuilder: (context, index) {
-          return _buildClassmateCard(classmates[index]);
-        },
-      ),
+        : ListView.builder(
+      padding: EdgeInsets.all(16),
+      itemCount: classmates.length,
+      itemBuilder: (context, index) {
+        return _buildClassmateCard(classmates[index]);
+      },
     );
   }
 

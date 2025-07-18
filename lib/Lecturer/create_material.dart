@@ -30,12 +30,14 @@ class NotificationService {
     try {
       final currentUser = _auth.currentUser;
       if (currentUser == null) {
+        print('❌ User not authenticated for notification creation');
         throw Exception('User not authenticated');
       }
 
       // Get organization code if not provided
       String? orgCode = organizationCode;
       if (orgCode == null) {
+        print('🔍 Fetching organization code for user: ${currentUser.uid}');
         final userDoc = await _firestore
             .collection('users')
             .doc(currentUser.uid)
@@ -44,11 +46,16 @@ class NotificationService {
       }
 
       if (orgCode == null) {
+        print('❌ Organization code not found');
         throw Exception('Organization code not found');
       }
 
+      print('✅ Starting notification creation for $itemType: $itemTitle');
+      print('📍 Organization: $orgCode');
+
       // Get enrolled students if this is a course-related item
       if (courseId != null) {
+        print('🔍 Fetching enrolled students for course: $courseId');
         final enrollmentsSnapshot = await _firestore
             .collection('organizations')
             .doc(orgCode)
@@ -56,6 +63,8 @@ class NotificationService {
             .doc(courseId)
             .collection('enrollments')
             .get();
+
+        print('📊 Found ${enrollmentsSnapshot.docs.length} enrolled students');
 
         // Create notifications for all enrolled students
         for (var enrollment in enrollmentsSnapshot.docs) {
@@ -73,6 +82,7 @@ class NotificationService {
         }
       } else {
         // For personal items (like goals), create notification for current user
+        print('📝 Creating personal notification for user: ${currentUser.uid}');
         await _createStudentNotification(
           organizationCode: orgCode,
           studentId: currentUser.uid,
@@ -83,8 +93,20 @@ class NotificationService {
       }
 
       print('✅ Created notifications for $itemType: $itemTitle');
+
+      // MERGED: Create calendar events after notifications
+      if (courseId != null) {
+        await createCalendarEventsForEnrolledStudents(
+          sourceId: sourceId,
+          itemTitle: itemTitle,
+          dueDate: dueDate,
+          itemType: itemType,
+          courseId: courseId,
+          organizationCode: orgCode,
+        );
+      }
     } catch (e) {
-      print('Error creating notifications: $e');
+      print('❌ Error creating notifications: $e');
     }
   }
 
@@ -130,6 +152,9 @@ class NotificationService {
         notificationBody = '$itemTitle has been posted';
     }
 
+    print('📬 Creating notification for student: $studentId');
+    print('📍 Path: organizations/$organizationCode/students/$studentId/notifications');
+
     await _firestore
         .collection('organizations')
         .doc(organizationCode)
@@ -159,11 +184,15 @@ class NotificationService {
   }) async {
     try {
       final currentUser = _auth.currentUser;
-      if (currentUser == null) return;
+      if (currentUser == null) {
+        print('❌ User not authenticated for calendar event creation');
+        return;
+      }
 
       // Get organization code if not provided
       String? orgCode = organizationCode;
       if (orgCode == null) {
+        print('🔍 Fetching organization code for calendar events');
         final userDoc = await _firestore
             .collection('users')
             .doc(currentUser.uid)
@@ -171,7 +200,13 @@ class NotificationService {
         orgCode = userDoc.data()?['organizationCode'];
       }
 
-      if (orgCode == null) return;
+      if (orgCode == null) {
+        print('❌ Organization code not found for calendar events');
+        return;
+      }
+
+      print('✅ Starting calendar event creation for $itemType: $itemTitle');
+      print('📅 Due date: $dueDate');
 
       final enrollmentsSnapshot = await _firestore
           .collection('organizations')
@@ -181,8 +216,13 @@ class NotificationService {
           .collection('enrollments')
           .get();
 
+      print('📊 Creating calendar events for ${enrollmentsSnapshot.docs.length} students');
+
       for (var enrollment in enrollmentsSnapshot.docs) {
         final studentId = enrollment.data()['studentId'];
+
+        print('📅 Creating calendar event for student: $studentId');
+        print('📍 Path: organizations/$orgCode/students/$studentId/calendar_events');
 
         await _firestore
             .collection('organizations')
@@ -212,21 +252,20 @@ class NotificationService {
 
       print('✅ Created calendar events for $itemType: $itemTitle');
     } catch (e) {
-      print('Error creating calendar events: $e');
+      print('❌ Error creating calendar events: $e');
     }
   }
 
-  // Helper methods for calendar event properties
   String _getCalendarEventTitle(String itemType, String itemTitle) {
     switch (itemType.toLowerCase()) {
       case 'assignment':
-        return '📝 Assignment: $itemTitle Due';
+        return itemTitle; // Changed from '📝 Assignment: $itemTitle Due'
       case 'tutorial':
-        return '📚 Tutorial: $itemTitle Due';
+        return itemTitle; // Changed from '📚 Tutorial: $itemTitle Due'
       case 'goal':
-        return '🎯 Goal: $itemTitle Due';
+        return itemTitle; // Changed from '🎯 Goal: $itemTitle Due'
       default:
-        return '📅 $itemTitle Due';
+        return itemTitle; // Changed from '📅 $itemTitle Due'
     }
   }
 
@@ -243,16 +282,17 @@ class NotificationService {
     }
   }
 
-  int _getCalendarEventColor(String itemType) {
+  // Change the return type from Object to int
+  int _getCalendarEventColor(String itemType) {  // Change Object to int
     switch (itemType.toLowerCase()) {
       case 'assignment':
-        return Colors.orange.value;
+        return Colors.orange.value;  // Add .value
       case 'tutorial':
-        return Colors.blue.value;
+        return Colors.red.value;     // Add .value
       case 'goal':
-        return Colors.green.value;
+        return Colors.green.value;   // Add .value (was purple)
       default:
-        return Colors.purple.value;
+        return Colors.grey.value;    // Add .value
     }
   }
 
@@ -311,9 +351,13 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   @override
   void initState() {
     super.initState();
+    print('🚀 Initializing CreateMaterialPage');
+    print('📍 Course ID: ${widget.courseId}');
+    print('🔧 Edit mode: ${widget.editMode}');
 
     // If in edit mode, populate the fields with existing data
     if (widget.editMode && widget.materialData != null) {
+      print('📝 Loading existing material data for editing');
       _titleController.text = widget.materialData!['title'] ?? '';
       _descriptionController.text = widget.materialData!['description'] ?? '';
       _materialType = widget.materialData!['materialType'] ?? 'learning';
@@ -323,6 +367,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         final dueDateTime = (widget.materialData!['dueDate'] as Timestamp).toDate();
         _dueDate = DateTime(dueDateTime.year, dueDateTime.month, dueDateTime.day);
         _dueTime = TimeOfDay(hour: dueDateTime.hour, minute: dueDateTime.minute);
+        print('📅 Loaded due date: $_dueDate at $_dueTime');
       }
 
       // Handle existing files
@@ -338,12 +383,14 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             'storagePath': file['storagePath'] ?? '',
           }),
         );
+        print('📁 Loaded ${_existingFiles.length} existing files');
       }
     }
   }
 
   @override
   void dispose() {
+    print('🧹 Disposing CreateMaterialPage resources');
     _titleController.dispose();
     _descriptionController.dispose();
     _uploadSubscription?.cancel();
@@ -352,6 +399,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
 
   Future<void> _selectFiles() async {
     try {
+      print('📂 Starting file selection process');
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         allowMultiple: true,
         type: FileType.custom,
@@ -361,11 +409,13 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       );
 
       if (result != null) {
+        print('📋 Selected ${result.files.length} files for validation');
         List<PlatformFile> validFiles = [];
 
         for (var file in result.files) {
           // Check file size
           if (file.size > 10 * 1024 * 1024) {
+            print('❌ File ${file.name} exceeds 10MB limit');
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -380,11 +430,13 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           // Ensure we have bytes data
           if (kIsWeb) {
             if (file.bytes == null) {
+              print('❌ No bytes data for web file: ${file.name}');
               continue;
             }
           } else if (file.bytes == null && file.path != null) {
             // For mobile, read bytes from path
             try {
+              print('📱 Reading bytes from mobile path for: ${file.name}');
               final fileBytes = await File(file.path!).readAsBytes();
               file = PlatformFile(
                 name: file.name,
@@ -393,11 +445,13 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                 path: file.path,
               );
             } catch (e) {
+              print('❌ Failed to read bytes for: ${file.name}');
               continue;
             }
           }
 
           validFiles.add(file);
+          print('✅ File validated: ${file.name}');
         }
 
         if (mounted) {
@@ -405,7 +459,10 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             _selectedFiles = validFiles;
           });
 
+          print('📊 Final valid files count: ${validFiles.length}');
+
           if (validFiles.isEmpty && result.files.isNotEmpty) {
+            print('⚠️ No valid files after validation');
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('No valid files selected. Please try again.'),
@@ -414,8 +471,11 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             );
           }
         }
+      } else {
+        print('📂 File selection cancelled by user');
       }
     } catch (e) {
+      print('❌ Error selecting files: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -433,14 +493,20 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
     // Verify authentication
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
+      print('❌ User must be authenticated to upload files');
       throw Exception('User must be authenticated to upload files');
     }
+
+    print('☁️ Starting file upload process for ${_selectedFiles.length} files');
+    print('👤 Upload by user: ${currentUser.uid}');
 
     for (int i = 0; i < _selectedFiles.length; i++) {
       final file = _selectedFiles[i];
 
       if (file.bytes != null) {
         try {
+          print('⬆️ Uploading file ${i + 1}/${_selectedFiles.length}: ${file.name}');
+
           if (mounted) {
             setState(() {
               _uploadStatus = 'Uploading ${file.name}...';
@@ -451,6 +517,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           String fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
           // Using 'materials' instead of 'assignments'
           String storagePath = 'materials/${widget.courseId}/$fileName';
+
+          print('📍 Storage path: $storagePath');
 
           // Create file reference
           final ref = FirebaseStorage.instance.ref().child(storagePath);
@@ -481,13 +549,16 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
               }
             },
             onError: (error) {
-              // Handle error silently
+              print('❌ Upload progress error: $error');
             },
           );
 
           // Wait for upload to complete
           final snapshot = await uploadTask;
           final downloadUrl = await snapshot.ref.getDownloadURL();
+
+          print('✅ Upload complete for: ${file.name}');
+          print('🔗 Download URL obtained');
 
           // Add to uploaded files list
           uploadedFilesList.add({
@@ -499,6 +570,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           });
 
         } catch (e) {
+          print('❌ Failed to upload ${file.name}: $e');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -513,6 +585,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       }
     }
 
+    print('✅ All files uploaded successfully');
     return uploadedFilesList;
   }
 
@@ -546,12 +619,16 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
     }
   }
 
-  // Enhanced _saveMaterial method with NotificationService integration
+  // Enhanced _saveMaterial method with integrated notification and calendar creation
   Future<void> _saveMaterial() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      print('❌ Form validation failed');
+      return;
+    }
 
     // Validate tutorial specific requirements
     if (_materialType == 'tutorial' && _dueDate == null) {
+      print('❌ Tutorial due date validation failed');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Please select a due date for the tutorial'),
@@ -560,6 +637,10 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       );
       return;
     }
+
+    print('💾 Starting material save process');
+    print('📝 Material type: $_materialType');
+    print('🔧 Edit mode: ${widget.editMode}');
 
     setState(() {
       _isLoading = true;
@@ -571,6 +652,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       // Upload new files if any
       List<Map<String, dynamic>> newlyUploadedFiles = [];
       if (_selectedFiles.isNotEmpty) {
+        print('⬆️ Uploading ${_selectedFiles.length} new files');
         newlyUploadedFiles = await _uploadFiles();
       }
 
@@ -579,6 +661,21 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         ..._existingFiles,
         ...newlyUploadedFiles,
       ];
+
+      print('📁 Total files after upload: ${allFiles.length}');
+
+      // Prepare due date time for tutorials
+      DateTime? dueDateTime;
+      if (_materialType == 'tutorial') {
+        dueDateTime = DateTime(
+          _dueDate!.year,
+          _dueDate!.month,
+          _dueDate!.day,
+          _dueTime?.hour ?? 23,
+          _dueTime?.minute ?? 59,
+        );
+        print('📅 Tutorial due date set to: $dueDateTime');
+      }
 
       // Prepare material data
       final materialData = {
@@ -602,15 +699,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
 
       // Add tutorial-specific fields
       if (_materialType == 'tutorial') {
-        final dueDateTime = DateTime(
-          _dueDate!.year,
-          _dueDate!.month,
-          _dueDate!.day,
-          _dueTime?.hour ?? 23,
-          _dueTime?.minute ?? 59,
-        );
-
-        materialData['dueDate'] = Timestamp.fromDate(dueDateTime);
+        materialData['dueDate'] = Timestamp.fromDate(dueDateTime!);
         materialData['requiresSubmission'] = true;
       } else {
         materialData['requiresSubmission'] = false;
@@ -630,13 +719,19 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       final organizationCode = widget.courseData['organizationCode'];
 
       if (organizationCode == null) {
+        print('❌ Organization code not found in course data');
         throw Exception('Organization code not found');
       }
+
+      print('🏢 Organization code: $organizationCode');
 
       // Save or update material in Firestore
       String? materialId;
       if (widget.editMode && widget.materialId != null) {
         // Update existing material
+        print('📝 Updating existing material: ${widget.materialId}');
+        print('📍 Path: organizations/$organizationCode/courses/${widget.courseId}/materials/${widget.materialId}');
+
         await FirebaseFirestore.instance
             .collection('organizations')
             .doc(organizationCode)
@@ -647,6 +742,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             .update(materialData);
 
         materialId = widget.materialId;
+        print('✅ Material updated successfully');
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -657,6 +754,9 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         }
       } else {
         // Create new material
+        print('🆕 Creating new material');
+        print('📍 Path: organizations/$organizationCode/courses/${widget.courseId}/materials');
+
         final docRef = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(organizationCode)
@@ -666,6 +766,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
             .add(materialData);
 
         materialId = docRef.id;
+        print('✅ Material created successfully with ID: $materialId');
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -676,37 +778,22 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         }
       }
 
-      // Enhanced notification and calendar event creation using NotificationService
+      // MERGED: Create notifications and calendar events using NotificationService
+      // This now handles both notifications and calendar events in one call
       if (_materialType == 'tutorial') {
-        final dueDateTime = DateTime(
-          _dueDate!.year,
-          _dueDate!.month,
-          _dueDate!.day,
-          _dueTime?.hour ?? 23,
-          _dueTime?.minute ?? 59,
-        );
-
-        // Create calendar events using NotificationService
-        await _notificationService.createCalendarEventsForEnrolledStudents(
-          sourceId: materialId!,
-          itemTitle: _titleController.text.trim(),
-          dueDate: dueDateTime,
-          itemType: 'tutorial',
-          courseId: widget.courseId,
-          organizationCode: organizationCode,
-        );
-
-        // Create notifications using NotificationService
+        print('📚 Creating notifications and calendar events for tutorial');
+        // Create notifications and calendar events using NotificationService
         await _notificationService.createNewItemNotification(
           itemType: 'tutorial',
           itemTitle: _titleController.text.trim(),
-          dueDate: dueDateTime,
-          sourceId: materialId,
+          dueDate: dueDateTime!,
+          sourceId: materialId!,
           courseId: widget.courseId,
           courseName: widget.courseData['title'] ?? widget.courseData['name'],
           organizationCode: organizationCode,
         );
       } else {
+        print('📖 Creating notifications for learning material');
         // For learning materials, only send notifications (no calendar events)
         await _notificationService.createNewItemNotification(
           itemType: 'learning',
@@ -719,11 +806,14 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         );
       }
 
+      print('🎉 Material save process completed successfully');
+
       // Navigate back
       if (mounted) {
         Navigator.pop(context, true);
       }
     } catch (e) {
+      print('❌ Error ${widget.editMode ? 'updating' : 'creating'} material: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -743,6 +833,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   }
 
   Future<void> _selectDueDate() async {
+    print('📅 Opening due date picker');
+
     // Determine the first selectable date based on edit mode
     DateTime firstSelectableDate;
 
@@ -767,10 +859,13 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       setState(() {
         _dueDate = picked;
       });
+      print('✅ Due date selected: $picked');
     }
   }
 
   Future<void> _selectDueTime() async {
+    print('⏰ Opening due time picker');
+
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: _dueTime ?? TimeOfDay(hour: 23, minute: 59),
@@ -780,6 +875,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       setState(() {
         _dueTime = picked;
       });
+      print('✅ Due time selected: ${picked.format(context)}');
     }
   }
 

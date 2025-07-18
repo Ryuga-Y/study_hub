@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import '../Authentication/auth_services.dart';
+import 'dart:math' as math;
 
 enum CalendarView { month, week, day, agenda }
 enum EventType { normal, allDay, recurring }
@@ -18,7 +19,7 @@ class _CalendarPageState extends State<CalendarPage> {
   DateTime _focusedDate = DateTime.now();
   CalendarView _currentView = CalendarView.month;
   Map<DateTime, List<CalendarEvent>> _events = {};
-  List<String> _enabledCalendars = ['personal', 'work', 'family'];
+  List<String> _enabledCalendars = ['personal', 'school', 'family', 'assignments', 'tutorials', 'goals'];
   bool _isLoading = true;
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
@@ -31,33 +32,62 @@ class _CalendarPageState extends State<CalendarPage> {
   @override
   void initState() {
     super.initState();
+    print('🚀 Calendar page initializing');
+    _startEventsListener(); // Make sure this is called
+  }
+
+  // Add refresh functionality
+  Future<void> _refreshEvents() async {
+    setState(() => _isLoading = true);
+
+    // Cancel existing subscription
+    await _eventsSubscription?.cancel();
+
+    // Restart the listener
     _startEventsListener();
   }
 
-  // New method to start real-time listener
+  // Debug function to print events information
+  void _debugPrintEvents() {
+    print('🔍 DEBUG: Current events in calendar:');
+    _events.forEach((date, eventList) {
+      print('📅 Date: $date has ${eventList.length} events');
+      for (var event in eventList) {
+        print('  📌 ${event.title} at ${event.startTime} (${event.calendar})');
+      }
+    });
+
+    final todayEvents = _getEventsForDay(_selectedDate);
+    print('📅 Events for selected date $_selectedDate: ${todayEvents.length}');
+    for (var event in todayEvents) {
+      print('  ⏰ ${event.title} at ${TimeOfDay.fromDateTime(event.startTime).format(context)}');
+    }
+  }
+
   void _startEventsListener() {
     final user = _authService.currentUser;
     if (user == null) {
-      print('No user found');
+      print('❌ No user found');
       setState(() => _isLoading = false);
       return;
     }
 
     _authService.getUserData(user.uid).then((userData) {
       if (userData == null) {
-        print('No user data found');
+        print('❌ No user data found');
         setState(() => _isLoading = false);
         return;
       }
 
       final orgCode = userData['organizationCode'];
       if (orgCode == null) {
-        print('No organization code found');
+        print('❌ No organization code found');
         setState(() => _isLoading = false);
         return;
       }
 
-      print('Starting real-time event listener for user: ${user.uid}, org: $orgCode');
+      print('✅ Starting real-time event listener for user: ${user.uid}, org: $orgCode');
+      print('📍 Path: organizations/$orgCode/students/${user.uid}/calendar_events');
 
       _eventsSubscription = FirebaseFirestore.instance
           .collection('organizations')
@@ -67,60 +97,71 @@ class _CalendarPageState extends State<CalendarPage> {
           .collection('calendar_events')
           .snapshots()
           .listen((snapshot) {
-        print('Received ${snapshot.docs.length} event documents');
+        print('📅 Received ${snapshot.docs.length} event documents');
 
-        Map<DateTime, List<CalendarEvent>> events = {};
+        // COMPLETELY REBUILD events map from scratch
+        Map<DateTime, List<CalendarEvent>> newEvents = {};
 
-        for (var change in snapshot.docChanges) {
-          final data = change.doc.data();
+        for (var doc in snapshot.docs) {
+          final data = doc.data();
           if (data == null) continue;
 
           try {
-            final event = CalendarEvent.fromMap(change.doc.id, data);
-            print('Processing event: ${event.title} for ${event.startTime}');
-
-            if (change.type == DocumentChangeType.removed) {
-              // Remove event from map
-              final eventDate = DateTime(event.startTime.year, event.startTime.month, event.startTime.day);
-              events[eventDate]?.removeWhere((e) => e.id == event.id);
-              continue;
-            }
+            final event = CalendarEvent.fromMap(doc.id, data);
+            print('📝 Processing event: ${event.title}');
+            print('📅 Event date: ${event.startTime}');
+            print('📅 Event hour: ${event.startTime.hour}:${event.startTime.minute}');
+            print('🏷️ Event calendar: ${event.calendar}');
 
             // Handle recurring events
             if (event.recurrenceType != RecurrenceType.none) {
               final recurringEvents = _generateRecurringEvents(event);
               for (var recurringEvent in recurringEvents) {
                 final eventDate = DateTime(
-                  recurringEvent.startTime.year,
-                  recurringEvent.startTime.month,
-                  recurringEvent.startTime.day,
+                  event.startTime.year,
+                  event.startTime.month,
+                  event.startTime.day,
                 );
-                events[eventDate] = events[eventDate] ?? [];
-                events[eventDate]!.add(recurringEvent);
+                newEvents[eventDate] = newEvents[eventDate] ?? [];
+                newEvents[eventDate]!.add(event);
+                print('➕ Added event for: $eventDate (hour: ${event.startTime.hour}:${event.startTime.minute})');
               }
             } else {
-              final eventDate = DateTime(event.startTime.year, event.startTime.month, event.startTime.day);
-              events[eventDate] = events[eventDate] ?? [];
-              if (!events[eventDate]!.any((e) => e.id == event.id)) {
-                events[eventDate]!.add(event);
-              }
+              // IMPORTANT: Normalize the date consistently
+              final eventDate = DateTime(
+                event.startTime.year,
+                event.startTime.month,
+                event.startTime.day,
+              );
+              newEvents[eventDate] = newEvents[eventDate] ?? [];
+              newEvents[eventDate]!.add(event);
+              print('➕ Added event for: $eventDate');
             }
           } catch (e) {
-            print('Error processing event ${change.doc.id}: $e');
+            print('❌ Error processing event ${doc.id}: $e');
+            print('📄 Event data: $data');
           }
         }
 
         // Sort events by start time for each date
-        events.forEach((date, eventList) {
+        newEvents.forEach((date, eventList) {
           eventList.sort((a, b) => a.startTime.compareTo(b.startTime));
         });
 
+        print('✅ Final events map summary:');
+        newEvents.forEach((date, eventList) {
+          print('📅 $date: ${eventList.length} events');
+          for (var event in eventList) {
+            print('   📌 ${event.title} at ${event.startTime.hour}:${event.startTime.minute}');
+          }
+        });
+
         setState(() {
-          _events = events;
+          _events = newEvents;
           _isLoading = false;
         });
       }, onError: (e) {
-        print('Error in event listener: $e');
+        print('❌ Error in event listener: $e');
         setState(() => _isLoading = false);
       });
     });
@@ -132,6 +173,7 @@ class _CalendarPageState extends State<CalendarPage> {
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
+    print('🧹 Calendar page disposed - listener cancelled');
   }
 
   Future<void> _loadEvents() async {
@@ -221,6 +263,7 @@ class _CalendarPageState extends State<CalendarPage> {
       setState(() {
         _events = events;
         _isLoading = false;
+        _debugPrintEvents(); // Add debug function call
       });
     } catch (e) {
       print('Error loading events: $e');
@@ -308,19 +351,52 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   List<CalendarEvent> _getEventsForDay(DateTime day) {
-    // Normalize the day to remove time component
-    final normalizedDay = DateTime(day.year, day.month, day.day);
-    final events = _events[normalizedDay] ?? [];
+    // Normalize the day to midnight LOCAL time (not UTC)
+    final normalizedDay = DateTime(
+      day.year,
+      day.month,
+      day.day,
+    );
 
-    // Debug print to check if events are being found
-    print('Getting events for $normalizedDay: found ${events.length} events');
-    if (events.isNotEmpty) {
-      for (var event in events) {
-        print('  - Event: ${event.title} at ${event.startTime}');
+    print('🔍 Getting events for normalized date: $normalizedDay');
+    print('📊 Available dates in _events: ${_events.keys.toList()}');
+
+    // Get all events for this day
+    List<CalendarEvent> allEvents = [];
+
+    _events.forEach((eventDate, eventList) {
+      // Normalize event date for comparison (ensure LOCAL time)
+      final normalizedEventDate = DateTime(
+        eventDate.year,
+        eventDate.month,
+        eventDate.day,
+      );
+
+      if (normalizedEventDate.year == normalizedDay.year &&
+          normalizedEventDate.month == normalizedDay.month &&
+          normalizedEventDate.day == normalizedDay.day) {
+        allEvents.addAll(eventList);
       }
+    });
+
+    print('📅 Raw events for $normalizedDay: ${allEvents.length}');
+    for (var event in allEvents) {
+      print('   📌 ${event.title} at ${event.startTime} (calendar: ${event.calendar})');
     }
 
-    return events.where((event) => _enabledCalendars.contains(event.calendar)).toList();
+    // Filter by enabled calendars
+    final filteredEvents = allEvents.where((event) {
+      final isEnabled = _enabledCalendars.contains(event.calendar);
+      print('   🔍 Event ${event.title} (${event.calendar}): enabled=$isEnabled');
+      return isEnabled;
+    }).toList();
+
+    // Sort by start time
+    filteredEvents.sort((a, b) => a.startTime.compareTo(b.startTime));
+
+    print('✅ Filtered events for $normalizedDay: ${filteredEvents.length}');
+
+    return filteredEvents;
   }
 
   List<CalendarEvent> _getEventsForDateRange(DateTime start, DateTime end) {
@@ -335,7 +411,6 @@ class _CalendarPageState extends State<CalendarPage> {
     return events;
   }
 
-  // Updated _addEvent without _loadEvents call
   Future<void> _addEvent(CalendarEvent event) async {
     try {
       final user = _authService.currentUser;
@@ -354,9 +429,11 @@ class _CalendarPageState extends State<CalendarPage> {
           .doc(user.uid)
           .collection('calendar_events')
           .add(event.toMap());
-      // No need to call _loadEvents; listener will handle updates
+
+      // Note: No need to manually update _events here since the listener will handle it
+      print('✅ Event added successfully - listener will update all views');
     } catch (e) {
-      print('Error adding event: $e');
+      print('❌ Error adding event: $e');
     }
   }
 
@@ -414,6 +491,186 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
+  // Calendar filter dialog from the first snippet
+  void _showCalendarFilter() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Filter Calendars'),
+        content: StatefulBuilder(
+          builder: (context, setState) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CheckboxListTile(
+                title: Text('Personal'),
+                value: _enabledCalendars.contains('personal'),
+                onChanged: (value) {
+                  setState(() {
+                    if (value!) {
+                      _enabledCalendars.add('personal');
+                    } else {
+                      _enabledCalendars.remove('personal');
+                    }
+                  });
+                  this.setState(() {});
+                },
+              ),
+              CheckboxListTile(
+                title: Text('School'),
+                value: _enabledCalendars.contains('school'),
+                onChanged: (value) {
+                  setState(() {
+                    if (value!) {
+                      _enabledCalendars.add('school');
+                    } else {
+                      _enabledCalendars.remove('school');
+                    }
+                  });
+                  this.setState(() {});
+                },
+              ),
+              CheckboxListTile(
+                title: Text('Family'),
+                value: _enabledCalendars.contains('family'),
+                onChanged: (value) {
+                  setState(() {
+                    if (value!) {
+                      _enabledCalendars.add('family');
+                    } else {
+                      _enabledCalendars.remove('family');
+                    }
+                  });
+                  this.setState(() {});
+                },
+              ),
+              CheckboxListTile(
+                title: Text('Assignments'),
+                value: _enabledCalendars.contains('assignments'),
+                onChanged: (value) {
+                  setState(() {
+                    if (value!) {
+                      _enabledCalendars.add('assignments');
+                    } else {
+                      _enabledCalendars.remove('assignments');
+                    }
+                  });
+                  this.setState(() {});
+                },
+              ),
+              CheckboxListTile(
+                title: Text('Tutorials'),
+                value: _enabledCalendars.contains('tutorials'),
+                onChanged: (value) {
+                  setState(() {
+                    if (value!) {
+                      _enabledCalendars.add('tutorials');
+                    } else {
+                      _enabledCalendars.remove('tutorials');
+                    }
+                  });
+                  this.setState(() {});
+                },
+              ),
+              CheckboxListTile(
+                title: Text('Goals'),
+                value: _enabledCalendars.contains('goals'),
+                onChanged: (value) {
+                  setState(() {
+                    if (value!) {
+                      _enabledCalendars.add('goals');
+                    } else {
+                      _enabledCalendars.remove('goals');
+                    }
+                  });
+                  this.setState(() {});
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Updated calendar color function to include all calendar types
+  Color _getCalendarColor(String calendar) {
+    switch (calendar) {
+      case 'personal':
+        return Colors.blue;
+      case 'school':
+        return Colors.orange;
+      case 'family':
+        return Colors.green;
+      case 'assignments':
+        return Colors.red;    // Assignments show in red
+      case 'tutorials':
+        return Colors.red;    // Tutorials show in red
+      case 'goals':
+        return Colors.purple;
+      default:
+        return Colors.blue;
+    }
+  }
+
+  // Updated app bar from the first snippet with refresh functionality
+  Widget _buildAppBar() {
+    return Container(
+      height: 150,
+      padding: EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(Icons.arrow_back, color: Colors.grey[700]),
+            onPressed: () => Navigator.pop(context),
+            padding: EdgeInsets.zero,
+          ),
+          SizedBox(width: 8),
+          Icon(
+            Icons.calendar_today,
+            color: Colors.blue[600],
+            size: 24,
+          ),
+          SizedBox(width: 8),
+          Text(
+            'Calendar',
+            style: TextStyle(
+              color: Colors.grey[700],
+              fontSize: 20,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          Spacer(),
+          // Refresh button
+          IconButton(
+            icon: Icon(Icons.refresh, color: Colors.grey[700]),
+            onPressed: _refreshEvents,
+            padding: EdgeInsets.zero,
+          ),
+          IconButton(
+            icon: Icon(Icons.search, color: Colors.grey[700]),
+            onPressed: () => _showSearchDialog(),
+            padding: EdgeInsets.zero,
+          ),
+          IconButton(
+            icon: Icon(Icons.filter_list, color: Colors.grey[700]),
+            onPressed: () => _showCalendarFilter(),
+            padding: EdgeInsets.zero,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -428,9 +685,9 @@ class _CalendarPageState extends State<CalendarPage> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: _buildAppBar(),
       body: Column(
         children: [
+          _buildAppBar(),
           if (_isSearching) _buildSearchResults(),
           if (!_isSearching) ...[
             _buildViewSelector(),
@@ -444,41 +701,6 @@ class _CalendarPageState extends State<CalendarPage> {
         backgroundColor: Colors.blue[600],
         child: Icon(Icons.add, color: Colors.white),
       ),
-    );
-  }
-
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
-      backgroundColor: Colors.white,
-      elevation: 1,
-      leading: IconButton(
-        icon: Icon(Icons.arrow_back, color: Colors.grey[700]),
-        onPressed: () => Navigator.pop(context),
-      ),
-      title: Row(
-        children: [
-          Icon(
-            Icons.calendar_today,
-            color: Colors.blue[600],
-            size: 28,
-          ),
-          SizedBox(width: 12),
-          Text(
-            'Calendar',
-            style: TextStyle(
-              color: Colors.grey[700],
-              fontSize: 22,
-              fontWeight: FontWeight.normal,
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        IconButton(
-          icon: Icon(Icons.search, color: Colors.grey[700]),
-          onPressed: () => _showSearchDialog(),
-        ),
-      ],
     );
   }
 
@@ -895,53 +1117,70 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _buildWeekView() {
-    final weekStart = _focusedDate.subtract(Duration(days: _focusedDate.weekday - 1));
+    final weekStart = _focusedDate.subtract(Duration(days: (_focusedDate.weekday - 1) % 7));
     final weekDays = List.generate(7, (index) => weekStart.add(Duration(days: index)));
 
     return Column(
       children: [
-        // Week header with fixed height and proper constraints
+        // Week header - Fixed height
         Container(
-          height: 70, // Increased height to prevent overflow
+          height: 80,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+          ),
           child: Row(
             children: [
               Container(width: 60), // Time column space
               ...weekDays.map((day) {
                 final isToday = _isSameDay(day, DateTime.now());
+                final isSelected = _isSameDay(day, _selectedDate);
                 return Expanded(
-                  child: Container(
-                    padding: EdgeInsets.symmetric(vertical: 4), // Reduced padding
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min, // Use minimum space needed
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          _getDayName(day.weekday).substring(0, 3),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedDate = day;
+                        _currentView = CalendarView.day;
+                      });
+                    },
+                    child: Container(
+                      margin: EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isSelected ? Colors.blue[50] : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _getDayName(day.weekday).substring(0, 3),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
                           ),
-                        ),
-                        SizedBox(height: 4), // Fixed spacing
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: isToday ? Colors.blue[600] : Colors.transparent,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Text(
-                              '${day.day}',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                color: isToday ? Colors.white : Colors.black87,
+                          SizedBox(height: 4),
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: isToday ? Colors.blue[600] : Colors.transparent,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${day.day}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: isToday ? Colors.white : Colors.black87,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -949,10 +1188,17 @@ class _CalendarPageState extends State<CalendarPage> {
             ],
           ),
         ),
-        // Time slots
-        Expanded(
-          child: SingleChildScrollView(
-            child: _buildTimeSlots(weekDays),
+        // Time slots with flexible height
+        Flexible(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final availableHeight = constraints.maxHeight;
+              final timeSlotHeight = math.max(60.0, availableHeight / 24); // Smaller minimum for week view
+
+              return SingleChildScrollView(
+                child: _buildTimeSlots(weekDays, timeSlotHeight),
+              );
+            },
           ),
         ),
       ],
@@ -962,104 +1208,255 @@ class _CalendarPageState extends State<CalendarPage> {
   Widget _buildDayView() {
     return Column(
       children: [
-        // Day header
+        // Day header - Fixed height
         Container(
-          height: 60,
-          padding: EdgeInsets.symmetric(vertical: 8),
+          height: 90,
+          padding: EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+          ),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                _getDayName(_selectedDate.weekday),
+                _getDayName(_selectedDate.weekday), // Changed from _selectedDate
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 14,
                   color: Colors.grey[600],
                 ),
               ),
-              Text(
-                  '${_selectedDate.day}',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black87,
-                  )
+              SizedBox(height: 8),
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: _isSameDay(_selectedDate, DateTime.now())
+                      ? Colors.blue[600]
+                      : Colors.transparent,
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    '${_selectedDate.day}', // Changed from _selectedDate
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                      color: _isSameDay(_selectedDate, DateTime.now())
+                          ? Colors.white
+                          : Colors.black87,
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
         ),
-        // Time slots
-        Expanded(
-          child: SingleChildScrollView(
-            child: _buildTimeSlots([_selectedDate]),
+        // Time slots - Use Flexible instead of Expanded
+        Flexible(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final availableHeight = constraints.maxHeight;
+              final timeSlotHeight = math.max(50.0, availableHeight / 24);
+
+              return SingleChildScrollView(
+                child: _buildTimeSlots([_selectedDate], timeSlotHeight), // Changed to use _selectedDate
+              );
+            },
           ),
         ),
       ],
     );
   }
 
-  Widget _buildTimeSlots(List<DateTime> days) {
+  Widget _buildTimeSlots(List<DateTime> days, [double slotHeight = 60.0]) {
+    print('🕐 Building time slots for days: $days');
+    print('📏 Slot height: $slotHeight');
+
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: List.generate(24, (hour) {
-        return Container(
-          height: 60,
-          decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(color: Colors.grey[200]!),
-            ),
-          ),
+        return SizedBox(
+          height: slotHeight,
           child: Row(
             children: [
-              Container(
+              // Time label column
+              SizedBox(
                 width: 60,
-                padding: EdgeInsets.only(right: 8, top: 4),
-                child: Text(
-                  '${hour.toString().padLeft(2, '0')}:00',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
+                child: Padding(
+                  padding: EdgeInsets.only(right: 8, top: 2),
+                  child: Text(
+                    '${hour.toString().padLeft(2, '0')}:00',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey[600],
+                    ),
+                    textAlign: TextAlign.right,
                   ),
-                  textAlign: TextAlign.right,
                 ),
               ),
+              // Events column for each day
               ...days.map((day) {
-                final dayEvents = _getEventsForDay(day)
-                    .where((event) => event.startTime.hour == hour)
-                    .toList();
+                // Normalize the day to ensure consistent comparison
+                final normalizedDay = DateTime(day.year, day.month, day.day);
+
+                // Get ALL events for this day
+                final allDayEvents = _getEventsForDay(normalizedDay);
+                print('🕐 Hour $hour for day $normalizedDay: checking ${allDayEvents.length} total events');
+
+                // Filter events that fall within this hour slot
+                final dayEvents = allDayEvents.where((event) {
+                  final eventStartHour = event.startTime.hour;
+                  final eventEndHour = event.endTime.hour;
+                  final eventStartMinute = event.startTime.minute;
+                  final eventEndMinute = event.endTime.minute;
+
+                  // Special handling for events at 23:59 (11:59 PM)
+                  if (hour == 23 && eventStartHour == 23 && eventStartMinute == 59) {
+                    return true;
+                  }
+
+                  // Event matches if:
+                  // 1. It starts in this hour
+                  // 2. It spans across this hour (starts before and ends after)
+                  // 3. It's an all-day event shown at specific time (like 11:59 PM)
+                  final matches = eventStartHour == hour ||
+                      (eventStartHour < hour &&
+                          (eventEndHour > hour ||
+                              (eventEndHour == hour && eventEndMinute > 0)));
+
+                  if (matches) {
+                    print('   ✅ Event ${event.title} matches hour $hour (start: $eventStartHour:$eventStartMinute, end: $eventEndHour:$eventEndMinute)');
+                  }
+                  return matches;
+                }).toList();
+
+                print('🎯 Final events for hour $hour: ${dayEvents.length}');
 
                 return Expanded(
                   child: Container(
+                    height: slotHeight,
                     decoration: BoxDecoration(
                       border: Border(
-                        left: BorderSide(color: Colors.grey[200]!),
+                        left: BorderSide(color: Colors.grey[200]!, width: 0.5),
+                        top: hour == 0 ? BorderSide.none : BorderSide(color: Colors.grey[200]!, width: 0.5),
                       ),
                     ),
-                    child: Stack(
-                      children: dayEvents.map((event) {
-                        return Positioned(
-                          left: 2,
-                          right: 2,
-                          top: (event.startTime.minute / 60) * 60,
-                          height: (event.endTime.difference(event.startTime).inMinutes / 60) * 60,
-                          child: GestureDetector(
-                            onTap: () => _showEventDetails(event),
-                            child: Container(
-                              padding: EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: event.color,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                event.title,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
+                    child: ClipRect(
+                      child: Stack(
+                        clipBehavior: Clip.hardEdge,
+                        children: [
+                          // Show events in this time slot - stacked vertically
+                          ...dayEvents.asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final event = entry.value;
+                            final totalEvents = dayEvents.length;
+
+                            print('🎨 Rendering event: ${event.title} at hour $hour');
+
+                            // Calculate position and height more accurately
+                            final eventStartTime = event.startTime;
+                            final eventEndTime = event.endTime;
+
+                            // Calculate base position and height
+                            double topPosition = 0;
+                            double eventHeight = 20; // Default minimum height
+
+                            if (eventStartTime.hour == 23 && eventStartTime.minute == 59) {
+                              // Special handling for 11:59 PM events
+                              topPosition = slotHeight - 30 - (index * 12); // Stack upwards from bottom
+                              eventHeight = 10; // Smaller height for stacked events
+                            } else if (eventStartTime.hour == hour) {
+                              topPosition = (eventStartTime.minute / 60) * slotHeight;
+
+                              if (eventEndTime.hour == hour) {
+                                // Event starts and ends in the same hour
+                                final durationMinutes = eventEndTime.minute - eventStartTime.minute;
+                                eventHeight = math.max(20.0, (durationMinutes / 60) * slotHeight);
+                              } else {
+                                // Event starts in this hour but ends later
+                                eventHeight = math.max(20.0, ((60 - eventStartTime.minute) / 60) * slotHeight);
+                              }
+
+                              // For overlapping events at same time, stack them vertically
+                              if (totalEvents > 1) {
+                                // Reduce height to fit multiple events
+                                eventHeight = math.min(eventHeight, slotHeight / totalEvents - 2);
+                                // Stack events vertically
+                                topPosition = topPosition + (index * (eventHeight + 2));
+                              }
+                            } else if (eventStartTime.hour < hour && eventEndTime.hour == hour) {
+                              // Event started earlier and ends in this hour
+                              topPosition = 0;
+                              eventHeight = math.max(20.0, (eventEndTime.minute / 60) * slotHeight);
+                            } else if (eventStartTime.hour < hour && eventEndTime.hour > hour) {
+                              // Event spans the entire hour
+                              topPosition = 0;
+                              eventHeight = slotHeight;
+                            }
+
+                            // Ensure event doesn't overflow the time slot
+                            if (topPosition + eventHeight > slotHeight) {
+                              eventHeight = slotHeight - topPosition - 2;
+                            }
+
+                            return Positioned(
+                              left: 2,
+                              right: 2,
+                              top: topPosition,
+                              height: math.max(10, eventHeight), // Minimum height of 10
+                              child: GestureDetector(
+                                onTap: () => _showEventDetails(event),
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: event.color.withOpacity(totalEvents > 2 ? 0.9 : 1.0),
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(
+                                      color: event.color,
+                                      width: 0.5,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.15),
+                                        blurRadius: 2,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          event.title,
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: math.min(9, eventHeight / 2.5),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                      ),
+                                      if (eventHeight > 15 && totalEvents <= 3)
+                                        Padding(
+                                          padding: EdgeInsets.only(left: 4),
+                                          child: Text(
+                                            TimeOfDay.fromDateTime(event.startTime).format(context),
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(0.8),
+                                              fontSize: math.min(7, eventHeight / 3),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
+                            );
+                          }).toList(),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -1210,6 +1607,7 @@ class _CalendarPageState extends State<CalendarPage> {
           break;
         case CalendarView.week:
           _focusedDate = _focusedDate.add(Duration(days: 7 * direction));
+          _selectedDate = _focusedDate;
           break;
         case CalendarView.day:
           _focusedDate = _focusedDate.add(Duration(days: direction));
@@ -1300,19 +1698,6 @@ class _CalendarPageState extends State<CalendarPage> {
     });
   }
 
-  Color _getCalendarColor(String calendar) {
-    switch (calendar) {
-      case 'personal':
-        return Colors.blue;
-      case 'work':
-        return Colors.orange;
-      case 'family':
-        return Colors.green;
-      default:
-        return Colors.blue;
-    }
-  }
-
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
@@ -1373,8 +1758,8 @@ class CalendarEvent {
       id: id,
       title: map['title'] ?? '',
       description: map['description'] ?? '',
-      startTime: (map['startTime'] as Timestamp).toDate(),
-      endTime: (map['endTime'] as Timestamp).toDate(),
+      startTime: (map['startTime'] as Timestamp).toDate().toLocal(), // ADD .toLocal()
+      endTime: (map['endTime'] as Timestamp).toDate().toLocal(),
       color: Color(map['color'] ?? Colors.blue.value),
       calendar: map['calendar'] ?? 'personal',
       eventType: EventType.values[map['eventType'] ?? 0],
@@ -1431,6 +1816,7 @@ class _NoteDialogState extends State<NoteDialog> {
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = TimeOfDay.now();
   Color _selectedColor = Colors.blue;
+  String _selectedCalendar = 'personal';
 
   final List<Color> _colors = [
     Colors.blue,
@@ -1445,6 +1831,15 @@ class _NoteDialogState extends State<NoteDialog> {
     Colors.amber,
   ];
 
+  final List<String> _availableCalendars = [
+    'personal',
+    'school',
+    'family',
+    'assignments',
+    'tutorials',
+    'goals'
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -1456,6 +1851,26 @@ class _NoteDialogState extends State<NoteDialog> {
       _selectedDate = widget.event!.startTime;
       _selectedTime = TimeOfDay.fromDateTime(widget.event!.startTime);
       _selectedColor = widget.event!.color;
+      _selectedCalendar = widget.event!.calendar;
+    }
+  }
+
+  Color _getCalendarColor(String calendar) {
+    switch (calendar) {
+      case 'personal':
+        return Colors.blue;
+      case 'school':
+        return Colors.orange;
+      case 'family':
+        return Colors.green;
+      case 'assignments':
+        return Colors.red;
+      case 'tutorials':
+        return Colors.red;
+      case 'goals':
+        return Colors.purple;
+      default:
+        return Colors.blue;
     }
   }
 
@@ -1490,6 +1905,42 @@ class _NoteDialogState extends State<NoteDialog> {
                 prefixIcon: Icon(Icons.description),
               ),
               maxLines: 3,
+            ),
+            SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              value: _selectedCalendar,
+              decoration: InputDecoration(
+                labelText: 'Calendar',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                prefixIcon: Icon(Icons.calendar_today),
+              ),
+              items: _availableCalendars.map((calendar) {
+                return DropdownMenuItem(
+                  value: calendar,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: _getCalendarColor(calendar),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Text(calendar.toUpperCase()),
+                    ],
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedCalendar = value!;
+                  _selectedColor = _getCalendarColor(value);
+                });
+              },
             ),
             SizedBox(height: 16),
             Row(
@@ -1605,7 +2056,7 @@ class _NoteDialogState extends State<NoteDialog> {
                 startTime: startDateTime,
                 endTime: endDateTime,
                 color: _selectedColor,
-                calendar: 'personal',
+                calendar: _selectedCalendar,
                 eventType: EventType.normal,
                 recurrenceType: RecurrenceType.none,
                 reminderMinutes: 15,
@@ -1677,6 +2128,22 @@ class EventDetailsDialog extends StatelessWidget {
             Text(event.description),
             SizedBox(height: 16),
           ],
+          Text('Calendar:', style: TextStyle(fontWeight: FontWeight.bold)),
+          Row(
+            children: [
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: event.color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              SizedBox(width: 8),
+              Text(event.calendar.toUpperCase()),
+            ],
+          ),
+          SizedBox(height: 16),
           Text('Date & Time:', style: TextStyle(fontWeight: FontWeight.bold)),
           Text(
             '${event.startTime.day}/${event.startTime.month}/${event.startTime.year} at ${TimeOfDay.fromDateTime(event.startTime).format(context)}',

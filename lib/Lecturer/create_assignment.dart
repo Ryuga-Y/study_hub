@@ -8,7 +8,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File;
 import 'dart:async';
 
-// Add these enums if they don't exist in your project
+
+// Enum definitions
 enum EventType { normal, recurring, holiday }
 enum RecurrenceType { none, daily, weekly, monthly, yearly }
 
@@ -17,7 +18,7 @@ class NotificationService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Create notification for new items (assignments, materials, etc.)
+  // MERGED: Create notification for new items with integrated calendar creation
   Future<void> createNewItemNotification({
     required String itemType,
     required String itemTitle,
@@ -83,6 +84,18 @@ class NotificationService {
       }
 
       print('✅ Created notifications for $itemType: $itemTitle');
+
+      // MERGED: Create calendar events after notifications
+      if (courseId != null) {
+        await createCalendarEventsForEnrolledStudents(
+          sourceId: sourceId,
+          itemTitle: itemTitle,
+          dueDate: dueDate,
+          itemType: itemType,
+          courseId: courseId,
+          organizationCode: orgCode,
+        );
+      }
     } catch (e) {
       print('Error creating notifications: $e');
     }
@@ -216,17 +229,16 @@ class NotificationService {
     }
   }
 
-  // Helper methods for calendar event properties
   String _getCalendarEventTitle(String itemType, String itemTitle) {
     switch (itemType.toLowerCase()) {
       case 'assignment':
-        return '📝 Assignment: $itemTitle Due';
+        return itemTitle; // Changed from '📝 Assignment: $itemTitle Due'
       case 'tutorial':
-        return '📚 Tutorial: $itemTitle Due';
+        return itemTitle; // Changed from '📚 Tutorial: $itemTitle Due'
       case 'goal':
-        return '🎯 Goal: $itemTitle Due';
+        return itemTitle; // Changed from '🎯 Goal: $itemTitle Due'
       default:
-        return '📅 $itemTitle Due';
+        return itemTitle; // Changed from '📅 $itemTitle Due'
     }
   }
 
@@ -243,16 +255,17 @@ class NotificationService {
     }
   }
 
-  int _getCalendarEventColor(String itemType) {
+  // Change the return type from Object to int
+  int _getCalendarEventColor(String itemType) {  // Change Object to int
     switch (itemType.toLowerCase()) {
       case 'assignment':
-        return Colors.orange.value;
+        return Colors.red.value;     // Add .value
       case 'tutorial':
-        return Colors.blue.value;
+        return Colors.red.value;     // Add .value
       case 'goal':
-        return Colors.green.value;
+        return Colors.green.value;   // Add .value
       default:
-        return Colors.purple.value;
+        return Colors.purple.value;  // Add .value
     }
   }
 
@@ -304,6 +317,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   double _uploadProgress = 0;
   String _uploadStatus = '';
   StreamSubscription? _uploadSubscription;
+  StreamSubscription? _eventsSubscription; // Added for events listener
 
   // Initialize NotificationService
   final NotificationService _notificationService = NotificationService();
@@ -340,6 +354,9 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         );
       }
     }
+
+    // MERGED: Start events listener when page initializes
+    _startEventsListener();
   }
 
   @override
@@ -348,7 +365,70 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     _descriptionController.dispose();
     _pointsController.dispose();
     _uploadSubscription?.cancel();
+    _eventsSubscription?.cancel(); // Cancel events subscription
     super.dispose();
+  }
+
+  // MERGED: Real-time events listener method from document 1
+  void _startEventsListener() {
+    final user = FirebaseAuth.instance.currentUser; // Updated to use FirebaseAuth.instance
+    if (user == null) {
+      print('❌ No user found');
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    // Get user data to retrieve organization code
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get()
+        .then((userDoc) {
+      if (!userDoc.exists) {
+        print('❌ No user data found');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final userData = userDoc.data();
+      if (userData == null) {
+        print('❌ No user data found');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final orgCode = userData['organizationCode'];
+      if (orgCode == null) {
+        print('❌ No organization code found');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      print('✅ Starting real-time event listener for user: ${user.uid}, org: $orgCode');
+      print('📍 Path: organizations/$orgCode/students/${user.uid}/calendar_events');
+
+      // Set up real-time listener for calendar events
+      _eventsSubscription = FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('calendar_events')
+          .snapshots()
+          .listen(
+            (snapshot) {
+          print('📅 Calendar events updated: ${snapshot.docs.length} events');
+          // Handle real-time updates here if needed
+          // For example, you could update UI state or show notifications
+        },
+        onError: (error) {
+          print('❌ Error listening to calendar events: $error');
+        },
+      );
+    }).catchError((error) {
+      print('❌ Error getting user data: $error');
+      setState(() => _isLoading = false);
+    });
   }
 
   Future<void> _selectFiles() async {
@@ -545,7 +625,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
     }
   }
 
-  // Enhanced _saveAssignment method with NotificationService integration
+  // MERGED: Simplified save assignment method using NotificationService
   Future<void> _saveAssignment() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -587,7 +667,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         _dueTime?.minute ?? 59,
       );
 
-      // Get organization code - standardize on 'organizationCode'
+      // Get organization code
       final organizationCode = widget.courseData['organizationCode'];
 
       if (organizationCode == null) {
@@ -665,21 +745,13 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         }
       }
 
-      // Use NotificationService for calendar events and notifications
-      await _notificationService.createCalendarEventsForEnrolledStudents(
-        sourceId: assignmentId!,
-        itemTitle: _titleController.text.trim(),
-        dueDate: dueDateTime,
-        itemType: 'assignment',
-        courseId: widget.courseId,
-        organizationCode: organizationCode,
-      );
-
+      // MERGED: Use NotificationService for both notifications and calendar events
+      // This single call handles everything: notifications + calendar events with RED color for assignments
       await _notificationService.createNewItemNotification(
         itemType: 'assignment',
         itemTitle: _titleController.text.trim(),
         dueDate: dueDateTime,
-        sourceId: assignmentId,
+        sourceId: assignmentId!,
         courseId: widget.courseId,
         courseName: widget.courseData['title'] ?? widget.courseData['name'],
         organizationCode: organizationCode,
@@ -726,7 +798,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       context: context,
       initialDate: _dueDate ?? DateTime.now().add(Duration(days: 7)),
       firstDate: firstSelectableDate,
-      lastDate: DateTime.now().add(Duration(days: 365)),  // Up to 1 year in the future
+      lastDate: DateTime.now().add(Duration(days: 365)),
     );
 
     if (picked != null && mounted) {
@@ -969,7 +1041,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                       children: [
                         Expanded(
                           child: InkWell(
-                            onTap: _selectDueDate,  // Always clickable
+                            onTap: _selectDueDate,
                             child: InputDecorator(
                               decoration: InputDecoration(
                                 labelText: 'Due Date',
