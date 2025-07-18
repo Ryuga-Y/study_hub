@@ -359,9 +359,7 @@ class _PostCardState extends State<PostCard> {
   }
 
   Widget _buildStats() {
-    if (widget.post.likeCount == 0 &&
-        widget.post.commentCount == 0 &&
-        widget.post.reactions.isEmpty) {
+    if (widget.post.likeCount == 0 && widget.post.commentCount == 0) {
       return SizedBox.shrink();
     }
 
@@ -369,17 +367,21 @@ class _PostCardState extends State<PostCard> {
       padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
-          if (widget.post.likeCount > 0 || widget.post.reactions.isNotEmpty) ...[
-            // Reaction emojis
+          if (widget.post.likeCount > 0) ...[
+            // Show reaction emojis
             if (widget.post.reactions.isNotEmpty)
               Row(
-                children: widget.post.reactions.entries
-                    .take(3)
-                    .map((entry) => Padding(
-                  padding: EdgeInsets.only(right: 4),
-                  child: Text(entry.key, style: TextStyle(fontSize: 16)),
-                ))
-                    .toList(),
+                children: [
+                  // Show up to 3 most used reactions
+                  ...widget.post.reactions.entries
+                      .toList()
+                      .take(3)
+                      .map((entry) => Padding(
+                    padding: EdgeInsets.only(right: 4),
+                    child: Text(entry.key, style: TextStyle(fontSize: 16)),
+                  )),
+                  SizedBox(width: 4),
+                ],
               ),
             Text(
               '${widget.post.likeCount}',
@@ -389,9 +391,7 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
           ],
-
           Spacer(),
-
           if (widget.post.commentCount > 0)
             Text(
               '${widget.post.commentCount} comment${widget.post.commentCount == 1 ? '' : 's'}',
@@ -406,7 +406,10 @@ class _PostCardState extends State<PostCard> {
   }
 
   Widget _buildActions(String? currentUserId) {
-    final isLiked = currentUserId != null && widget.post.likedBy.contains(currentUserId);
+    final userReaction = currentUserId != null
+        ? widget.post.userReactions[currentUserId]
+        : null;
+    final hasReacted = userReaction != null;
 
     return Container(
       decoration: BoxDecoration(
@@ -417,12 +420,24 @@ class _PostCardState extends State<PostCard> {
       padding: EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          // Like button
+          // Like/React button
           _buildActionButton(
-            icon: isLiked ? Icons.favorite : Icons.favorite_outline,
-            label: 'Like',
-            color: isLiked ? Colors.red : null,
-            onTap: widget.onLike,
+            icon: hasReacted ? Icons.favorite : Icons.favorite_outline,
+            label: hasReacted ? userReaction : 'Like',
+            color: hasReacted ? Colors.red : null,
+            showEmoji: hasReacted,
+            onTap: () {
+              // Quick tap toggles current reaction or adds default like
+              if (hasReacted) {
+                // Remove reaction by sending the same reaction
+                context.read<CommunityBloc>().add(
+                  AddReaction(postId: widget.post.id, reaction: userReaction),
+                );
+              } else {
+                // Add default like
+                widget.onLike();
+              }
+            },
             onLongPress: () {
               setState(() => _showReactions = true);
             },
@@ -450,6 +465,7 @@ class _PostCardState extends State<PostCard> {
     required IconData icon,
     required String label,
     Color? color,
+    bool showEmoji = false,
     required VoidCallback onTap,
     VoidCallback? onLongPress,
   }) {
@@ -462,20 +478,37 @@ class _PostCardState extends State<PostCard> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                icon,
-                size: 20,
-                color: color ?? Colors.grey[700],
-              ),
-              SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: color ?? Colors.grey[700],
-                  fontWeight: FontWeight.w500,
+              if (showEmoji && label != 'Like') ...[
+                // Show emoji instead of icon for reactions
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 16),
                 ),
-              ),
+                SizedBox(width: 4),
+                Text(
+                  'React',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: color ?? Colors.grey[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ] else ...[
+                Icon(
+                  icon,
+                  size: 20,
+                  color: color ?? Colors.grey[700],
+                ),
+                SizedBox(width: 8),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: color ?? Colors.grey[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -508,13 +541,30 @@ class _PostCardState extends State<PostCard> {
                 return GestureDetector(
                   onTap: () {
                     setState(() => _showReactions = false);
-                    // Handle reaction
+                    // Handle reaction selection
+                    context.read<CommunityBloc>().add(
+                      AddReaction(postId: widget.post.id, reaction: reaction),
+                    );
                   },
                   child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(
-                      reaction,
-                      style: TextStyle(fontSize: 28),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          reaction,
+                          style: TextStyle(fontSize: 28),
+                        ),
+                        // Show count if exists
+                        if (widget.post.reactions[reaction] != null)
+                          Text(
+                            '${widget.post.reactions[reaction]!.length}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 );

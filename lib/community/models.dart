@@ -70,11 +70,12 @@ class Post {
   final List<MediaType> mediaTypes;
   final String caption;
   final DateTime createdAt;
-  final int likeCount;
+  final int likeCount; // Total count of all reactions
   final int commentCount;
   final PostPrivacy privacy;
-  final List<String> likedBy;
-  final Map<String, int> reactions;
+  final List<String> likedBy; // Users who reacted (any reaction)
+  final Map<String, List<String>> reactions; // reaction emoji -> list of user IDs
+  final Map<String, String> userReactions; // userId -> reaction emoji
   final bool isEdited;
   final DateTime? editedAt;
 
@@ -92,12 +93,26 @@ class Post {
     this.privacy = PostPrivacy.public,
     this.likedBy = const [],
     this.reactions = const {},
+    this.userReactions = const {},
     this.isEdited = false,
     this.editedAt,
   });
 
   factory Post.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+
+    // Convert reactions from Map<String, int> to Map<String, List<String>>
+    final reactionsData = data['reactions'] as Map<String, dynamic>? ?? {};
+    final Map<String, List<String>> reactions = {};
+    reactionsData.forEach((emoji, users) {
+      if (users is List) {
+        reactions[emoji] = List<String>.from(users);
+      }
+    });
+
+    // Build userReactions map
+    final Map<String, String> userReactions = Map<String, String>.from(data['userReactions'] ?? {});
+
     return Post(
       id: doc.id,
       userId: data['userId'] ?? '',
@@ -119,13 +134,20 @@ class Post {
         orElse: () => PostPrivacy.public,
       ),
       likedBy: List<String>.from(data['likedBy'] ?? []),
-      reactions: Map<String, int>.from(data['reactions'] ?? {}),
+      reactions: reactions,
+      userReactions: userReactions,
       isEdited: data['isEdited'] ?? false,
       editedAt: (data['editedAt'] as Timestamp?)?.toDate(),
     );
   }
 
   Map<String, dynamic> toMap() {
+    // Convert reactions to store user lists
+    final reactionsMap = <String, dynamic>{};
+    reactions.forEach((emoji, users) {
+      reactionsMap[emoji] = users;
+    });
+
     return {
       'userId': userId,
       'userName': userName,
@@ -138,7 +160,8 @@ class Post {
       'commentCount': commentCount,
       'privacy': privacy.toString().split('.').last,
       'likedBy': likedBy,
-      'reactions': reactions,
+      'reactions': reactionsMap,
+      'userReactions': userReactions,
       'isEdited': isEdited,
       'editedAt': editedAt != null ? Timestamp.fromDate(editedAt!) : null,
     };
@@ -149,9 +172,11 @@ class Post {
     int? likeCount,
     int? commentCount,
     List<String>? likedBy,
-    Map<String, int>? reactions,
+    Map<String, List<String>>? reactions,
+    Map<String, String>? userReactions,
     bool? isEdited,
     DateTime? editedAt,
+    PostPrivacy? privacy,
   }) {
     return Post(
       id: id,
@@ -164,9 +189,10 @@ class Post {
       createdAt: createdAt,
       likeCount: likeCount ?? this.likeCount,
       commentCount: commentCount ?? this.commentCount,
-      privacy: privacy,
+      privacy: privacy ?? this.privacy,
       likedBy: likedBy ?? this.likedBy,
       reactions: reactions ?? this.reactions,
+      userReactions: userReactions ?? this.userReactions,
       isEdited: isEdited ?? this.isEdited,
       editedAt: editedAt ?? this.editedAt,
     );

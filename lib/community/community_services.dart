@@ -243,59 +243,8 @@ class CommunityService {
     });
   }
 
-  // Like/Reaction Operations
-  Future<void> toggleLike(String postId) async {
-    try {
-      final userId = currentUserId;
-      if (userId == null) throw Exception('User not authenticated');
-
-      final postRef = _firestore.collection('posts').doc(postId);
-
-      // Get current post data first
-      final postDoc = await postRef.get();
-      if (!postDoc.exists) {
-        throw Exception('Post not found');
-      }
-
-      final postData = postDoc.data()!;
-      List<String> likedBy = List<String>.from(postData['likedBy'] ?? []);
-      final isLiked = likedBy.contains(userId);
-
-      if (isLiked) {
-        // Unlike
-        likedBy.remove(userId);
-        await postRef.update({
-          'likedBy': likedBy,
-          'likeCount': FieldValue.increment(-1),
-        });
-      } else {
-        // Like
-        likedBy.add(userId);
-        await postRef.update({
-          'likedBy': likedBy,
-          'likeCount': FieldValue.increment(1),
-        });
-
-        // Send notification
-        if (postData['userId'] != userId) {
-          final userData = await _firestore.collection('users').doc(userId).get();
-          await _createNotification(
-            userId: postData['userId'],
-            type: NotificationType.like,
-            title: 'New Like',
-            message: '${userData.data()?['fullName']} liked your post',
-            actionUserId: userId,
-            postId: postId,
-          );
-        }
-      }
-    } catch (e) {
-      print('Error toggling like: $e');
-      throw Exception('Failed to toggle like: $e');
-    }
-  }
-
-  Future<void> addReaction(String postId, String reaction) async {
+  // Updated Reaction Methods
+  Future<void> toggleReaction(String postId, String reaction) async {
     try {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
@@ -304,15 +253,97 @@ class CommunityService {
 
       await _firestore.runTransaction((transaction) async {
         final postDoc = await transaction.get(postRef);
-        final reactions = Map<String, int>.from(postDoc.data()?['reactions'] ?? {});
+        if (!postDoc.exists) {
+          throw Exception('Post not found');
+        }
 
-        reactions[reaction] = (reactions[reaction] ?? 0) + 1;
+        final postData = postDoc.data()!;
 
-        transaction.update(postRef, {'reactions': reactions});
+        // Get current data
+        List<String> likedBy = List<String>.from(postData['likedBy'] ?? []);
+        Map<String, dynamic> reactions = Map<String, dynamic>.from(postData['reactions'] ?? {});
+        Map<String, dynamic> userReactions = Map<String, dynamic>.from(postData['userReactions'] ?? {});
+
+        // Check if user already reacted
+        final currentReaction = userReactions[userId] as String?;
+
+        if (currentReaction == reaction) {
+          // User is removing their reaction
+          likedBy.remove(userId);
+          userReactions.remove(userId);
+
+          // Remove user from reaction list
+          if (reactions[reaction] is List) {
+            (reactions[reaction] as List).remove(userId);
+            if ((reactions[reaction] as List).isEmpty) {
+              reactions.remove(reaction);
+            }
+          }
+        } else {
+          // User is adding/changing reaction
+          if (currentReaction != null) {
+            // Remove from old reaction
+            if (reactions[currentReaction] is List) {
+              (reactions[currentReaction] as List).remove(userId);
+              if ((reactions[currentReaction] as List).isEmpty) {
+                reactions.remove(currentReaction);
+              }
+            }
+          } else {
+            // New reaction - add to likedBy
+            likedBy.add(userId);
+          }
+
+          // Add to new reaction
+          userReactions[userId] = reaction;
+          if (!reactions.containsKey(reaction)) {
+            reactions[reaction] = [];
+          }
+          if (reactions[reaction] is List && !(reactions[reaction] as List).contains(userId)) {
+            (reactions[reaction] as List).add(userId);
+          }
+        }
+
+        // Update the post
+        transaction.update(postRef, {
+          'likedBy': likedBy,
+          'likeCount': likedBy.length,
+          'reactions': reactions,
+          'userReactions': userReactions,
+        });
       });
+
+      // Send notification if it's a new reaction
+      final postDoc = await postRef.get();
+      final postData = postDoc.data()!;
+
+      if (postData['userId'] != userId && postData['userReactions'][userId] != null) {
+        final userData = await _firestore.collection('users').doc(userId).get();
+        await _createNotification(
+          userId: postData['userId'],
+          type: NotificationType.like,
+          title: 'New Reaction',
+          message: '${userData.data()?['fullName']} reacted $reaction to your post',
+          actionUserId: userId,
+          postId: postId,
+        );
+      }
     } catch (e) {
-      throw Exception('Failed to add reaction: $e');
+      print('Error toggling reaction: $e');
+      throw Exception('Failed to toggle reaction: $e');
     }
+  }
+
+  // Keep the old toggleLike for backward compatibility but redirect to toggleReaction
+  Future<void> toggleLike(String postId) async {
+    // Default to thumbs up reaction - assuming 'like' is the default reaction type
+    await toggleReaction(postId, 'like');
+  }
+
+  // Legacy method for adding reactions (deprecated - use toggleReaction instead)
+  @Deprecated('Use toggleReaction instead')
+  Future<void> addReaction(String postId, String reaction) async {
+    await toggleReaction(postId, reaction);
   }
 
   Future<void> syncFriendCount(String userId) async {

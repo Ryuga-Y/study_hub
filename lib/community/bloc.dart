@@ -475,80 +475,97 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
+  // Updated toggle like handler to use default reaction
   Future<void> _onToggleLike(ToggleLike event, Emitter<CommunityState> emit) async {
     try {
-      // Get current user ID
       final currentUserId = _service.currentUserId;
       if (currentUserId == null) return;
 
-      // Optimistically update local state first
-      final updatedPosts = state.feedPosts.map((post) {
-        if (post.id == event.postId) {
-          final likedBy = List<String>.from(post.likedBy);
-          final isCurrentlyLiked = likedBy.contains(currentUserId);
-
-          if (isCurrentlyLiked) {
-            likedBy.remove(currentUserId);
-          } else {
-            likedBy.add(currentUserId);
-          }
-
-          return post.copyWith(
-            likedBy: likedBy,
-            likeCount: likedBy.length,
-          );
-        }
-        return post;
-      }).toList();
-
-      // Emit the optimistic update
-      emit(state.copyWith(feedPosts: updatedPosts));
-
-      // Then make the actual API call
-      try {
-        await _service.toggleLike(event.postId);
-      } catch (e) {
-        // If the API call fails, revert the optimistic update
-        // by re-fetching or reverting to previous state
-        print('Error toggling like: $e');
-
-        // Revert to previous state
-        final revertedPosts = state.feedPosts.map((post) {
-          if (post.id == event.postId) {
-            // Find the original post
-            final originalPost = state.feedPosts.firstWhere((p) => p.id == event.postId);
-            return originalPost;
-          }
-          return post;
-        }).toList();
-
-        emit(state.copyWith(
-          feedPosts: revertedPosts,
-          error: 'Failed to update like',
-        ));
-      }
+      // Use default like reaction
+      await _handleReaction(event.postId, ReactionType.like, emit);
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
     }
   }
 
+  // Updated add reaction handler
   Future<void> _onAddReaction(AddReaction event, Emitter<CommunityState> emit) async {
     try {
-      await _service.addReaction(event.postId, event.reaction);
-
-      // Update post in local state
-      final updatedPosts = state.feedPosts.map((post) {
-        if (post.id == event.postId) {
-          final reactions = Map<String, int>.from(post.reactions);
-          reactions[event.reaction] = (reactions[event.reaction] ?? 0) + 1;
-          return post.copyWith(reactions: reactions);
-        }
-        return post;
-      }).toList();
-
-      emit(state.copyWith(feedPosts: updatedPosts));
+      await _handleReaction(event.postId, event.reaction, emit);
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  // Helper method to handle reactions
+  Future<void> _handleReaction(String postId, String reaction, Emitter<CommunityState> emit) async {
+    final currentUserId = _service.currentUserId;
+    if (currentUserId == null) return;
+
+    // Store original posts for potential rollback
+    final originalPosts = List<Post>.from(state.feedPosts);
+
+    // Optimistically update local state
+    final updatedPosts = state.feedPosts.map((post) {
+      if (post.id == postId) {
+        final likedBy = List<String>.from(post.likedBy);
+        final reactions = Map<String, List<String>>.from(post.reactions);
+        final userReactions = Map<String, String>.from(post.userReactions);
+        final currentReaction = userReactions[currentUserId];
+
+        if (currentReaction == reaction) {
+          // Removing reaction
+          likedBy.remove(currentUserId);
+          userReactions.remove(currentUserId);
+          if (reactions[reaction] != null) {
+            reactions[reaction] = List<String>.from(reactions[reaction]!)
+              ..remove(currentUserId);
+            if (reactions[reaction]!.isEmpty) {
+              reactions.remove(reaction);
+            }
+          }
+        } else {
+          // Adding/changing reaction
+          if (currentReaction != null) {
+            // Remove from old reaction
+            if (reactions[currentReaction] != null) {
+              reactions[currentReaction] = List<String>.from(reactions[currentReaction]!)
+                ..remove(currentUserId);
+              if (reactions[currentReaction]!.isEmpty) {
+                reactions.remove(currentReaction);
+              }
+            }
+          } else {
+            // New reaction
+            likedBy.add(currentUserId);
+          }
+
+          userReactions[currentUserId] = reaction;
+          reactions[reaction] = List<String>.from(reactions[reaction] ?? [])
+            ..add(currentUserId);
+        }
+
+        return post.copyWith(
+          likedBy: likedBy,
+          likeCount: likedBy.length,
+          reactions: reactions,
+          userReactions: userReactions,
+        );
+      }
+      return post;
+    }).toList();
+
+    emit(state.copyWith(feedPosts: updatedPosts));
+
+    // Make API call
+    try {
+      await _service.toggleReaction(postId, reaction);
+    } catch (e) {
+      // Revert on failure
+      emit(state.copyWith(
+        feedPosts: originalPosts,
+        error: 'Failed to update reaction',
+      ));
     }
   }
 
