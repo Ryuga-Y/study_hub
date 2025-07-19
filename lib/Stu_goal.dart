@@ -592,15 +592,10 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin, Widget
     try {
       final progress = await _goalService.getGoalProgress();
       if (progress != null && mounted) {
-        // First, get the actual water consumption count BEFORE setting state
-        final actualCount = await _goalService.getActualWaterConsumptionCount();
-
         setState(() {
-          wateringCount = progress['wateringCount'] ?? 0;
-          actualWaterConsumptionCount = actualCount; // Use the calculated count
-
+          wateringCount = progress['wateringCount'] ?? 0; // ENSURE THIS IS SET
           treeGrowth = (progress['treeGrowth'] ?? 0.0).toDouble();
-          goal = progress['currentGoal'] ?? "No goal selected - Press 'Set Goal' to choose one";
+          waterBuckets = progress['waterBuckets'] ?? 0;
 
           // Handle pinned goals
           if (progress['pinnedGoals'] != null && progress['pinnedGoals'] is List) {
@@ -632,15 +627,10 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin, Widget
 
         // Force a rebuild of the tree UI after state is set
         if (mounted) {
-          // Small delay to ensure the tree painter gets the correct values
           Future.delayed(Duration(milliseconds: 100), () {
             if (mounted) setState(() {});
           });
         }
-      } else {
-        setState(() {
-          isLoading = false;
-        });
       }
     } catch (e) {
       print('Error loading goal progress: $e');
@@ -667,11 +657,13 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin, Widget
     // Store initial values for animation
     double previousGrowth = treeGrowth;
     int previousBuckets = waterBuckets;
+    int previousWateringCount = wateringCount; // ADD THIS LINE
 
-    // 🚀 FIXED: Update UI immediately for responsive feedback
+    // Update UI immediately for responsive feedback
     setState(() {
       waterBuckets = previousBuckets - 1;
       treeGrowth = math.min(previousGrowth + 0.05, 1.0);
+      wateringCount = previousWateringCount + 1; // ADD THIS LINE - INCREMENT WATERING COUNT
     });
 
     // Use water bucket through Firebase
@@ -1108,13 +1100,18 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin, Widget
 
   // 🔧 MERGED: Fixed tree painter method using actual water consumption count
   Widget _getCurrentTreePainter() {
-    // Use wateringCount for current tree only (not total consumption)
-    // This ensures consistent appearance for the same progress
-    final int leafCount = wateringCount;
+    // Use wateringCount directly from state (not calculated)
+    final int leafCount = wateringCount; // This should be 3 based on your water consumption
+
+    // Calculate actual growth percentage
+    final double actualGrowth = math.min(wateringCount * 0.05, 1.0); // This should be 0.15 (15%)
+
+    // Use actual growth instead of treeGrowth if they don't match
+    final double displayGrowth = actualGrowth;
 
     // For initial display, use static values (no animations) if animations haven't started
-    final double flowerBloomValue = treeGrowth >= 1.0 ? 1.0 : _flowerBloomAnimation.value;
-    final double leafScaleValue = wateringCount > 0 ? 1.0 : _leafScaleAnimation.value;
+    final double flowerBloomValue = displayGrowth >= 1.0 ? 1.0 : _flowerBloomAnimation.value;
+    final double leafScaleValue = leafCount > 0 ? 1.0 : _leafScaleAnimation.value;
 
     switch (currentTreeLevel) {
       case TreeLevel.bronze:
@@ -1125,8 +1122,8 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin, Widget
             child: CustomPaint(
               size: Size(300, 320),
               painter: BronzeTreePainter(
-                growthLevel: leafCount,
-                totalGrowth: treeGrowth,
+                growthLevel: leafCount, // This should show 3 leaves
+                totalGrowth: displayGrowth, // This should be 0.15
                 flowerBloom: flowerBloomValue,
                 flowerRotation: _flowerRotationAnimation.value,
                 leafScale: leafScaleValue,
@@ -1280,11 +1277,22 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin, Widget
         title: Text('StudyHub'),
         backgroundColor: Colors.white,
         actions: [
-          // 🔄 Debug verification button (remove after testing)
+          // 🔄 Fix Tree Progress button
           IconButton(
-            onPressed: _showBucketVerification,
-            icon: Icon(Icons.bug_report, color: Colors.orange[600]),
-            tooltip: 'Debug Bucket Count',
+            onPressed: () async {
+              setState(() => isLoading = true);
+              await _goalService.recalculateTreeProgress();
+              await _loadGoalProgress();
+              setState(() => isLoading = false);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Tree progress refreshed!'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            },
+            icon: Icon(Icons.refresh, color: Colors.blue[600]),
+            tooltip: 'Refresh Tree Progress',
           ),
 
           // 🔄 Auto-sync indicator

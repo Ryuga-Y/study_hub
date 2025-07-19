@@ -334,19 +334,14 @@ class GoalProgressService {
         // Use one water bucket and increase growth by 5%
         waterBuckets--;
         wateringCount++;
-        treeGrowth += 0.05; // Each bucket = 5% growth
-
-        // Ensure treeGrowth doesn't exceed 1.0
-        if (treeGrowth > 1.0) {
-          treeGrowth = 1.0;
-        }
+        treeGrowth = math.min(treeGrowth + 0.05, 1.0); // Cap at 1.0
 
         int totalProgress = currentProgress['totalProgress'] ?? 0;
         totalProgress++;
 
         Map<String, dynamic> updatedProgress = {
           'waterBuckets': waterBuckets,
-          'wateringCount': wateringCount,
+          'wateringCount': wateringCount,  // MAKE SURE THIS IS INCLUDED
           'treeGrowth': treeGrowth,
           'totalProgress': totalProgress,
           'lastUpdated': FieldValue.serverTimestamp(),
@@ -369,7 +364,7 @@ class GoalProgressService {
 
           // Reset for next tree
           updatedProgress.addAll({
-            'wateringCount': 0,
+            'wateringCount': 0,  // Reset watering count for new tree
             'treeGrowth': 0.0,
             'currentTreeLevel': currentTreeLevel,
             'completedTrees': completedTrees,
@@ -403,7 +398,7 @@ class GoalProgressService {
 
         success = true;
 
-        print('💧 Water bucket used successfully. Remaining: $waterBuckets, Growth: ${(treeGrowth * 100).toStringAsFixed(0)}%');
+        print('💧 Water bucket used successfully. Remaining: $waterBuckets, Growth: ${(treeGrowth * 100).toStringAsFixed(0)}%, WateringCount: $wateringCount');
       });
 
       return success;
@@ -549,6 +544,38 @@ class GoalProgressService {
       return {'error': e.toString()};
     } finally {
       _userLocks.remove(userId);
+    }
+  }
+
+  // 🌳 RECALCULATE: Sync tree progress with actual water consumption
+  Future<void> recalculateTreeProgress() async {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null || !await _verifyStudentAccess()) return;
+
+    try {
+      print('🌳 Recalculating tree progress from water consumption...');
+
+      // Get all water consumption records
+      final consumptionSnapshot = await _firestore
+          .collection('goalProgress')
+          .doc(userId)
+          .collection('waterConsumption')
+          .get();
+
+      // Count total buckets consumed
+      int totalWateringCount = consumptionSnapshot.docs.length;
+      double calculatedTreeGrowth = (totalWateringCount * 0.05).clamp(0.0, 1.0);
+
+      // Update the main progress document
+      await _firestore.collection('goalProgress').doc(userId).update({
+        'wateringCount': totalWateringCount,
+        'treeGrowth': calculatedTreeGrowth,
+        'lastRecalculated': FieldValue.serverTimestamp(),
+      });
+
+      print('✅ Tree progress recalculated: wateringCount=$totalWateringCount, growth=${(calculatedTreeGrowth * 100).toStringAsFixed(0)}%');
+    } catch (e) {
+      print('❌ Error recalculating tree progress: $e');
     }
   }
 
@@ -1216,7 +1243,6 @@ class GoalProgressService {
     return newRewards;
   }
 
-  // In the getGoalProgress() method, make sure wateringCount is included:
   Future<Map<String, dynamic>?> getGoalProgress() async {
     final userId = _auth.currentUser?.uid;
     if (userId == null) throw Exception('User not authenticated');
@@ -1233,7 +1259,7 @@ class GoalProgressService {
       final data = freshDoc.data()!;
 
       // Ensure wateringCount is properly included
-      data['wateringCount'] = data['wateringCount'] ?? 0;
+      data['wateringCount'] = data['wateringCount'] ?? 0; // THIS LINE SHOULD EXIST
       data['treeGrowth'] = data['treeGrowth'] ?? 0.0;
 
       return data;
@@ -1404,10 +1430,10 @@ class GoalProgressService {
   Map<String, dynamic> _getDefaultProgress() {
     return {
       'waterBuckets': 0,
-      'wateringCount': 0,
+      'wateringCount': 0, // MAKE SURE THIS EXISTS
       'treeGrowth': 0.0,
       'currentGoal': 'No goal selected - Press \'Set Goal\' to choose one',
-      'pinnedGoals': [], // New field for multiple pinned goals
+      'pinnedGoals': [],
       'hasActiveGoal': false,
       'currentTreeLevel': 'bronze',
       'completedTrees': 0,
