@@ -498,7 +498,10 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           }
         },
         backgroundColor: Colors.purple[400],
-        child: Icon(Icons.add),
+        child: Icon(
+          Icons.add,
+          color: Colors.white,
+        ),
       ),
     );
   }
@@ -509,14 +512,10 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
       elevation: 0,
       title: Row(
         children: [
-          Image.asset(
-            'assets/images/logo.png',
-            height: 32,
-            errorBuilder: (context, error, stackTrace) => Icon(
-              Icons.school,
-              color: Colors.purple[400],
-              size: 32,
-            ),
+          Icon(
+            Icons.school,
+            color: Colors.purple[400],
+            size: 32,
           ),
           SizedBox(width: 12),
           Text(
