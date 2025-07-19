@@ -9,6 +9,7 @@ import '../Authentication/auth_services.dart';
 import 'media_picker.dart';
 import 'profile_screen.dart';
 import 'search_screen.dart';
+import '../chat_integrated.dart';
 
 class FeedScreen extends StatefulWidget {
   final String organizationCode;
@@ -187,6 +188,21 @@ class _FeedScreenState extends State<FeedScreen> {
               },
             ),
             Spacer(),
+            // Chat icon - ADD THIS BEFORE THE NOTIFICATION ICON
+            IconButton(
+              icon: Icon(Icons.chat_bubble_outline),
+              color: Colors.black87,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatContactPage(),
+                  ),
+                );
+              },
+            ),
+
+            // Notification icon (existing code)
             Stack(
               children: [
                 IconButton(

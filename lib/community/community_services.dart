@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'models.dart';
+import '../chat_integrated.dart';
+import '../chat.dart';
 
 class CommunityService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -560,10 +562,16 @@ class CommunityService {
     }
   }
 
+  // This is the ONLY acceptFriendRequest method
   Future<void> acceptFriendRequest(String requestId) async {
     try {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
+
+      String senderId = '';
+      String recipientId = userId;
+      String senderName = '';
+      String recipientName = '';
 
       await _firestore.runTransaction((transaction) async {
         // Get the friend request document
@@ -579,8 +587,15 @@ class CommunityService {
           throw Exception('You can only accept requests sent to you');
         }
 
-        final senderId = requestData['userId'];
-        final recipientId = userId;
+        senderId = requestData['userId'];
+        recipientId = userId;
+
+        // Get user names for chat creation
+        final senderDoc = await transaction.get(_firestore.collection('users').doc(senderId));
+        final recipientDoc = await transaction.get(_firestore.collection('users').doc(recipientId));
+
+        senderName = senderDoc.data()?['fullName'] ?? 'Unknown';
+        recipientName = recipientDoc.data()?['fullName'] ?? 'Unknown';
 
         // Update friend request status
         transaction.update(requestDoc.reference, {
@@ -606,11 +621,11 @@ class CommunityService {
         }
 
         // Get current friend counts
-        final recipientDoc = await transaction.get(_firestore.collection('users').doc(recipientId));
-        final senderDoc = await transaction.get(_firestore.collection('users').doc(senderId));
+        final recipientDocData = recipientDoc.data();
+        final senderDocData = senderDoc.data();
 
-        final recipientCurrentCount = recipientDoc.data()?['friendCount'] ?? 0;
-        final senderCurrentCount = senderDoc.data()?['friendCount'] ?? 0;
+        final recipientCurrentCount = recipientDocData?['friendCount'] ?? 0;
+        final senderCurrentCount = senderDocData?['friendCount'] ?? 0;
 
         // Update friend counts
         transaction.update(_firestore.collection('users').doc(recipientId), {
@@ -624,13 +639,12 @@ class CommunityService {
         });
       });
 
+      // Create chat for new friends after transaction completes
+      await _createChatForNewFriends(senderId, recipientId, senderName, recipientName);
+
       // Send notification outside transaction
       final userData = await _firestore.collection('users').doc(userId).get();
       if (userData.exists) {
-        final requestDoc = await _firestore.collection('friends').doc(requestId).get();
-        final requestData = requestDoc.data()!;
-        final senderId = requestData['userId'];
-
         await _createNotification(
           userId: senderId,
           type: NotificationType.friendAccepted,
@@ -642,13 +656,55 @@ class CommunityService {
 
       // Sync friend counts after transaction
       await syncFriendCount(userId);
-      final requestDoc = await _firestore.collection('friends').doc(requestId).get();
-      final requestData = requestDoc.data()!;
-      await syncFriendCount(requestData['userId']);
+      await syncFriendCount(senderId);
 
     } catch (e) {
       print('Error accepting friend request: $e');
       throw Exception('Failed to accept friend request: $e');
+    }
+  }
+
+  // Create chat for new friends
+  Future<void> _createChatForNewFriends(String userId1, String userId2, String user1Name, String user2Name) async {
+    try {
+      // Generate chat ID (sorted user IDs)
+      final sortedIds = [userId1, userId2]..sort();
+      final chatId = '${sortedIds[0]}_${sortedIds[1]}';
+
+      // Check if chat already exists
+      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+      if (chatDoc.exists) return;
+
+      // Create chat document
+      await _firestore.collection('chats').doc(chatId).set({
+        'participants': [userId1, userId2],
+        'participantNames': {
+          userId1: user1Name,
+          userId2: user2Name,
+        },
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastMessage': "You became friends with $user2Name, let's start chat!",
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'unreadCount': {
+          userId1: 0,
+          userId2: 0,
+        },
+      });
+
+      // Add system message
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .add({
+        'text': "You became friends with $user2Name, let's start chat!",
+        'senderId': 'system',
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'isSystemMessage': true,
+      });
+    } catch (e) {
+      print('Error creating chat: $e');
     }
   }
 
@@ -657,28 +713,39 @@ class CommunityService {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
 
-      // Delete both friend records
-      final batch = _firestore.batch();
+      await _firestore.runTransaction((transaction) async {
+        // Get the friend request document
+        final requestDoc = await transaction.get(_firestore.collection('friends').doc(requestId));
+        if (!requestDoc.exists) {
+          throw Exception('Friend request not found');
+        }
 
-      // Delete received request
-      batch.delete(_firestore.collection('friends').doc(requestId));
+        final requestData = requestDoc.data()!;
 
-      // Find and delete sent request
-      final requestDoc = await _firestore.collection('friends').doc(requestId).get();
-      final requestData = requestDoc.data()!;
+        // Validate that this user can decline this request
+        if (requestData['friendId'] != userId || requestData['isReceived'] != true) {
+          throw Exception('You can only decline requests sent to you');
+        }
 
-      final sentRequestQuery = await _firestore
-          .collection('friends')
-          .where('userId', isEqualTo: requestData['friendId'])
-          .where('friendId', isEqualTo: requestData['userId'])
-          .get();
+        final senderId = requestData['userId'];
 
-      if (sentRequestQuery.docs.isNotEmpty) {
-        batch.delete(sentRequestQuery.docs.first.reference);
-      }
+        // Delete the received request
+        transaction.delete(requestDoc.reference);
 
-      await batch.commit();
+        // Find and delete the sent request
+        final sentRequestQuery = await _firestore
+            .collection('friends')
+            .where('userId', isEqualTo: senderId)
+            .where('friendId', isEqualTo: userId)
+            .where('status', isEqualTo: 'pending')
+            .get();
+
+        for (final doc in sentRequestQuery.docs) {
+          transaction.delete(doc.reference);
+        }
+      });
     } catch (e) {
+      print('Error declining friend request: $e');
       throw Exception('Failed to decline friend request: $e');
     }
   }
@@ -689,52 +756,59 @@ class CommunityService {
       if (userId == null) throw Exception('User not authenticated');
 
       await _firestore.runTransaction((transaction) async {
-        // Delete both friend records
-        final userFriendQuery = await _firestore
+        // Find friendship documents in both directions
+        final query1 = await _firestore
             .collection('friends')
             .where('userId', isEqualTo: userId)
             .where('friendId', isEqualTo: friendId)
+            .where('status', isEqualTo: 'accepted')
             .get();
 
-        if (userFriendQuery.docs.isNotEmpty) {
-          transaction.delete(userFriendQuery.docs.first.reference);
-        }
-
-        // Delete friend's record
-        final friendRecordQuery = await _firestore
+        final query2 = await _firestore
             .collection('friends')
             .where('userId', isEqualTo: friendId)
             .where('friendId', isEqualTo: userId)
+            .where('status', isEqualTo: 'accepted')
             .get();
 
-        if (friendRecordQuery.docs.isNotEmpty) {
-          transaction.delete(friendRecordQuery.docs.first.reference);
+        // Delete all friendship documents
+        for (final doc in query1.docs) {
+          transaction.delete(doc.reference);
+        }
+        for (final doc in query2.docs) {
+          transaction.delete(doc.reference);
         }
 
-        // Get current friend counts
+        // Update friend counts
         final userDoc = await transaction.get(_firestore.collection('users').doc(userId));
         final friendDoc = await transaction.get(_firestore.collection('users').doc(friendId));
 
-        final userCurrentCount = userDoc.data()?['friendCount'] ?? 0;
-        final friendCurrentCount = friendDoc.data()?['friendCount'] ?? 0;
+        if (userDoc.exists) {
+          final currentCount = userDoc.data()?['friendCount'] ?? 0;
+          transaction.update(userDoc.reference, {
+            'friendCount': currentCount > 0 ? currentCount - 1 : 0,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
 
-        // Update friend counts (ensure they don't go below 0)
-        transaction.update(_firestore.collection('users').doc(userId), {
-          'friendCount': userCurrentCount > 0 ? userCurrentCount - 1 : 0,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-
-        transaction.update(_firestore.collection('users').doc(friendId), {
-          'friendCount': friendCurrentCount > 0 ? friendCurrentCount - 1 : 0,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
+        if (friendDoc.exists) {
+          final currentCount = friendDoc.data()?['friendCount'] ?? 0;
+          transaction.update(friendDoc.reference, {
+            'friendCount': currentCount > 0 ? currentCount - 1 : 0,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
       });
 
       // Sync friend counts after transaction
       await syncFriendCount(userId);
       await syncFriendCount(friendId);
 
+      // Note: You might also want to handle the chat deletion or archiving here
+      // depending on your app's requirements
+
     } catch (e) {
+      print('Error removing friend: $e');
       throw Exception('Failed to remove friend: $e');
     }
   }

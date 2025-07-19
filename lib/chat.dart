@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
+export 'chat_integrated.dart';
 
 void main() {
   runApp(MyApp());
@@ -90,40 +91,7 @@ class ChatContactPage extends StatefulWidget {
 }
 
 class _ChatContactPageState extends State<ChatContactPage> {
-  List<Map<String, dynamic>> contacts = [
-    {
-      "name": "James",
-      "message": "Hello, I'm fine, how can I help you?",
-      "unread": 2,
-      "avatar": "assets/james.jpg",
-      "isOnline": true,
-      "lastSeen": "Active now"
-    },
-    {
-      "name": "Anna",
-      "message": "Let's meet tomorrow to discuss the plan.",
-      "unread": 1,
-      "avatar": "assets/anna.jpg",
-      "isOnline": false,
-      "lastSeen": "2 hours ago"
-    },
-    {
-      "name": "John",
-      "message": "Can you send me the report by today?",
-      "unread": 0,
-      "avatar": "assets/john.jpg",
-      "isOnline": true,
-      "lastSeen": "Active now"
-    },
-    {
-      "name": "Emily",
-      "message": "Please review the document I sent.",
-      "unread": 3,
-      "avatar": "assets/emily.jpg",
-      "isOnline": false,
-      "lastSeen": "1 day ago"
-    },
-  ];
+  List<Map<String, dynamic>> contacts = [];
 
   @override
   Widget build(BuildContext context) {
@@ -164,6 +132,38 @@ class _ChatContactPageState extends State<ChatContactPage> {
   }
 
   Widget _buildContactsList() {
+    if (contacts.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.chat_bubble_outline,
+              size: 80,
+              color: Colors.grey[300],
+            ),
+            SizedBox(height: 16),
+            Text(
+              'No messages yet',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[600],
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Start a conversation!',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return ListView.builder(
       itemCount: contacts.length,
       itemBuilder: (context, index) {
@@ -314,28 +314,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final FocusNode _focusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
 
-  List<ChatMessage> messages = [
-    ChatMessage(
-      text: "Hello, I'm fine, how can I help you?",
-      isMe: false,
-      timestamp: DateTime.now().subtract(Duration(minutes: 5)),
-    ),
-    ChatMessage(
-      text: "What is the best programming language?",
-      isMe: true,
-      timestamp: DateTime.now().subtract(Duration(minutes: 3)),
-    ),
-    ChatMessage(
-      text: "There are many programming languages in the market that are used in designing and building websites.",
-      isMe: false,
-      timestamp: DateTime.now().subtract(Duration(minutes: 2)),
-    ),
-    ChatMessage(
-      text: "So explain to me more",
-      isMe: true,
-      timestamp: DateTime.now().subtract(Duration(minutes: 1)),
-    ),
-  ];
+  List<ChatMessage> messages = [];
 
   bool _showEmojiPicker = false;
   bool _isSearching = false;
@@ -507,6 +486,37 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessagesList() {
+    if (messages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.message_outlined,
+              size: 64,
+              color: Colors.grey[300],
+            ),
+            SizedBox(height: 16),
+            Text(
+              'No messages yet',
+              style: TextStyle(
+                fontSize: 18,
+                color: Colors.grey[600],
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Say hello to start the conversation!',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.all(16),

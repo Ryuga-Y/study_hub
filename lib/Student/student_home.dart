@@ -11,6 +11,7 @@ import 'student_course.dart';
 import 'calendar.dart'; // Import the calendar page
 import '../Stu_goal.dart'; // Import the goal page
 import '../goal_progress_service.dart'; // Import the goal service
+import '../chat_integrated.dart';
 
 class StudentHomePage extends StatefulWidget {
   const StudentHomePage({Key? key}) : super(key: key);
@@ -542,52 +543,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
         child: _buildBody(),
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
-      // Floating Action Button - ONLY FOR STUDENTS
-      floatingActionButton: _isStudent ? FloatingActionButton(
-        onPressed: _navigateToGoalSystem,
-        backgroundColor: Colors.green[600],
-        heroTag: "goal_fab",
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Icon(Icons.local_florist, color: Colors.white, size: 28),
-            if (_waterBuckets > 0)
-              Positioned(
-                right: 0,
-                top: 0,
-                child: AnimatedContainer(
-                  duration: Duration(milliseconds: 300),
-                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[600],
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white, width: 1),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.orange.withOpacity(0.4),
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: AnimatedSwitcher(
-                    duration: Duration(milliseconds: 300),
-                    child: Text(
-                      '$_waterBuckets',
-                      key: ValueKey(_waterBuckets),
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ) : null, // Don't show for non-students
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      // No floating action button
     );
   }
 
@@ -697,40 +653,6 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 _navigateToCalendar(); // Navigate to calendar page
               },
             ),
-            // Goal System - ONLY FOR STUDENTS
-            if (_isStudent)
-              ListTile(
-                leading: Icon(Icons.local_florist, color: Colors.green[600]),
-                title: const Text('Goal System'),
-                trailing: _waterBuckets > 0
-                    ? Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[100],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.local_drink, size: 14, color: Colors.orange[700]),
-                      SizedBox(width: 4),
-                      Text(
-                        '$_waterBuckets',
-                        style: TextStyle(
-                          color: Colors.orange[700],
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-                    : null,
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToGoalSystem();
-                },
-              ),
             ListTile(
               leading: const Icon(Icons.settings),
               title: const Text('Settings'),
@@ -950,7 +872,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                   (index) => _buildCourseCard(_enrolledCourses[index]),
             ),
 
-          // Extra space for floating action button
+          // Extra space at bottom
           const SizedBox(height: 80),
         ],
       ),
@@ -1102,11 +1024,27 @@ class _StudentHomePageState extends State<StudentHomePage> {
             _navigateToCommunity();
             break;
           case 2:
-          // TODO: Navigate to chat
+          // Navigate to chat
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatContactPage(),
+              ),
+            );
             break;
           case 3:
-          // Navigate to calendar
-            _navigateToCalendar();
+          // Navigate to Goal System (only for students)
+            if (_isStudent) {
+              _navigateToGoalSystem();
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('🌱 Goal system is only available for students'),
+                  backgroundColor: Colors.orange,
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            }
             break;
           case 4:
           // TODO: Navigate to profile
@@ -1116,7 +1054,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
       selectedItemColor: Colors.purple[400],
       unselectedItemColor: Colors.grey[600],
       type: BottomNavigationBarType.fixed,
-      items: const [
+      items: [
         BottomNavigationBarItem(
           icon: Icon(Icons.library_books),
           label: 'Courses',
@@ -1130,8 +1068,34 @@ class _StudentHomePageState extends State<StudentHomePage> {
           label: 'Chat',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.calendar_today),
-          label: 'Calendar',
+          icon: Stack(
+            alignment: Alignment.topRight,
+            children: [
+              Icon(Icons.local_florist),
+              if (_isStudent && _waterBuckets > 0)
+                Container(
+                  padding: EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[600],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  constraints: BoxConstraints(
+                    minWidth: 16,
+                    minHeight: 16,
+                  ),
+                  child: Text(
+                    '$_waterBuckets',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+            ],
+          ),
+          label: 'Goals',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.person_outline),
