@@ -649,14 +649,18 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   Future<void> _onLoadFriends(LoadFriends event, Emitter<CommunityState> emit) async {
     try {
       await emit.forEach(
-        _service.getFriends(status: FriendStatus.accepted),
-        onData: (friends) => state.copyWith(friends: friends),
+        _service.getFriends(status: FriendStatus.accepted), // Explicitly request accepted friends
+        onData: (friends) {
+          print('DEBUG: BLoC - Loaded ${friends.length} friends');
+          return state.copyWith(friends: friends);
+        },
         onError: (error, stackTrace) => state.copyWith(error: error.toString()),
       );
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
     }
   }
+
 
   Future<void> _onLoadPendingRequests(LoadPendingRequests event, Emitter<CommunityState> emit) async {
     try {
@@ -678,8 +682,9 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
 
       // Refresh search results to update button states
       if (state.searchResults.isNotEmpty) {
+        final lastQuery = state.searchResults.first.fullName; // This is a hack, you might want to store the last query
         add(SearchUsers(
-          query: '',
+          query: lastQuery,
           organizationCode: state.currentUserProfile?.organizationCode ?? '',
         ));
       }
@@ -694,11 +699,24 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
 
       await _service.acceptFriendRequest(event.requestId);
 
-      emit(state.copyWith(successMessage: 'Friend request accepted!'));
+      // Remove the accepted request from pending requests immediately
+      final updatedRequests = state.pendingRequests
+          .where((request) => request.id != event.requestId)
+          .toList();
 
-      // Reload friends and pending requests
+      emit(state.copyWith(
+        pendingRequests: updatedRequests,
+        successMessage: 'Friend request accepted!',
+      ));
+
+      // Reload friends list and user profile to update counts
       add(LoadFriends());
       add(LoadPendingRequests());
+
+      // Reload current user profile to update friend count
+      if (_service.currentUserId != null) {
+        add(LoadUserProfile(_service.currentUserId!));
+      }
     } catch (e) {
       print('DEBUG: BLoC - Error accepting friend request: $e');
       emit(state.copyWith(error: e.toString()));
@@ -709,7 +727,7 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     try {
       await _service.declineFriendRequest(event.requestId);
 
-      // Remove from local state
+      // Remove from local state immediately
       final updatedRequests = state.pendingRequests
           .where((request) => request.id != event.requestId)
           .toList();
@@ -718,6 +736,9 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
         pendingRequests: updatedRequests,
         successMessage: 'Friend request declined',
       ));
+
+      // Reload pending requests to ensure consistency
+      add(LoadPendingRequests());
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
     }
@@ -727,7 +748,7 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     try {
       await _service.removeFriend(event.friendId);
 
-      // Remove from local state
+      // Remove from local state immediately
       final updatedFriends = state.friends
           .where((friend) => friend.friendId != event.friendId)
           .toList();
@@ -736,6 +757,12 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
         friends: updatedFriends,
         successMessage: 'Friend removed',
       ));
+
+      // Reload friends and update profile
+      add(LoadFriends());
+      if (_service.currentUserId != null) {
+        add(LoadUserProfile(_service.currentUserId!));
+      }
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
     }

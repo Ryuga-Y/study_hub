@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:study_hub/community/search_screen.dart';
 import 'bloc.dart';
 import 'community_services.dart';
 import 'models.dart';
@@ -52,18 +54,70 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       }
     });
 
-    // Load friends
+    // Load friends - Fixed logic
     if (widget.isCurrentUser) {
+      // For current user, load from bloc state
       context.read<CommunityBloc>().add(LoadFriends());
+      _isLoadingFriends = false;
     } else {
-      // Check friend status
+      // For other users, load their friends directly
+      _loadUserFriends();
+    }
+
+    // Check friend status if viewing another user
+    if (!widget.isCurrentUser) {
       _checkFriendStatus();
     }
   }
 
+  void _loadUserFriends() {
+    _service.getFriends(status: FriendStatus.accepted).listen((allFriends) {
+      if (mounted) {
+        // Filter friends for the user being viewed
+        final userFriends = allFriends.where((friend) =>
+        friend.userId == widget.userId || friend.friendId == widget.userId
+        ).toList();
+
+        setState(() {
+          _userFriends = userFriends;
+          _isLoadingFriends = false;
+        });
+      }
+    });
+  }
+
   Future<void> _checkFriendStatus() async {
-    // Check if already friends or if request is pending
-    // This would be implemented in the service
+    try {
+      final currentUser = _service.currentUserId;
+      if (currentUser == null) return;
+
+      // Check if already friends
+      final friendsSnapshot = await FirebaseFirestore.instance
+          .collection('friends')
+          .where('userId', isEqualTo: currentUser)
+          .where('friendId', isEqualTo: widget.userId)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      if (friendsSnapshot.docs.isNotEmpty) {
+        setState(() => _friendStatus = FriendStatus.accepted);
+        return;
+      }
+
+      // Check for pending request
+      final pendingSnapshot = await FirebaseFirestore.instance
+          .collection('friends')
+          .where('userId', isEqualTo: currentUser)
+          .where('friendId', isEqualTo: widget.userId)
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      if (pendingSnapshot.docs.isNotEmpty) {
+        setState(() => _friendStatus = FriendStatus.pending);
+      }
+    } catch (e) {
+      print('Error checking friend status: $e');
+    }
   }
 
   @override
@@ -261,7 +315,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _getRoleColor(user.role).withOpacity(0.1),
+                    color: _getRoleColor(user.role).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -494,7 +548,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                     child: Container(
                       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
+                        color: Colors.black.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -535,7 +589,13 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   }
 
   Widget _buildFriendsList(CommunityState state) {
+    if (_isLoadingFriends) {
+      return Center(child: CircularProgressIndicator());
+    }
+
     final friends = widget.isCurrentUser ? state.friends : _userFriends;
+
+    print('DEBUG: Displaying ${friends.length} friends for user ${widget.userId}');
 
     if (friends.isEmpty) {
       return Center(
@@ -561,7 +621,14 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               TextButton(
                 onPressed: () {
                   // Navigate to search screen
-                  Navigator.pushNamed(context, '/search');
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => SearchScreen(
+                        organizationCode: state.currentUserProfile?.organizationCode ?? '',
+                      ),
+                    ),
+                  );
                 },
                 child: Text('Find Friends'),
               ),
@@ -576,16 +643,22 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       itemCount: friends.length,
       itemBuilder: (context, index) {
         final friend = friends[index];
+
+        // Determine the correct friend info to display
+        final displayId = friend.userId == widget.userId ? friend.friendId : friend.userId;
+        final displayName = friend.userId == widget.userId ? friend.friendName : friend.friendName;
+        final displayAvatar = friend.userId == widget.userId ? friend.friendAvatar : friend.friendAvatar;
+
         return ListTile(
           leading: CircleAvatar(
-            backgroundImage: friend.friendAvatar != null
-                ? CachedNetworkImageProvider(friend.friendAvatar!)
+            backgroundImage: displayAvatar != null
+                ? CachedNetworkImageProvider(displayAvatar)
                 : null,
-            child: friend.friendAvatar == null
+            child: displayAvatar == null
                 ? Icon(Icons.person)
                 : null,
           ),
-          title: Text(friend.friendName),
+          title: Text(displayName),
           subtitle: friend.mutualFriends.isNotEmpty
               ? Text('${friend.mutualFriends.length} mutual friends')
               : null,
@@ -604,7 +677,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             ],
             onSelected: (value) {
               if (value == 'unfriend') {
-                context.read<CommunityBloc>().add(RemoveFriend(friend.friendId));
+                context.read<CommunityBloc>().add(RemoveFriend(displayId));
               }
             },
           )
@@ -614,7 +687,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               context,
               MaterialPageRoute(
                 builder: (context) => ProfileScreen(
-                  userId: friend.friendId,
+                  userId: displayId,
                   isCurrentUser: false,
                 ),
               ),

@@ -410,7 +410,12 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
             ),
           ),
         ),
-      );
+      ).then((_) {
+        // Reset bottom navigation to Courses tab when returning from community
+        setState(() {
+          _currentIndex = 0;
+        });
+      });
     } catch (e) {
       // Close loading dialog if open
       if (Navigator.canPop(context)) {
@@ -423,6 +428,11 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           backgroundColor: Colors.red,
         ),
       );
+
+      // Reset navigation index on error as well
+      setState(() {
+        _currentIndex = 0;
+      });
     }
   }
 
