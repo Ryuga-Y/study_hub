@@ -37,7 +37,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
   String? _errorMessage;
 
   // Navigation
-  int _currentIndex = 1;
+  int _currentIndex = 0;
 
   @override
   void initState() {

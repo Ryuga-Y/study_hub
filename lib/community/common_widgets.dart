@@ -11,7 +11,7 @@ class UserAvatar extends StatelessWidget {
   const UserAvatar({
     Key? key,
     this.imageUrl,
-    this.radius = 19,
+    this.radius = 20,
     this.isOnline = false,
     this.onTap,
   }) : super(key: key);
