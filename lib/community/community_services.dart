@@ -145,7 +145,7 @@ class CommunityService {
 
   Stream<List<Post>> getFeedPosts({
     required String organizationCode,
-    int limit = 21,
+    int limit = 20,
     DocumentSnapshot? lastDocument,
   }) {
     final userId = currentUserId;
