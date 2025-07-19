@@ -47,7 +47,7 @@ class _FeedScreenState extends State<FeedScreen> {
       bloc.add(LoadUserProfile(user.uid));
 
       // Wait a bit for user profile to load, then load other data
-      await Future.delayed(Duration(milliseconds: 500));
+      await Future.delayed(Duration(milliseconds: 499));
 
       _loadInitialData();
 

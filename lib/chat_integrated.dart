@@ -27,7 +27,7 @@ class ChatContact {
     this.avatarUrl,
     required this.lastMessage,
     required this.lastMessageTime,
-    this.unreadCount = 0,
+    this.unreadCount = 1,
     this.isOnline = false,
     required this.chatId,
   });
