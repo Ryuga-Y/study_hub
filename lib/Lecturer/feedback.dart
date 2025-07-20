@@ -37,96 +37,14 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
       final user = _authService.currentUser;
       if (user == null) return;
 
-      // Determine which student to load feedback for
-      final targetStudentId = widget.isStudent ? user.uid : widget.studentId;
-
-      if (targetStudentId == null) {
-        setState(() {
-          isLoading = false;
-        });
-        return;
-      }
-
-      // Get all assignments for the course
-      final assignmentsSnapshot = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(widget.organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('assignments')
-          .orderBy('createdAt', descending: true)
-          .get();
-
       List<Map<String, dynamic>> allFeedback = [];
 
-      // For each assignment, get evaluations for the student
-      for (var assignmentDoc in assignmentsSnapshot.docs) {
-        final assignmentData = assignmentDoc.data();
-        assignmentData['id'] = assignmentDoc.id;
-
-        // Get submissions for this assignment by the student
-        final submissionsSnapshot = await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(widget.organizationCode)
-            .collection('courses')
-            .doc(widget.courseId)
-            .collection('assignments')
-            .doc(assignmentDoc.id)
-            .collection('submissions')
-            .where('studentId', isEqualTo: targetStudentId)
-            .orderBy('submittedAt', descending: true)
-            .get();
-
-        for (var submissionDoc in submissionsSnapshot.docs) {
-          final submissionData = submissionDoc.data();
-
-          // Get evaluation for this submission
-          final evalDoc = await FirebaseFirestore.instance
-              .collection('organizations')
-              .doc(widget.organizationCode)
-              .collection('courses')
-              .doc(widget.courseId)
-              .collection('assignments')
-              .doc(assignmentDoc.id)
-              .collection('submissions')
-              .doc(submissionDoc.id)
-              .collection('evaluations')
-              .doc('current')
-              .get();
-
-          if (evalDoc.exists) {
-            final evalData = evalDoc.data()!;
-
-            // Get evaluator name
-            String evaluatorName = 'Unknown';
-            if (evalData['evaluatorId'] != null) {
-              final evaluatorDoc = await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(evalData['evaluatorId'])
-                  .get();
-              if (evaluatorDoc.exists) {
-                evaluatorName = evaluatorDoc.data()?['fullName'] ?? 'Unknown';
-              }
-            }
-
-            allFeedback.add({
-              'assignmentId': assignmentDoc.id,
-              'assignmentTitle': assignmentData['title'] as String,
-              'assignmentPoints': (assignmentData['points'] as num? ?? 100),
-              'submissionId': submissionDoc.id,
-              'submittedAt': submissionData['submittedAt'],
-              'evaluatedAt': evalData['evaluatedAt'],
-              'grade': evalData['grade'] as num?,
-              'totalScore': evalData['totalScore'] as num?,
-              'feedback': evalData['feedback'] as String?,
-              'privateNotes': widget.isStudent ? null : evalData['privateNotes'] as String?,
-              'allowResubmission': evalData['allowResubmission'] as bool?,
-              'rubricUsed': evalData['rubricUsed'] as bool?,
-              'criteriaScores': evalData['criteriaScores'] as Map<String, dynamic>?,
-              'evaluatorName': evaluatorName,
-            });
-          }
-        }
+      if (widget.isStudent) {
+        // For students: load their own feedback
+        await _loadStudentFeedback(user.uid, allFeedback);
+      } else {
+        // For lecturers: load all feedback for all students
+        await _loadAllStudentsFeedback(allFeedback);
       }
 
       setState(() {
@@ -139,6 +57,201 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
         isLoading = false;
       });
     }
+  }
+
+  Future<void> _loadStudentFeedback(String studentId, List<Map<String, dynamic>> allFeedback) async {
+    // Get all assignments for the course
+    final assignmentsSnapshot = await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(widget.organizationCode)
+        .collection('courses')
+        .doc(widget.courseId)
+        .collection('assignments')
+        .orderBy('createdAt', descending: true)
+        .get();
+
+    // For each assignment, get evaluations for the student
+    for (var assignmentDoc in assignmentsSnapshot.docs) {
+      final assignmentData = assignmentDoc.data();
+      assignmentData['id'] = assignmentDoc.id;
+
+      // Get submissions for this assignment by the student
+      final submissionsSnapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .doc(assignmentDoc.id)
+          .collection('submissions')
+          .where('studentId', isEqualTo: studentId)
+          .get();
+
+      for (var submissionDoc in submissionsSnapshot.docs) {
+        final submissionData = submissionDoc.data();
+
+        // Get evaluation for this submission
+        final evalDoc = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(assignmentDoc.id)
+            .collection('submissions')
+            .doc(submissionDoc.id)
+            .collection('evaluations')
+            .doc('current')
+            .get();
+
+        if (evalDoc.exists) {
+          final evalData = evalDoc.data()!;
+
+          // Get evaluator name
+          String evaluatorName = 'Unknown';
+          if (evalData['evaluatorId'] != null) {
+            final evaluatorDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(evalData['evaluatorId'])
+                .get();
+            if (evaluatorDoc.exists) {
+              evaluatorName = evaluatorDoc.data()?['fullName'] ?? 'Unknown';
+            }
+          }
+
+          allFeedback.add({
+            'assignmentId': assignmentDoc.id,
+            'assignmentTitle': assignmentData['title'] as String,
+            'assignmentPoints': (assignmentData['points'] as num? ?? 100),
+            'submissionId': submissionDoc.id,
+            'submittedAt': submissionData['submittedAt'],
+            'evaluatedAt': evalData['evaluatedAt'],
+            'grade': evalData['grade'] as num?,
+            'letterGrade': evalData['letterGrade'] as String?,
+            'percentage': evalData['percentage'] as num?,
+            'totalScore': evalData['totalScore'] as num?,
+            'feedback': evalData['feedback'] as String?,
+            'privateNotes': widget.isStudent ? null : evalData['privateNotes'] as String?,
+            'allowResubmission': evalData['allowResubmission'] as bool?,
+            'rubricUsed': evalData['rubricUsed'] as bool?,
+            'criteriaScores': evalData['criteriaScores'] as Map<String, dynamic>?,
+            'evaluatorName': evaluatorName,
+            'studentId': studentId,
+            'studentName': submissionData['studentName'] ?? evalData['studentName'] ?? 'Unknown',
+            'studentEmail': submissionData['studentEmail'] ?? evalData['studentEmail'] ?? '',
+          });
+        }
+      }
+    }
+  }
+
+  Future<void> _loadAllStudentsFeedback(List<Map<String, dynamic>> allFeedback) async {
+    // Get all assignments for the course
+    final assignmentsSnapshot = await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(widget.organizationCode)
+        .collection('courses')
+        .doc(widget.courseId)
+        .collection('assignments')
+        .orderBy('createdAt', descending: true)
+        .get();
+
+    // For each assignment, get all submissions with evaluations
+    for (var assignmentDoc in assignmentsSnapshot.docs) {
+      final assignmentData = assignmentDoc.data();
+      assignmentData['id'] = assignmentDoc.id;
+
+      // Get all submissions for this assignment
+      final submissionsSnapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .doc(assignmentDoc.id)
+          .collection('submissions')
+          .get();
+
+      for (var submissionDoc in submissionsSnapshot.docs) {
+        final submissionData = submissionDoc.data();
+
+        // Get evaluation for this submission
+        final evalDoc = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(widget.organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(assignmentDoc.id)
+            .collection('submissions')
+            .doc(submissionDoc.id)
+            .collection('evaluations')
+            .doc('current')
+            .get();
+
+        if (evalDoc.exists) {
+          final evalData = evalDoc.data()!;
+
+          // Get evaluator name
+          String evaluatorName = 'Unknown';
+          if (evalData['evaluatorId'] != null) {
+            final evaluatorDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(evalData['evaluatorId'])
+                .get();
+            if (evaluatorDoc.exists) {
+              evaluatorName = evaluatorDoc.data()?['fullName'] ?? 'Unknown';
+            }
+          }
+
+          // Get student name if not in submission data
+          String studentName = submissionData['studentName'] ?? evalData['studentName'] ?? 'Unknown';
+          String studentEmail = submissionData['studentEmail'] ?? evalData['studentEmail'] ?? '';
+          final studentId = submissionData['studentId'] ?? evalData['studentId'] ?? '';
+
+          if (studentName == 'Unknown' && studentId.isNotEmpty) {
+            final studentDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(studentId)
+                .get();
+            if (studentDoc.exists) {
+              studentName = studentDoc.data()?['fullName'] ?? 'Unknown';
+              studentEmail = studentDoc.data()?['email'] ?? '';
+            }
+          }
+
+          allFeedback.add({
+            'assignmentId': assignmentDoc.id,
+            'assignmentTitle': assignmentData['title'] as String,
+            'assignmentPoints': (assignmentData['points'] as num? ?? 100),
+            'submissionId': submissionDoc.id,
+            'submittedAt': submissionData['submittedAt'],
+            'evaluatedAt': evalData['evaluatedAt'],
+            'grade': evalData['grade'] as num?,
+            'letterGrade': evalData['letterGrade'] as String?,
+            'percentage': evalData['percentage'] as num?,
+            'totalScore': evalData['totalScore'] as num?,
+            'feedback': evalData['feedback'] as String?,
+            'privateNotes': evalData['privateNotes'] as String?,
+            'allowResubmission': evalData['allowResubmission'] as bool?,
+            'rubricUsed': evalData['rubricUsed'] as bool?,
+            'criteriaScores': evalData['criteriaScores'] as Map<String, dynamic>?,
+            'evaluatorName': evaluatorName,
+            'studentId': studentId,
+            'studentName': studentName,
+            'studentEmail': studentEmail,
+          });
+        }
+      }
+    }
+
+    // Sort by evaluation date
+    allFeedback.sort((a, b) {
+      final aTime = a['evaluatedAt'] as Timestamp?;
+      final bTime = b['evaluatedAt'] as Timestamp?;
+      if (aTime == null || bTime == null) return 0;
+      return bTime.compareTo(aTime);
+    });
   }
 
   @override
@@ -160,10 +273,13 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
         .toSet();
     final assignments = assignmentSet.toList();
 
-    // Filter feedback by selected assignment
-    final filteredFeedback = selectedAssignmentId == null
-        ? feedbackHistory
-        : feedbackHistory.where((f) => f['assignmentId'] == selectedAssignmentId).toList();
+    // Filter feedback by assignment only
+    var filteredFeedback = feedbackHistory;
+    if (selectedAssignmentId != null) {
+      filteredFeedback = filteredFeedback
+          .where((f) => f['assignmentId'] == selectedAssignmentId)
+          .toList();
+    }
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -182,47 +298,69 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
           icon: Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          if (feedbackHistory.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.purple[100],
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${filteredFeedback.length} evaluations',
+                  style: TextStyle(
+                    color: Colors.purple[700],
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
       body: Column(
         children: [
-          // Filter by Assignment
+          // Assignment Filter Only
           if (assignments.isNotEmpty)
             Container(
-              margin: EdgeInsets.all(16),
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withValues(alpha: 0.1),
-                    blurRadius: 5,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  isExpanded: true,
-                  value: selectedAssignmentId,
-                  hint: Text('All Assignments'),
-                  items: [
-                    DropdownMenuItem<String>(
-                      value: null,
-                      child: Text('All Assignments'),
+              padding: EdgeInsets.all(16),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withValues(alpha: 0.1),
+                      blurRadius: 5,
+                      offset: Offset(0, 2),
                     ),
-                    ...assignments.map((assignment) {
-                      return DropdownMenuItem<String>(
-                        value: assignment['id'] as String,
-                        child: Text(assignment['title'] as String),
-                      );
-                    }).toList(),
                   ],
-                  onChanged: (value) {
-                    setState(() {
-                      selectedAssignmentId = value;
-                    });
-                  },
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: selectedAssignmentId,
+                    hint: Text('All Assignments'),
+                    items: [
+                      DropdownMenuItem<String>(
+                        value: null,
+                        child: Text('All Assignments'),
+                      ),
+                      ...assignments.map((assignment) {
+                        return DropdownMenuItem<String>(
+                          value: assignment['id'] as String,
+                          child: Text(assignment['title'] as String),
+                        );
+                      }).toList(),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        selectedAssignmentId = value;
+                      });
+                    },
+                  ),
                 ),
               ),
             ),
@@ -267,7 +405,9 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
           Text(
             widget.isStudent
                 ? 'Your graded assignments will appear here'
-                : 'Student feedback will appear here',
+                : selectedAssignmentId != null
+                ? 'No feedback for selected assignment'
+                : 'Evaluated assignments will appear here',
             style: TextStyle(
               color: Colors.grey[600],
             ),
@@ -280,7 +420,8 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
   Widget _buildFeedbackCard(Map<String, dynamic> feedback) {
     final grade = (feedback['grade'] as num? ?? 0).toDouble();
     final maxPoints = (feedback['assignmentPoints'] as num? ?? 100).toDouble();
-    final percentage = (grade / maxPoints * 100).toStringAsFixed(1);
+    final percentage = feedback['percentage'] ?? (grade / maxPoints * 100);
+    final letterGrade = feedback['letterGrade'];
 
     return Container(
       margin: EdgeInsets.only(bottom: 16),
@@ -301,6 +442,36 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (!widget.isStudent) ...[
+              // Show student info for lecturer
+              Container(
+                margin: EdgeInsets.only(bottom: 8),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person, size: 16, color: Colors.blue[700]),
+                    SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        feedback['studentName'] ?? 'Unknown Student',
+                        style: TextStyle(
+                          color: Colors.blue[700],
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             Text(
               feedback['assignmentTitle'],
               style: TextStyle(
@@ -325,28 +496,45 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
           ],
         ),
         trailing: Container(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          constraints: BoxConstraints(maxWidth: 90, maxHeight: 50),
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: _getGradeColor(percentage).withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _getGradeColor(percentage)),
+            color: _getGradeColor(letterGrade ?? _calculateLetterGrade(percentage.toDouble())).withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _getGradeColor(letterGrade ?? _calculateLetterGrade(percentage.toDouble()))),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                '${grade.toInt()}/${maxPoints.toInt()}',
-                style: TextStyle(
-                  color: _getGradeColor(percentage),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
+              if (letterGrade != null)
+                Text(
+                  letterGrade,
+                  style: TextStyle(
+                    color: _getGradeColor(letterGrade),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    height: 1.0,
+                  ),
+                ),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '${grade.toInt()}/${maxPoints.toInt()}',
+                  style: TextStyle(
+                    color: _getGradeColor(letterGrade ?? _calculateLetterGrade(percentage.toDouble())),
+                    fontWeight: FontWeight.bold,
+                    fontSize: letterGrade != null ? 10 : 12,
+                    height: 1.0,
+                  ),
                 ),
               ),
               Text(
-                '$percentage%',
+                '${percentage.toStringAsFixed(1)}%',
                 style: TextStyle(
-                  color: _getGradeColor(percentage),
-                  fontSize: 12,
+                  color: _getGradeColor(letterGrade ?? _calculateLetterGrade(percentage.toDouble())),
+                  fontSize: 8,
+                  height: 1.0,
                 ),
               ),
             ],
@@ -446,19 +634,12 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
                   fontSize: 12,
                 ),
               ),
-              if (feedback['allowResubmission'] == true)
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.green[100],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    'Resubmission Allowed',
-                    style: TextStyle(
-                      color: Colors.green[700],
-                      fontSize: 12,
-                    ),
+              if (!widget.isStudent && feedback['studentEmail'] != null)
+                Text(
+                  feedback['studentEmail'],
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 12,
                   ),
                 ),
             ],
@@ -529,13 +710,36 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
     );
   }
 
-  Color _getGradeColor(String percentage) {
-    final percent = double.tryParse(percentage) ?? 0.0;
-    if (percent >= 90) return Colors.green[600]!;
-    if (percent >= 80) return Colors.blue[600]!;
-    if (percent >= 70) return Colors.orange[600]!;
-    if (percent >= 60) return Colors.deepOrange[600]!;
-    return Colors.red[600]!;
+  Color _getGradeColor(String letterGrade) {
+    switch (letterGrade) {
+      case 'A+':
+      case 'A':
+      case 'A-':
+        return Colors.green[600]!;
+      case 'B+':
+      case 'B':
+      case 'B-':
+        return Colors.blue[600]!;
+      case 'C+':
+      case 'C':
+        return Colors.orange[600]!;
+      case 'F':
+        return Colors.red[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
+  }
+
+  String _calculateLetterGrade(double percentage) {
+    if (percentage >= 90) return 'A+';
+    if (percentage >= 80) return 'A';
+    if (percentage >= 75) return 'A-';
+    if (percentage >= 70) return 'B+';
+    if (percentage >= 65) return 'B';
+    if (percentage >= 60) return 'B-';
+    if (percentage >= 55) return 'C+';
+    if (percentage >= 50) return 'C';
+    return 'F';
   }
 
   String _formatDate(dynamic timestamp) {

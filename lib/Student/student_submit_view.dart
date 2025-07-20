@@ -715,7 +715,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                       Icon(Icons.comment, color: Colors.blue[600], size: 24),
                       SizedBox(width: 12),
                       Text(
-                        'Instructor Feedback',
+                        'Lecturer Feedback',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,

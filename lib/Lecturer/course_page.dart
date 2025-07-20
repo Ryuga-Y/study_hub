@@ -1228,7 +1228,6 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             child: CustomButton(
               text: 'Enroll Students',
               onPressed: _showEnrollStudentDialog,
-              icon: Icons.person_add,
             ),
           ),
         Expanded(

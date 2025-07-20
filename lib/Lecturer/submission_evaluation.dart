@@ -1206,7 +1206,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        'Instructor Only',
+                        'Lecturer Only',
                         style: TextStyle(
                           color: Colors.orange[700],
                           fontSize: 12,
@@ -1220,8 +1220,8 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                   controller: _privateNotesController,
                   maxLines: 4,
                   decoration: InputDecoration(
-                    hintText: 'Notes only visible to instructors...',
-                    border: OutlineInputBorder(
+                    hintText: 'Notes only visible to Lecturer...',
+                       border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
                     focusedBorder: OutlineInputBorder(
