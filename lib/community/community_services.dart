@@ -450,6 +450,37 @@ class CommunityService {
         snapshot.docs.map((doc) => Comment.fromFirestore(doc)).toList());
   }
 
+  Future<void> deleteComment({
+    required String commentId,
+    required String postId,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Get comment to verify ownership
+      final commentDoc = await _firestore.collection('comments').doc(commentId).get();
+      if (!commentDoc.exists) {
+        throw Exception('Comment not found');
+      }
+
+      final commentData = commentDoc.data()!;
+      if (commentData['userId'] != userId) {
+        throw Exception('Unauthorized');
+      }
+
+      // Delete the comment
+      await _firestore.collection('comments').doc(commentId).delete();
+
+      // Update post comment count
+      await _firestore.collection('posts').doc(postId).update({
+        'commentCount': FieldValue.increment(-1),
+      });
+    } catch (e) {
+      throw Exception('Failed to delete comment: $e');
+    }
+  }
+
   // Friend Operations
   Future<void> sendFriendRequest(String friendId) async {
     try {
@@ -562,7 +593,7 @@ class CommunityService {
     }
   }
 
-  // This is the ONLY acceptFriendRequest method
+  // UPDATED Accept Friend Request method with enhanced chat creation
   Future<void> acceptFriendRequest(String requestId) async {
     try {
       final userId = currentUserId;
@@ -585,7 +616,7 @@ class CommunityService {
         throw Exception('You can only accept requests sent to you');
       }
 
-      final recipientId = requestData['userId'];  // Current user
+      final recipientId = requestData['userId'];  // Current user (who is accepting)
       final senderId = requestData['friendId'];   // Friend who sent request
 
       // Step 1: Update the main request document
@@ -613,7 +644,7 @@ class CommunityService {
         });
       }
 
-      // Step 3: Update friend counts using a simpler approach
+      // Step 3: Update friend counts
       print('Step 3: Updating friend counts');
 
       // Update current user's friend count
@@ -629,7 +660,7 @@ class CommunityService {
       });
 
       // Step 4: Get user data for chat creation
-      print('Step 4: Creating chat');
+      print('Step 4: Creating chat and sending acceptance message');
       final senderDoc = await _firestore.collection('users').doc(senderId).get();
       final recipientDoc = await _firestore.collection('users').doc(recipientId).get();
 
@@ -637,7 +668,13 @@ class CommunityService {
         final senderName = senderDoc.data()?['fullName'] ?? 'Unknown';
         final recipientName = recipientDoc.data()?['fullName'] ?? 'Unknown';
 
-        await _createChatForNewFriends(senderId, recipientId, senderName, recipientName);
+        // Create chat with acceptance message
+        await _createChatWithAcceptanceMessage(
+            senderId,
+            recipientId,
+            senderName,
+            recipientName
+        );
       }
 
       // Step 5: Send notification
@@ -662,57 +699,86 @@ class CommunityService {
     }
   }
 
-
-  // Create chat for new friends
-  Future<void> _createChatForNewFriends(String userId1, String userId2, String user1Name, String user2Name) async {
+  // UPDATED Chat creation method with acceptance message
+  Future<void> _createChatWithAcceptanceMessage(
+      String senderId,
+      String recipientId,
+      String senderName,
+      String recipientName
+      ) async {
     try {
       // Generate chat ID (sorted user IDs)
-      final sortedIds = [userId1, userId2]..sort();
+      final sortedIds = [senderId, recipientId]..sort();
       final chatId = '${sortedIds[0]}_${sortedIds[1]}';
 
       print('Creating chat for new friends: $chatId');
 
       // Check if chat already exists
       final chatDoc = await _firestore.collection('chats').doc(chatId).get();
-      if (chatDoc.exists) {
-        print('Chat already exists, skipping creation');
-        return;
+
+      if (!chatDoc.exists) {
+        // Create the initial welcome message text
+        final welcomeMessage = "You became friends, let's start chatting!";
+
+        // Create chat document
+        await _firestore.collection('chats').doc(chatId).set({
+          'participants': [senderId, recipientId],
+          'participantNames': {
+            senderId: senderName,
+            recipientId: recipientName,
+          },
+          'createdAt': FieldValue.serverTimestamp(),
+          'lastMessage': welcomeMessage,
+          'lastMessageTime': FieldValue.serverTimestamp(),
+          'unreadCount': {
+            senderId: 1,  // Mark as unread for both users initially
+            recipientId: 1,
+          },
+        });
+
+        print('Chat document created successfully');
+
+        // Add system welcome message
+        await _firestore
+            .collection('chats')
+            .doc(chatId)
+            .collection('messages')
+            .add({
+          'text': welcomeMessage,
+          'senderId': 'system',
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+          'isSystemMessage': true,
+        });
       }
 
-      // Create chat document - compatible with updated Firestore rules
-      await _firestore.collection('chats').doc(chatId).set({
-        'participants': [userId1, userId2],
-        'participantNames': {
-          userId1: user1Name,
-          userId2: user2Name,
-        },
-        'createdAt': FieldValue.serverTimestamp(),
-        'lastMessage': "You became friends, let's start chatting!",
-        'lastMessageTime': FieldValue.serverTimestamp(),
-        'unreadCount': {
-          userId1: 0,
-          userId2: 0,
-        },
-      });
+      // Send the acceptance message from the acceptor (recipientId) to the requester (senderId)
+      final acceptanceMessage = "I've accepted your friend request. Now let's chat!";
 
-      print('Chat document created successfully');
-
-      // Add system message - compatible with updated Firestore rules
+      // Add the acceptance message
       await _firestore
           .collection('chats')
           .doc(chatId)
           .collection('messages')
           .add({
-        'text': "You became friends, let's start chatting!",
-        'senderId': 'system',
+        'text': acceptanceMessage,
+        'senderId': recipientId,  // The person who accepted the request sends this
         'timestamp': FieldValue.serverTimestamp(),
         'isRead': false,
+        'isSystemMessage': false,  // This is a regular message, not a system message
       });
 
-      print('System message added successfully');
+      // Update chat metadata with the acceptance message
+      await _firestore.collection('chats').doc(chatId).update({
+        'lastMessage': acceptanceMessage,
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'unreadCount.${senderId}': FieldValue.increment(1),  // Increment unread count for the original requester
+      });
+
+      print('Acceptance message sent successfully');
 
     } catch (e) {
-      print('Error creating chat: $e');
+      print('Error creating chat with acceptance message: $e');
       // Don't throw here as chat creation failure shouldn't break friend acceptance
     }
   }
@@ -934,37 +1000,6 @@ class CommunityService {
       }
     } catch (e) {
       throw Exception('Failed to update profile: $e');
-    }
-  }
-
-  Future<void> deleteComment({
-    required String commentId,
-    required String postId,
-  }) async {
-    try {
-      final userId = currentUserId;
-      if (userId == null) throw Exception('User not authenticated');
-
-      // Get comment to verify ownership
-      final commentDoc = await _firestore.collection('comments').doc(commentId).get();
-      if (!commentDoc.exists) {
-        throw Exception('Comment not found');
-      }
-
-      final commentData = commentDoc.data()!;
-      if (commentData['userId'] != userId) {
-        throw Exception('Unauthorized');
-      }
-
-      // Delete the comment
-      await _firestore.collection('comments').doc(commentId).delete();
-
-      // Update post comment count
-      await _firestore.collection('posts').doc(postId).update({
-        'commentCount': FieldValue.increment(-1),
-      });
-    } catch (e) {
-      throw Exception('Failed to delete comment: $e');
     }
   }
 

@@ -13,15 +13,20 @@ import '../chat_integrated.dart';
 
 class FeedScreen extends StatefulWidget {
   final String organizationCode;
+  final int initialTab; // Add this line
 
-  const FeedScreen({Key? key, required this.organizationCode}) : super(key: key);
+  const FeedScreen({
+    Key? key,
+    required this.organizationCode,
+    this.initialTab = 0, // Add this line with default value
+  }) : super(key: key);
 
   @override
   _FeedScreenState createState() => _FeedScreenState();
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  int _currentIndex = 0;
+  late int _currentIndex; // Change this line - remove = 0
   final ScrollController _scrollController = ScrollController();
   final AuthService _authService = AuthService();
   bool _isInitialized = false;
@@ -29,6 +34,7 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialTab; // Add this line
     _initializeFeed();
     _scrollController.addListener(_onScroll);
   }

@@ -9,6 +9,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../community/bloc.dart';
 import '../community/models.dart';
+import '../community/search_screen.dart';
+import '../community/feed_screen.dart';
+import '../community/community_services.dart';
 
 // Chat Models
 class ChatContact {
@@ -37,7 +40,7 @@ class ChatContact {
       userId: friend.friendId,
       name: friend.friendName,
       avatarUrl: friend.friendAvatar,
-      lastMessage: lastMessage ?? "You became friends with ${friend.friendName}, let's start chat!",
+      lastMessage: lastMessage ?? "You became friends with ${friend.friendName}, let's start chatting!",
       lastMessageTime: lastMessageTime ?? friend.acceptedAt ?? friend.createdAt,
       unreadCount: unreadCount,
       isOnline: false,
@@ -101,7 +104,7 @@ class ChatMessage {
   }
 }
 
-// Text Overlay Model (same as original)
+// Text Overlay Model
 class TextOverlay {
   final String text;
   final Offset position;
@@ -155,11 +158,13 @@ class ChatContactPage extends StatefulWidget {
   _ChatContactPageState createState() => _ChatContactPageState();
 }
 
+// FIXED: Only one class declaration
 class _ChatContactPageState extends State<ChatContactPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   List<ChatContact> _contacts = [];
   bool _isLoading = true;
+  bool _hasFriends = false;
 
   @override
   void initState() {
@@ -179,6 +184,9 @@ class _ChatContactPageState extends State<ChatContactPage> {
           .where('status', isEqualTo: 'accepted')
           .get();
 
+      // Set hasFriends flag
+      _hasFriends = friendsSnapshot.docs.isNotEmpty;
+
       List<ChatContact> contacts = [];
 
       for (final doc in friendsSnapshot.docs) {
@@ -195,7 +203,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
 
         // Get last message info
         final chatData = chatDoc.data();
-        final lastMessage = chatData?['lastMessage'] ?? "You became friends with ${friend.friendName}, let's start chat!";
+        final lastMessage = chatData?['lastMessage'] ?? "You became friends with ${friend.friendName}, let's start chatting!";
         final lastMessageTime = chatData?['lastMessageTime'] != null
             ? (chatData!['lastMessageTime'] as Timestamp).toDate()
             : friend.acceptedAt ?? friend.createdAt;
@@ -225,21 +233,27 @@ class _ChatContactPageState extends State<ChatContactPage> {
   Future<void> _createChat(String currentUserId, Friend friend) async {
     final chatId = ChatContact._generateChatId(currentUserId, friend.friendId);
 
+    // Get current user's name
+    final currentUserDoc = await _firestore.collection('users').doc(currentUserId).get();
+    final currentUserName = currentUserDoc.data()?['fullName'] ?? 'You';
+
+    // Welcome message
+    final welcomeMessage = "You became friends with ${friend.friendName}, let's start chatting!";
+
     // Create chat document
     await _firestore.collection('chats').doc(chatId).set({
       'participants': [currentUserId, friend.friendId],
       'participantNames': {
-        currentUserId: _auth.currentUser?.displayName ?? 'You',
+        currentUserId: currentUserName,
         friend.friendId: friend.friendName,
       },
       'createdAt': FieldValue.serverTimestamp(),
-      'lastMessage': "You became friends with ${friend.friendName}, let's start chat!",
+      'lastMessage': welcomeMessage,
       'lastMessageTime': FieldValue.serverTimestamp(),
       'unreadCount': {
-        currentUserId: 0,
-        friend.friendId: 1,
+        currentUserId: 0,  // Current user has seen it
+        friend.friendId: 0, // Friend has also seen it (since it's a system message)
       },
-      'friendshipId': friend.id,
     });
 
     // Add welcome message
@@ -248,10 +262,10 @@ class _ChatContactPageState extends State<ChatContactPage> {
         .doc(chatId)
         .collection('messages')
         .add({
-      'text': "You became friends with ${friend.friendName}, let's start chat!",
+      'text': welcomeMessage,
       'senderId': 'system',
       'timestamp': FieldValue.serverTimestamp(),
-      'isRead': false,
+      'isRead': true,  // Mark as read for system messages
       'isSystemMessage': true,
     });
   }
@@ -314,7 +328,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
           ),
           SizedBox(height: 16),
           Text(
-            'No messages yet',
+            _hasFriends ? 'No messages yet' : 'No friends yet',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w600,
@@ -323,28 +337,64 @@ class _ChatContactPageState extends State<ChatContactPage> {
           ),
           SizedBox(height: 8),
           Text(
-            'Add friends to start chatting!',
+            _hasFriends
+                ? 'Start a conversation with your friends!'
+                : 'Add friends to start chatting!',
             style: TextStyle(
               fontSize: 16,
               color: Colors.grey[500],
             ),
           ),
-          SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            icon: Icon(Icons.person_add),
-            label: Text('Find Friends'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple[600],
-              foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
+          if (!_hasFriends) ...[  // Only show if no friends
+            SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () async {
+                try {
+                  // Get the current user's organization code
+                  final userDoc = await _firestore
+                      .collection('users')
+                      .doc(_auth.currentUser?.uid)
+                      .get();
+
+                  final organizationCode = userDoc.data()?['organizationCode'] ?? '';
+
+                  // Navigate to feed screen and then to search tab
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => FeedScreen(
+                        organizationCode: organizationCode,
+                        initialTab: 1, // Set to search tab index
+                      ),
+                    ),
+                        (route) => false, // Remove all previous routes
+                  );
+                } catch (e) {
+                  print('Error navigating to find friends: $e');
+                  // Fallback navigation
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => SearchScreen(
+                        organizationCode: '',
+                        initialTab: SearchScreenTab.search,
+                      ),
+                    ),
+                  );
+                }
+              },
+              icon: Icon(Icons.person_add),
+              label: Text('Find Friends'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple[600],
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -491,6 +541,8 @@ class _ChatContactPageState extends State<ChatContactPage> {
     );
   }
 }
+
+// Rest of the ChatScreen and other classes remain the same...
 
 // Chat Screen
 class ChatScreen extends StatefulWidget {
