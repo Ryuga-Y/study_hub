@@ -545,106 +545,6 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
     });
   }
 
-  Future<void> _loadFromPreviousAssignment() async {
-    // Show dialog to select previous assignment
-    final assignments = await FirebaseFirestore.instance
-        .collection('organizations')
-        .doc(widget.organizationCode)
-        .collection('courses')
-        .doc(widget.courseId)
-        .collection('assignments')
-        .where('id', isNotEqualTo: widget.assignmentId)
-        .get();
-
-    if (!mounted) return;
-
-    final selectedAssignment = await showDialog<String>(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: 400,
-          padding: EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Copy Rubric From',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              SizedBox(height: 16),
-              Container(
-                constraints: BoxConstraints(maxHeight: 300),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: assignments.docs.length,
-                  itemBuilder: (context, index) {
-                    final assignment = assignments.docs[index];
-                    return ListTile(
-                      title: Text(assignment.data()['title'] ?? 'Untitled'),
-                      subtitle: Text('Points: ${assignment.data()['points'] ?? 0}'),
-                      onTap: () => Navigator.pop(context, assignment.id),
-                    );
-                  },
-                ),
-              ),
-              SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text('Cancel'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (selectedAssignment != null) {
-      // Load rubric from selected assignment
-      final rubricDoc = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(widget.organizationCode)
-          .collection('courses')
-          .doc(widget.courseId)
-          .collection('assignments')
-          .doc(selectedAssignment)
-          .collection('rubric')
-          .doc('main')
-          .get();
-
-      if (rubricDoc.exists) {
-        setState(() {
-          criteriaList = List<Map<String, dynamic>>.from(
-            rubricDoc.data()!['criteria'] ?? [],
-          ).map((criterion) {
-            // Generate new IDs for copied criteria
-            return {
-              ...criterion,
-              'id': DateTime.now().millisecondsSinceEpoch.toString() + criterion['name'].hashCode.toString(),
-            };
-          }).toList();
-          isEditing = true;
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Rubric copied successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    }
-  }
-
   Future<void> _saveRubric() async {
     // Validate rubric
     if (criteriaList.isEmpty) {
@@ -957,57 +857,19 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                           side: BorderSide(color: Colors.purple[600]!),
                         ),
                       ),
-                      PopupMenuButton<String>(
-                        onSelected: (value) {
-                          switch (value) {
-                            case 'copy':
-                              _loadFromPreviousAssignment();
-                              break;
-                            case 'template':
-                              setState(() {
-                                useTemplate = true;
-                                criteriaList.clear();
-                                selectedTemplate = null;
-                              });
-                              break;
-                          }
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            useTemplate = true;
+                            criteriaList.clear();
+                            selectedTemplate = null;
+                          });
                         },
-                        itemBuilder: (context) => [
-                          PopupMenuItem(
-                            value: 'copy',
-                            child: Row(
-                              children: [
-                                Icon(Icons.copy, size: 20),
-                                SizedBox(width: 8),
-                                Text('Copy from Another'),
-                              ],
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: 'template',
-                            child: Row(
-                              children: [
-                                Icon(Icons.dashboard, size: 20),
-                                SizedBox(width: 8),
-                                Text('Use Template'),
-                              ],
-                            ),
-                          ),
-                        ],
-                        child: Container(
-                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey[400]!),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.more_vert, color: Colors.grey[700], size: 18),
-                              SizedBox(width: 4),
-                              Text('More', style: TextStyle(color: Colors.grey[700])),
-                            ],
-                          ),
+                        icon: Icon(Icons.dashboard, size: 18),
+                        label: Text('Use Template'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.grey[700],
+                          side: BorderSide(color: Colors.grey[400]!),
                         ),
                       ),
                     ],
