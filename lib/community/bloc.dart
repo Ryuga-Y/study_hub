@@ -746,25 +746,44 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
 
   Future<void> _onRemoveFriend(RemoveFriend event, Emitter<CommunityState> emit) async {
     try {
+      print('DEBUG: Starting to remove friend: ${event.friendId}');
+
+      // Show loading state (optional - you could add a loading flag to state)
+      // emit(state.copyWith(isLoadingFriends: true));
+
       await _service.removeFriend(event.friendId);
 
-      // Remove from local state immediately
+      // Remove from local state immediately for better UX
       final updatedFriends = state.friends
           .where((friend) => friend.friendId != event.friendId)
           .toList();
 
       emit(state.copyWith(
         friends: updatedFriends,
-        successMessage: 'Friend removed',
+        successMessage: 'Friend removed successfully',
+        error: null, // Clear any previous errors
       ));
 
-      // Reload friends and update profile
+      print('DEBUG: Friend removed from local state. New count: ${updatedFriends.length}');
+
+      // Reload friends list to ensure consistency
       add(LoadFriends());
+
+      // Reload current user profile to update friend count
       if (_service.currentUserId != null) {
         add(LoadUserProfile(_service.currentUserId!));
       }
+
     } catch (e) {
-      emit(state.copyWith(error: e.toString()));
+      print('DEBUG: BLoC - Error removing friend: $e');
+
+      emit(state.copyWith(
+        error: 'Failed to remove friend. Please try again.',
+        successMessage: null,
+      ));
+
+      // Reload friends list in case of error to ensure consistency
+      add(LoadFriends());
     }
   }
 

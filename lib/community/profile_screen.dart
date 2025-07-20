@@ -677,7 +677,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             ],
             onSelected: (value) {
               if (value == 'unfriend') {
-                context.read<CommunityBloc>().add(RemoveFriend(displayId));
+                _showUnfriendConfirmDialog(context, displayId, displayName);
               }
             },
           )
@@ -695,6 +695,60 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           },
         );
       },
+    );
+  }
+
+  void _showUnfriendConfirmDialog(BuildContext context, String friendId, String friendName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove Friend'),
+        content: Text('Are you sure you want to remove $friendName as a friend?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context); // Close dialog first
+
+              try {
+                // Show loading indicator
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 16),
+                        Text('Removing friend...'),
+                      ],
+                    ),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+
+                // Dispatch the remove friend action
+                context.read<CommunityBloc>().add(RemoveFriend(friendId));
+
+              } catch (e) {
+                // Show error message
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to remove friend: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: Text('Remove', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
     );
   }
 

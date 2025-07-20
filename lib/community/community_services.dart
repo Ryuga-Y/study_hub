@@ -835,37 +835,48 @@ class CommunityService {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
 
-      await _firestore.runTransaction((transaction) async {
-        // Find friendship documents in both directions
-        final query1 = await _firestore
-            .collection('friends')
-            .where('userId', isEqualTo: userId)
-            .where('friendId', isEqualTo: friendId)
-            .where('status', isEqualTo: 'accepted')
-            .get();
+      // First, find all friendship documents BEFORE the transaction
+      final query1 = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: userId)
+          .where('friendId', isEqualTo: friendId)
+          .where('status', isEqualTo: 'accepted')
+          .get();
 
-        final query2 = await _firestore
-            .collection('friends')
-            .where('userId', isEqualTo: friendId)
-            .where('friendId', isEqualTo: userId)
-            .where('status', isEqualTo: 'accepted')
-            .get();
+      final query2 = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: friendId)
+          .where('friendId', isEqualTo: userId)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      // Collect all document references to delete
+      final List<DocumentReference> docsToDelete = [];
+      docsToDelete.addAll(query1.docs.map((doc) => doc.reference));
+      docsToDelete.addAll(query2.docs.map((doc) => doc.reference));
+
+      if (docsToDelete.isEmpty) {
+        throw Exception('No friendship found to remove');
+      }
+
+      // Now run the transaction with the pre-fetched data
+      await _firestore.runTransaction((transaction) async {
+        // Get user documents within transaction
+        final userDocRef = _firestore.collection('users').doc(userId);
+        final friendDocRef = _firestore.collection('users').doc(friendId);
+
+        final userDoc = await transaction.get(userDocRef);
+        final friendDoc = await transaction.get(friendDocRef);
 
         // Delete all friendship documents
-        for (final doc in query1.docs) {
-          transaction.delete(doc.reference);
-        }
-        for (final doc in query2.docs) {
-          transaction.delete(doc.reference);
+        for (final docRef in docsToDelete) {
+          transaction.delete(docRef);
         }
 
         // Update friend counts
-        final userDoc = await transaction.get(_firestore.collection('users').doc(userId));
-        final friendDoc = await transaction.get(_firestore.collection('users').doc(friendId));
-
         if (userDoc.exists) {
           final currentCount = userDoc.data()?['friendCount'] ?? 0;
-          transaction.update(userDoc.reference, {
+          transaction.update(userDocRef, {
             'friendCount': currentCount > 0 ? currentCount - 1 : 0,
             'updatedAt': FieldValue.serverTimestamp(),
           });
@@ -873,7 +884,7 @@ class CommunityService {
 
         if (friendDoc.exists) {
           final currentCount = friendDoc.data()?['friendCount'] ?? 0;
-          transaction.update(friendDoc.reference, {
+          transaction.update(friendDocRef, {
             'friendCount': currentCount > 0 ? currentCount - 1 : 0,
             'updatedAt': FieldValue.serverTimestamp(),
           });
@@ -884,8 +895,7 @@ class CommunityService {
       await syncFriendCount(userId);
       await syncFriendCount(friendId);
 
-      // Note: You might also want to handle the chat deletion or archiving here
-      // depending on your app's requirements
+      print('Friend removed successfully');
 
     } catch (e) {
       print('Error removing friend: $e');
