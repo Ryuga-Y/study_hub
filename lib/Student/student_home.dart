@@ -12,6 +12,7 @@ import 'calendar.dart'; // Import the calendar page
 import '../Stu_goal.dart'; // Import the goal page
 import '../goal_progress_service.dart'; // Import the goal service
 import '../chat_integrated.dart';
+import '../stu_report.dart';
 
 class StudentHomePage extends StatefulWidget {
   const StudentHomePage({Key? key}) : super(key: key);
@@ -359,6 +360,15 @@ class _StudentHomePageState extends State<StudentHomePage> {
     );
   }
 
+  void _navigateToReport() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => StudentReportPage(),
+      ),
+    );
+  }
+
   void _navigateToGoalSystem() async {
     // Check if user is a student before allowing access
     final isStudent = await _goalService.isCurrentUserStudent();
@@ -637,6 +647,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 ],
               ),
             ),
+            // In the _buildDrawer() method, replace the existing ListTile widgets with this updated version:
+
             ListTile(
               leading: const Icon(Icons.person_outline),
               title: const Text('Profile'),
@@ -654,6 +666,14 @@ class _StudentHomePageState extends State<StudentHomePage> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.assessment),
+              title: const Text('My Report'),
+              onTap: () {
+                Navigator.pop(context);
+                _navigateToReport(); // Navigate to report page
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.settings),
               title: const Text('Settings'),
               onTap: () {
@@ -661,6 +681,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 // TODO: Navigate to settings page
               },
             ),
+
             const Divider(),
             ListTile(
               leading: const Icon(Icons.business),
