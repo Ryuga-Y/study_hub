@@ -8,7 +8,9 @@ import 'dart:async';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
 import 'student_assignment_details.dart';
-import '../goal_progress_service.dart'; // Import the enhanced goal service
+import '../goal_progress_service.dart';
+import '../Stu_goal.dart';
+import '../chat_integrated.dart';
 
 // Add these enums for calendar event types
 enum EventType { normal, recurring }
@@ -48,7 +50,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
 
   bool isLoading = true;
   String? errorMessage;
-  int _currentIndex = 2;
+  int _currentIndex = 0;
 
   // Calendar view state (if needed)
   DateTime _selectedDate = DateTime.now();
@@ -2655,16 +2657,29 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         });
         switch (index) {
           case 0:
+          // Navigate back to courses (student home)
             Navigator.pop(context);
             break;
           case 1:
           // TODO: Navigate to community
             break;
           case 2:
-          // Already on course page
+          // Navigate to chat
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatContactPage(),
+              ),
+            );
             break;
           case 3:
-          // TODO: Navigate to calendar
+          // Navigate to Goal System (flower page)
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => StuGoal(),
+              ),
+            );
             break;
           case 4:
           // TODO: Navigate to profile
@@ -2688,8 +2703,8 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           label: 'Chat',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.calendar_today),
-          label: 'Calendar',
+          icon: Icon(Icons.local_florist),
+          label: 'Goals',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.person_outline),
