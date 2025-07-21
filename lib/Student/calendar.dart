@@ -9,6 +9,11 @@ enum EventType { normal, allDay, recurring }
 enum RecurrenceType { none, daily, weekly, monthly, yearly }
 
 class CalendarPage extends StatefulWidget {
+  final DateTime? selectedDate;
+  final String? autoShowEventId; // Add this parameter
+
+  CalendarPage({this.selectedDate, this.autoShowEventId});
+
   @override
   _CalendarPageState createState() => _CalendarPageState();
 }
@@ -33,7 +38,22 @@ class _CalendarPageState extends State<CalendarPage> {
   void initState() {
     super.initState();
     print('🚀 Calendar page initializing');
+
+    // Set the initial selected date if provided
+    if (widget.selectedDate != null) {
+      _selectedDate = widget.selectedDate!;
+      _focusedDate = widget.selectedDate!;
+      _currentView = CalendarView.day; // Switch to day view to show the event clearly
+    }
+
     _startEventsListener(); // Make sure this is called
+
+    // Auto-show event details if specified
+    if (widget.autoShowEventId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _autoShowEventDetails();
+      });
+    }
   }
 
   // Add refresh functionality
@@ -968,83 +988,83 @@ class _CalendarPageState extends State<CalendarPage> {
               color: isSelected ? Colors.blue[100] : Colors.transparent,
               borderRadius: BorderRadius.circular(4),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Day number - Fixed height
-                Container(
-                  width: 32,
-                  height: 32,
-                  margin: EdgeInsets.only(top: 4),
-                  decoration: BoxDecoration(
-                    color: isToday ? Colors.blue[600] : Colors.transparent,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      '$day',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: isToday ? Colors.white : Colors.black87,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final availableHeight = constraints.maxHeight;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Day number - Flexible but with minimum height
+                    Container(
+                      width: 28,
+                      height: math.min(28, availableHeight * 0.4),
+                      margin: EdgeInsets.only(top: 2),
+                      decoration: BoxDecoration(
+                        color: isToday ? Colors.blue[600] : Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          '$day',
+                          style: TextStyle(
+                            fontSize: math.min(12, availableHeight * 0.15),
+                            fontWeight: FontWeight.w500,
+                            color: isToday ? Colors.white : Colors.black87,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-                // Events section with fixed constraints
-                if (events.isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    height: 40, // Fixed height to prevent overflow
-                    padding: EdgeInsets.symmetric(horizontal: 2),
-                    child: Column(
-                      children: [
-                        SizedBox(height: 2),
-                        // Show up to 2 events to fit in the fixed space
-                        ...events.take(2).map((event) {
-                          return Container(
-                            width: double.infinity,
-                            height: 12,
-                            margin: EdgeInsets.only(bottom: 1),
-                            decoration: BoxDecoration(
-                              color: event.color,
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                            child: Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 2),
-                              child: Text(
-                                event.title,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w500,
+                    // Events section - Flexible
+                    if (events.isNotEmpty && availableHeight > 40)
+                      Flexible(
+                        child: Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.symmetric(horizontal: 1),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(height: 1),
+                              ...events.take(math.max(1, ((availableHeight - 35) / 10).floor())).map((event) {
+                                return Container(
+                                  width: double.infinity,
+                                  height: math.min(8, (availableHeight - 35) / events.length),
+                                  margin: EdgeInsets.only(bottom: 1),
+                                  decoration: BoxDecoration(
+                                    color: event.color,
+                                    borderRadius: BorderRadius.circular(1),
+                                  ),
+                                  child: Padding(
+                                    padding: EdgeInsets.symmetric(horizontal: 1),
+                                    child: Text(
+                                      event.title,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: math.min(6, (availableHeight - 35) / events.length / 2),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                              if (events.length > math.max(1, ((availableHeight - 35) / 10).floor()) && availableHeight > 50)
+                                Text(
+                                  '+${events.length - math.max(1, ((availableHeight - 35) / 10).floor())}',
+                                  style: TextStyle(
+                                    fontSize: math.min(6, availableHeight * 0.08),
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1,
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                        // Show more indicator if there are more than 2 events
-                        if (events.length > 2)
-                          Padding(
-                            padding: EdgeInsets.only(top: 2),
-                            child: Text(
-                              '+${events.length - 2} more',
-                              style: TextStyle(
-                                fontSize: 7,
-                                color: Colors.grey[600],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
+                            ],
                           ),
-                      ],
-                    ),
-                  ),
-                // Fixed spacer for days without events
-                if (events.isEmpty)
-                  SizedBox(height: 44), // Day number (36) + events space (40) + margin (8)
-              ],
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -1056,63 +1076,62 @@ class _CalendarPageState extends State<CalendarPage> {
       dayWidgets.add(Container());
     }
 
-    // Create weeks with fixed heights
-    List<Widget> weeks = [];
-
-    // Week headers
-    weeks.add(
-      Container(
-        height: 40,
-        child: Row(
-          children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-              .map((day) => Expanded(
-            child: Container(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Center(
-                child: Text(
-                  day,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[600],
+    return Column(
+      children: [
+        // Week headers - Fixed height
+        Container(
+          height: 32,
+          child: Row(
+            children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+                .map((day) => Expanded(
+              child: Container(
+                padding: EdgeInsets.symmetric(vertical: 6),
+                child: Center(
+                  child: Text(
+                    day,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[600],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ))
-              .toList(),
+            ))
+                .toList(),
+          ),
         ),
-      ),
-    );
+        // Calendar grid - Flexible to take remaining space
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final numberOfWeeks = (dayWidgets.length / 7).ceil();
+              final weekHeight = constraints.maxHeight / numberOfWeeks;
 
-    // Calculate number of weeks and fixed height for each week
-    final numberOfWeeks = (dayWidgets.length / 7).ceil();
+              List<Widget> weeks = [];
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final headerHeight = 40.0;
-        final availableHeight = constraints.maxHeight - headerHeight;
-        final weekHeight = availableHeight / numberOfWeeks;
+              // Create week rows
+              for (int i = 0; i < dayWidgets.length; i += 7) {
+                final weekWidgets = dayWidgets.skip(i).take(7).toList();
 
-        // Create week rows
-        for (int i = 0; i < dayWidgets.length; i += 7) {
-          final weekWidgets = dayWidgets.skip(i).take(7).toList();
+                weeks.add(
+                  Container(
+                    height: weekHeight,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: weekWidgets.map((widget) => Expanded(child: widget)).toList(),
+                    ),
+                  ),
+                );
+              }
 
-          weeks.add(
-            Container(
-              height: weekHeight,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start, // Align to top to prevent overflow
-                children: weekWidgets.map((widget) => Expanded(child: widget)).toList(),
-              ),
-            ),
-          );
-        }
-
-        return Column(
-          children: weeks,
-        );
-      },
+              return Column(
+                children: weeks,
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -1481,7 +1500,7 @@ class _CalendarPageState extends State<CalendarPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.event_note, size: 64, color: Colors.grey[400]),
-            SizedBox(height: 16),
+            SizedBox(height: 50),
             Text(
               'No upcoming notes in the next 2 weeks',
               style: TextStyle(
@@ -1700,6 +1719,57 @@ class _CalendarPageState extends State<CalendarPage> {
 
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+// Auto-show event details for notification navigation
+  void _autoShowEventDetails() async {
+    if (widget.autoShowEventId == null) return;
+
+    try {
+      // Find the event in the loaded events
+      CalendarEvent? targetEvent;
+
+      _events.forEach((date, eventList) {
+        for (var event in eventList) {
+          if (event.id == widget.autoShowEventId) {
+            targetEvent = event;
+            return;
+          }
+        }
+      });
+
+      if (targetEvent != null) {
+        // Show the event details dialog
+        _showEventDetails(targetEvent!);
+      } else {
+        // If event not found in current events, try to load it directly
+        final user = _authService.currentUser;
+        if (user != null) {
+          final userData = await _authService.getUserData(user.uid);
+          if (userData != null) {
+            final orgCode = userData['organizationCode'];
+            if (orgCode != null) {
+              final eventDoc = await FirebaseFirestore.instance
+                  .collection('organizations')
+                  .doc(orgCode)
+                  .collection('students')
+                  .doc(user.uid)
+                  .collection('calendar_events')
+                  .doc(widget.autoShowEventId!)
+                  .get();
+
+              if (eventDoc.exists) {
+                final eventData = eventDoc.data()!;
+                final event = CalendarEvent.fromMap(eventDoc.id, eventData);
+                _showEventDetails(event);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ Error auto-showing event details: $e');
+    }
   }
 
   String _getMonthName(int month) {

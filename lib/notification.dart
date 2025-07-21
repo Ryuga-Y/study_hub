@@ -7,6 +7,7 @@ import '../Student/student_assignment_details.dart';
 import '../Student/student_course.dart';
 import '../Student/student_submit_view.dart';
 import '../Student/student_tutorial.dart';
+import '../Student/calendar.dart';
 
 class NotificationService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -128,10 +129,14 @@ class NotificationService {
 
       // FIXED: Allow any authenticated user with valid role
       if (_userRole != null) {
-        print('✅ Starting notification services for user with role: $_userRole');
+        print(
+            '✅ Starting notification services for user with role: $_userRole');
 
         // Start real-time notification listener first
         _startNotificationListener();
+
+        // Add this after _startNotificationListener()
+        await _cleanupDuplicateNotifications();
 
         // Load initial notifications
         await _loadNotifications();
@@ -290,8 +295,8 @@ class NotificationService {
           final eventData = change.doc.data() as Map<String, dynamic>;
           final sourceType = eventData['sourceType'] ?? '';
 
-          // Only process assignments and tutorials for reminders
-          if (sourceType == 'assignment' || sourceType == 'tutorial') {
+          // Process assignments, tutorials, AND personal calendar events for reminders
+          if (sourceType == 'assignment' || sourceType == 'tutorial' || sourceType == null || sourceType == '') {
             _checkAndCreateNotificationForEvent(change.doc.id, eventData);
           }
         }
@@ -307,9 +312,6 @@ class NotificationService {
       final minutesUntilDue = eventTime.difference(now).inMinutes;
       final sourceType = eventData['sourceType'] ?? '';
 
-      // Only process assignments and tutorials
-      if (sourceType != 'assignment' && sourceType != 'tutorial') return;
-
       // Check existing reminder notifications for this event
       final existingNotifications = await _firestore
           .collection('organizations')
@@ -318,7 +320,7 @@ class NotificationService {
           .doc(_auth.currentUser!.uid)
           .collection('notifications')
           .where('eventId', isEqualTo: eventId)
-          .where('type', whereIn: ['NotificationType.assignment', 'NotificationType.tutorial'])
+          .where('type', whereIn: ['NotificationType.assignment', 'NotificationType.tutorial', 'NotificationType.reminder'])
           .get();
 
       // Track what reminder types have been sent
@@ -334,28 +336,53 @@ class NotificationService {
 
       // Check for 1-day reminder (1440 minutes = 24 hours)
       if (minutesUntilDue <= 1440 && minutesUntilDue > 600 && !sentReminders.contains('1day')) {
+        String title;
+        String body;
+
+        if (sourceType == 'assignment') {
+          title = '📝 Assignment Due Tomorrow';
+          body = '$eventTitle is due tomorrow!';
+        } else if (sourceType == 'tutorial') {
+          title = '📚 Tutorial Due Tomorrow';
+          body = '$eventTitle is due tomorrow!';
+        } else {
+          // For personal calendar events
+          title = '📅 Calendar Reminder';
+          body = '$eventTitle is scheduled for tomorrow!';
+        }
+
         await _createReminderNotification(
           eventId: eventId,
           eventData: eventData,
           reminderType: '1day',
-          title: sourceType == 'assignment'
-              ? '📝 Assignment Due Tomorrow'
-              : '📚 Tutorial Due Tomorrow',
-          body: '$eventTitle is due tomorrow!',
+          title: title,
+          body: body,
           minutesUntil: minutesUntilDue,
         );
       }
 
-      // Check for 10-minute reminder
+// Check for 10-minute reminder
       if (minutesUntilDue <= 10 && minutesUntilDue > 0 && !sentReminders.contains('10min')) {
+        String title;
+        String body;
+
+        if (sourceType == 'assignment') {
+          title = '📝 Assignment Due in 10 Minutes!';
+          body = '$eventTitle is due in ${minutesUntilDue} minutes!';
+        } else if (sourceType == 'tutorial') {
+          title = '📚 Tutorial Due in 10 Minutes!';
+          body = '$eventTitle is due in ${minutesUntilDue} minutes!';
+        } else {
+          title = '⏰ Event Starting Soon!';
+          body = '$eventTitle starts in ${minutesUntilDue} minutes!';
+        }
+
         await _createReminderNotification(
           eventId: eventId,
           eventData: eventData,
           reminderType: '10min',
-          title: sourceType == 'assignment'
-              ? '📝 Assignment Due in 10 Minutes!'
-              : '📚 Tutorial Due in 10 Minutes!',
-          body: '$eventTitle is due in ${minutesUntilDue} minutes!',
+          title: title,
+          body: body,
           minutesUntil: minutesUntilDue,
         );
       }
@@ -426,15 +453,12 @@ class NotificationService {
         final eventTime = (eventData['startTime'] as Timestamp).toDate();
         final minutesUntilDue = eventTime.difference(now).inMinutes;
         final sourceType = eventData['sourceType'] ?? '';
-
-        // Only process assignments and tutorials
-        if (sourceType != 'assignment' && sourceType != 'tutorial') continue;
-
         final eventTitle = eventData['title'] ?? 'Event';
         final alreadySent = sentReminders[eventId] ?? <String>{};
 
         // Check for 1-day reminder (1440 minutes = 24 hours)
-        if (minutesUntilDue <= 1440 && minutesUntilDue > 600 && !alreadySent.contains('1day')) {
+        // Check for 1-day reminder (1440 minutes = 24 hours)
+        if (minutesUntilDue <= 1440 && minutesUntilDue > 1430 && !alreadySent.contains('1day')) {
           await _createReminderNotification(
             eventId: eventId,
             eventData: eventData,
@@ -447,7 +471,7 @@ class NotificationService {
           );
         }
 
-        // Check for 10-minute reminder
+// Check for 10-minute reminder
         if (minutesUntilDue <= 10 && minutesUntilDue > 0 && !alreadySent.contains('10min')) {
           await _createReminderNotification(
             eventId: eventId,
@@ -675,6 +699,31 @@ class NotificationService {
     if (user == null || _userOrgCode == null) return;
 
     try {
+      // Check if this exact reminder already exists to prevent duplicates
+      final existingReminder = await _firestore
+          .collection('organizations')
+          .doc(_userOrgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('notifications')
+          .where('eventId', isEqualTo: eventId)
+          .where('reminderType', isEqualTo: reminderType)
+          .get();
+
+      if (existingReminder.docs.isNotEmpty) {
+        print('⚠️ Reminder $reminderType already exists for event $eventId');
+        return;
+      }
+
+      String notificationType;
+      if (eventData['sourceType'] == 'assignment') {
+        notificationType = 'NotificationType.assignment';
+      } else if (eventData['sourceType'] == 'tutorial') {
+        notificationType = 'NotificationType.tutorial';
+      } else {
+        notificationType = 'NotificationType.reminder';
+      }
+
       await _firestore
           .collection('organizations')
           .doc(_userOrgCode)
@@ -684,13 +733,11 @@ class NotificationService {
           .add({
         'title': title,
         'body': body,
-        'type': eventData['sourceType'] == 'assignment'
-            ? 'NotificationType.assignment'
-            : 'NotificationType.tutorial',
+        'type': notificationType,
         'eventId': eventId,
         'reminderType': reminderType, // '1day' or '10min'
         'sourceId': eventData['sourceId'],
-        'sourceType': eventData['sourceType'],
+        'sourceType': eventData['sourceType'] ?? '', // Handle null sourceType
         'courseId': eventData['courseId'],
         'organizationCode': _userOrgCode,
         'minutesUntilDue': minutesUntil,
@@ -698,7 +745,7 @@ class NotificationService {
         'isRead': false,
       });
 
-      print('✅ Created $reminderType reminder for ${eventData['sourceType']}: ${eventData['title']}');
+      print('✅ Created $reminderType reminder for ${eventData['sourceType'] ?? 'personal'}: ${eventData['title']}');
     } catch (e) {
       print('❌ Error creating reminder notification: $e');
     }
@@ -927,6 +974,69 @@ class NotificationService {
       print('✅ Cleaned up ${testNotifications.docs.length} test notifications');
     } catch (e) {
       print('❌ Error cleaning up test notifications: $e');
+    }
+  }
+
+  // Clean up duplicate notifications
+  Future<void> _cleanupDuplicateNotifications() async {
+    final user = _auth.currentUser;
+    if (user == null || _userOrgCode == null) return;
+
+    try {
+      final notifications = await _firestore
+          .collection('organizations')
+          .doc(_userOrgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('notifications')
+          .get();
+
+      // Group notifications by eventId + reminderType
+      Map<String, List<QueryDocumentSnapshot>> grouped = {};
+
+      for (var doc in notifications.docs) {
+        final data = doc.data();
+        final eventId = data['eventId'] as String?;
+        final reminderType = data['reminderType'] as String?;
+
+        if (eventId != null && reminderType != null) {
+          final key = '${eventId}_$reminderType';
+          grouped[key] = grouped[key] ?? [];
+          grouped[key]!.add(doc);
+        }
+      }
+
+      // Delete duplicates (keep only the first one)
+      final batch = _firestore.batch();
+      int deleteCount = 0;
+
+      grouped.forEach((key, docs) {
+        if (docs.length > 1) {
+          // Sort by creation time and keep the first, delete the rest
+          // Sort by creation time and keep the first, delete the rest
+          docs.sort((a, b) {
+            final aData = a.data() as Map<String, dynamic>;
+            final bData = b.data() as Map<String, dynamic>;
+            final aTime = aData['createdAt'] as Timestamp?;
+            final bTime = bData['createdAt'] as Timestamp?;
+            if (aTime == null || bTime == null) return 0;
+            return aTime.compareTo(bTime);
+          });
+
+          // Delete duplicates (skip the first one)
+          for (int i = 1; i < docs.length; i++) {
+            batch.delete(docs[i].reference);
+            deleteCount++;
+          }
+        }
+      });
+
+      if (deleteCount > 0) {
+        await batch.commit();
+        print('🧹 Cleaned up $deleteCount duplicate notifications');
+      }
+    } catch (e) {
+      print('❌ Error cleaning up duplicates: $e');
     }
   }
 
@@ -1219,10 +1329,68 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
+// Add this new method for navigating to calendar events
+  Future<void> _navigateToCalendarEvent(BuildContext context, NotificationModel notification, String orgCode) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        _showNavigationError(context, 'User not authenticated');
+        return;
+      }
+
+      // Get the calendar event
+      final eventDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('calendar_events')
+          .doc(notification.eventId!)
+          .get();
+
+      if (!eventDoc.exists) {
+        _showNavigationError(context, 'Calendar event not found');
+        return;
+      }
+
+      final eventData = eventDoc.data()!;
+      final eventDateTime = (eventData['startTime'] as Timestamp).toDate();
+
+      // Create CalendarEvent object for the event details
+      final calendarEvent = CalendarEvent.fromMap(notification.eventId!, eventData);
+
+      // Navigate to calendar page with the specific date selected
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CalendarPage(
+            selectedDate: eventDateTime,
+            autoShowEventId: notification.eventId, // Pass the event ID to auto-show
+          ),
+        ),
+      ).then((_) {
+        // Add a small delay to ensure calendar loads before showing event details
+        Future.delayed(Duration(milliseconds: 500), () {
+          // The calendar will auto-show the event details via autoShowEventId
+        });
+      });
+
+    } catch (e) {
+      _showNavigationError(context, 'Failed to navigate to calendar event: $e');
+    }
+  }
+
 // NEW: Handle reminder notifications
   Future<void> _handleReminderNavigation(BuildContext context, NotificationModel notification, String orgCode) async {
     try {
       if (notification.eventId != null) {
+        // Check if it's a personal calendar event (no sourceType or sourceId)
+        if (notification.sourceType == null || notification.sourceType == '') {
+          await _navigateToCalendarEvent(context, notification, orgCode);
+          return;
+        }
+
+        // Handle assignment/tutorial reminders
         final courseId = await _notificationService.findCourseIdFromEventId(orgCode, notification.eventId!);
         if (courseId != null && notification.sourceId != null) {
           final updatedNotification = NotificationModel(
