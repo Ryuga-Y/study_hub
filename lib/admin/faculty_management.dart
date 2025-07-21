@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../Authentication/auth_services.dart';
 
 class FacultyManagementPage extends StatefulWidget {
   final String organizationId;
@@ -472,10 +473,10 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                         break;
                       case 'activate':
                       case 'deactivate':
-                        _toggleFacultyStatus(facultyId, !isActive);
+                        _toggleFacultyStatus(facultyId, !isActive, data);
                         break;
                       case 'delete':
-                        _showDeleteDialog(context, facultyId, data['name']);
+                        _showDeleteDialog(context, facultyId, data['name'], data);
                         break;
                     }
                   },
@@ -566,18 +567,31 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
               }
 
               try {
-                await FirebaseFirestore.instance
-                    .collection('organizations')
-                    .doc(widget.organizationId)
-                    .collection('faculties')
-                    .add({
+                final facultyData = {
                   'name': nameController.text.trim(),
                   'code': codeController.text.trim().toUpperCase(),
                   'description': descriptionController.text.trim(),
                   'isActive': true,
                   'createdAt': FieldValue.serverTimestamp(),
                   'createdBy': FirebaseAuth.instance.currentUser?.uid,
-                });
+                };
+
+                await FirebaseFirestore.instance
+                    .collection('organizations')
+                    .doc(widget.organizationId)
+                    .collection('faculties')
+                    .add(facultyData);
+
+                // Create audit log
+                await AuthService.createManagementAuditLog(
+                  organizationCode: widget.organizationId,
+                  action: 'faculty_created',
+                  details: {
+                    'facultyName': facultyData['name'],
+                    'facultyCode': facultyData['code'],
+                    'description': facultyData['description'],
+                  },
+                );
 
                 navigator.pop();
                 scaffoldMessenger.showSnackBar(
@@ -683,18 +697,33 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
               }
 
               try {
-                await FirebaseFirestore.instance
-                    .collection('organizations')
-                    .doc(widget.organizationId)
-                    .collection('faculties')
-                    .doc(facultyId)
-                    .update({
+                final updatedData = {
                   'name': nameController.text.trim(),
                   'code': codeController.text.trim().toUpperCase(),
                   'description': descriptionController.text.trim(),
                   'updatedAt': FieldValue.serverTimestamp(),
                   'updatedBy': FirebaseAuth.instance.currentUser?.uid,
-                });
+                };
+
+                await FirebaseFirestore.instance
+                    .collection('organizations')
+                    .doc(widget.organizationId)
+                    .collection('faculties')
+                    .doc(facultyId)
+                    .update(updatedData);
+
+                // Create audit log
+                await AuthService.createManagementAuditLog(
+                  organizationCode: widget.organizationId,
+                  action: 'faculty_updated',
+                  details: {
+                    'facultyId': facultyId,
+                    'oldName': data['name'],
+                    'newName': updatedData['name'],
+                    'oldCode': data['code'],
+                    'newCode': updatedData['code'],
+                  },
+                );
 
                 navigator.pop();
                 scaffoldMessenger.showSnackBar(
@@ -725,7 +754,7 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
     );
   }
 
-  void _toggleFacultyStatus(String facultyId, bool isActive) async {
+  void _toggleFacultyStatus(String facultyId, bool isActive, Map<String, dynamic> data) async {
     // Store context reference before async operation
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
@@ -740,6 +769,18 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
         'updatedAt': FieldValue.serverTimestamp(),
         'updatedBy': FirebaseAuth.instance.currentUser?.uid,
       });
+
+      // Create audit log
+      await AuthService.createManagementAuditLog(
+        organizationCode: widget.organizationId,
+        action: isActive ? 'faculty_activated' : 'faculty_deactivated',
+        details: {
+          'facultyId': facultyId,
+          'facultyName': data['name'],
+          'facultyCode': data['code'],
+          'newStatus': isActive ? 'active' : 'inactive',
+        },
+      );
 
       if (mounted) {
         scaffoldMessenger.showSnackBar(
@@ -761,7 +802,7 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
     }
   }
 
-  void _showDeleteDialog(BuildContext context, String facultyId, String facultyName) {
+  void _showDeleteDialog(BuildContext context, String facultyId, String facultyName, Map<String, dynamic> data) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -820,10 +861,12 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                     .collection('programs')
                     .get();
 
+                int deletedProgramsCount = 0;
                 if (programsSnapshot.docs.isNotEmpty) {
                   // Delete all programs first
                   for (var program in programsSnapshot.docs) {
                     await program.reference.delete();
+                    deletedProgramsCount++;
                   }
                 }
 
@@ -834,6 +877,18 @@ class _FacultyManagementPageState extends State<FacultyManagementPage> {
                     .collection('faculties')
                     .doc(facultyId)
                     .delete();
+
+                // Create audit log
+                await AuthService.createManagementAuditLog(
+                  organizationCode: widget.organizationId,
+                  action: 'faculty_deleted',
+                  details: {
+                    'facultyId': facultyId,
+                    'facultyName': data['name'],
+                    'facultyCode': data['code'],
+                    'deletedProgramsCount': deletedProgramsCount,
+                  },
+                );
 
                 navigator.pop();
 

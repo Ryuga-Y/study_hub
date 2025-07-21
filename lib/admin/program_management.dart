@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../Authentication/auth_services.dart';
 
 class ProgramManagementPage extends StatefulWidget {
   final String organizationId;
@@ -554,7 +555,7 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                         break;
                       case 'activate':
                       case 'deactivate':
-                        _toggleProgramStatus(program['facultyId'], program['id'], !isActive);
+                        _toggleProgramStatus(program['facultyId'], program['id'], !isActive, program);
                         break;
                       case 'delete':
                         _showDeleteDialog(context, program);
@@ -689,20 +690,38 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                 }
 
                 try {
-                  await FirebaseFirestore.instance
-                      .collection('organizations')
-                      .doc(widget.organizationId)
-                      .collection('faculties')
-                      .doc(selectedFacultyId)
-                      .collection('programs')
-                      .add({
+                  final selectedFaculty = _faculties.firstWhere((f) => f['id'] == selectedFacultyId);
+
+                  final programData = {
                     'name': nameController.text.trim(),
                     'code': codeController.text.trim().toUpperCase(),
                     'degree': selectedDegree,
                     'isActive': true,
                     'createdAt': FieldValue.serverTimestamp(),
                     'createdBy': FirebaseAuth.instance.currentUser?.uid,
-                  });
+                  };
+
+                  await FirebaseFirestore.instance
+                      .collection('organizations')
+                      .doc(widget.organizationId)
+                      .collection('faculties')
+                      .doc(selectedFacultyId)
+                      .collection('programs')
+                      .add(programData);
+
+                  // Create audit log
+                  await AuthService.createManagementAuditLog(
+                    organizationCode: widget.organizationId,
+                    action: 'program_created',
+                    details: {
+                      'programName': programData['name'],
+                      'programCode': programData['code'],
+                      'degree': programData['degree'],
+                      'facultyId': selectedFacultyId,
+                      'facultyName': selectedFaculty['name'],
+                      'facultyCode': selectedFaculty['code'],
+                    },
+                  );
 
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -842,6 +861,14 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                 }
 
                 try {
+                  final updatedData = {
+                    'name': nameController.text.trim(),
+                    'code': codeController.text.trim().toUpperCase(),
+                    'degree': selectedDegree,
+                    'updatedAt': FieldValue.serverTimestamp(),
+                    'updatedBy': FirebaseAuth.instance.currentUser?.uid,
+                  };
+
                   await FirebaseFirestore.instance
                       .collection('organizations')
                       .doc(widget.organizationId)
@@ -849,13 +876,23 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                       .doc(program['facultyId'])
                       .collection('programs')
                       .doc(program['id'])
-                      .update({
-                    'name': nameController.text.trim(),
-                    'code': codeController.text.trim().toUpperCase(),
-                    'degree': selectedDegree,
-                    'updatedAt': FieldValue.serverTimestamp(),
-                    'updatedBy': FirebaseAuth.instance.currentUser?.uid,
-                  });
+                      .update(updatedData);
+
+                  // Create audit log
+                  await AuthService.createManagementAuditLog(
+                    organizationCode: widget.organizationId,
+                    action: 'program_updated',
+                    details: {
+                      'programId': program['id'],
+                      'oldName': program['name'],
+                      'newName': updatedData['name'],
+                      'oldCode': program['code'],
+                      'newCode': updatedData['code'],
+                      'oldDegree': program['degree'],
+                      'newDegree': updatedData['degree'],
+                      'facultyName': program['facultyName'],
+                    },
+                  );
 
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -887,7 +924,7 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
     );
   }
 
-  void _toggleProgramStatus(String facultyId, String programId, bool isActive) async {
+  void _toggleProgramStatus(String facultyId, String programId, bool isActive, Map<String, dynamic> program) async {
     try {
       await FirebaseFirestore.instance
           .collection('organizations')
@@ -901,6 +938,19 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
         'updatedAt': FieldValue.serverTimestamp(),
         'updatedBy': FirebaseAuth.instance.currentUser?.uid,
       });
+
+      // Create audit log
+      await AuthService.createManagementAuditLog(
+        organizationCode: widget.organizationId,
+        action: isActive ? 'program_activated' : 'program_deactivated',
+        details: {
+          'programId': programId,
+          'programName': program['name'],
+          'programCode': program['code'],
+          'facultyName': program['facultyName'],
+          'newStatus': isActive ? 'active' : 'inactive',
+        },
+      );
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -972,6 +1022,19 @@ class _ProgramManagementPageState extends State<ProgramManagementPage> {
                     .collection('programs')
                     .doc(program['id'])
                     .delete();
+
+                // Create audit log
+                await AuthService.createManagementAuditLog(
+                  organizationCode: widget.organizationId,
+                  action: 'program_deleted',
+                  details: {
+                    'programId': program['id'],
+                    'programName': program['name'],
+                    'programCode': program['code'],
+                    'degree': program['degree'],
+                    'facultyName': program['facultyName'],
+                  },
+                );
 
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(

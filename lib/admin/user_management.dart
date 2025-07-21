@@ -734,16 +734,16 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                         case 'activate':
                         case 'deactivate':
                           if (role == 'admin' && _isOrganizationCreator) {
-                            _toggleAdminStatus(userId, !isActive);
+                            _toggleAdminStatus(userId, !isActive, data);
                           } else {
-                            _toggleUserStatus(userId, !isActive);
+                            _toggleUserStatus(userId, !isActive, data);
                           }
                           break;
                         case 'reset_password':
                           _sendPasswordReset(data['email']);
                           break;
                         case 'delete':
-                          _showDeleteDialog(context, userId, data['fullName']);
+                          _showDeleteDialog(context, userId, data['fullName'], data);
                           break;
                       }
                     },
@@ -765,7 +765,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                   ),
                   if (!isPendingActivation)
                     TextButton.icon(
-                      onPressed: () => _toggleUserStatus(userId, !isActive),
+                      onPressed: () => _toggleUserStatus(userId, !isActive, data),
                       icon: Icon(
                         isActive ? Icons.block : Icons.check_circle,
                         size: 16,
@@ -815,10 +815,10 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
     }
   }
 
-  void _toggleAdminStatus(String userId, bool isActive) async {
+  void _toggleAdminStatus(String userId, bool isActive, Map<String, dynamic> userData) async {
     if (isActive) {
       // Regular activation
-      _toggleUserStatus(userId, isActive);
+      _toggleUserStatus(userId, isActive, userData);
     } else {
       // Use special deactivation for admins if current user is org creator
       final result = await _authService.deactivateAdmin(userId, widget.organizationId);
@@ -1012,6 +1012,21 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                     'updatedAt': FieldValue.serverTimestamp(),
                   });
 
+                  // Create audit log for status change
+                  if (isActive != (userData['isActive'] ?? true)) {
+                    await AuthService.createManagementAuditLog(
+                      organizationCode: widget.organizationId,
+                      action: isActive ? 'user_activated' : 'user_deactivated',
+                      details: {
+                        'userId': userId,
+                        'userName': userData['fullName'],
+                        'userEmail': userData['email'],
+                        'userRole': userData['role'],
+                        'newStatus': isActive ? 'active' : 'inactive',
+                      },
+                    );
+                  }
+
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -1042,7 +1057,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
     );
   }
 
-  void _toggleUserStatus(String userId, bool isActive) async {
+  void _toggleUserStatus(String userId, bool isActive, Map<String, dynamic> userData) async {
     try {
       await FirebaseFirestore.instance
           .collection('users')
@@ -1050,7 +1065,21 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
           .update({
         'isActive': isActive,
         'updatedAt': FieldValue.serverTimestamp(),
+        'statusChangedBy': FirebaseAuth.instance.currentUser?.uid,
       });
+
+      // Create audit log
+      await AuthService.createManagementAuditLog(
+        organizationCode: widget.organizationId,
+        action: isActive ? 'user_activated' : 'user_deactivated',
+        details: {
+          'userId': userId,
+          'userName': userData['fullName'],
+          'userEmail': userData['email'],
+          'userRole': userData['role'],
+          'newStatus': isActive ? 'active' : 'inactive',
+        },
+      );
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1072,6 +1101,15 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
     try {
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
 
+      // Create audit log
+      await AuthService.createManagementAuditLog(
+        organizationCode: widget.organizationId,
+        action: 'password_reset_sent',
+        details: {
+          'targetEmail': email,
+        },
+      );
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Password reset email sent to $email'),
@@ -1088,7 +1126,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
     }
   }
 
-  void _showDeleteDialog(BuildContext context, String userId, String userName) {
+  void _showDeleteDialog(BuildContext context, String userId, String userName, Map<String, dynamic> userData) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1143,6 +1181,18 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                   'deletedAt': FieldValue.serverTimestamp(),
                   'deletedBy': FirebaseAuth.instance.currentUser?.uid,
                 });
+
+                // Create audit log
+                await AuthService.createManagementAuditLog(
+                  organizationCode: widget.organizationId,
+                  action: 'user_deleted',
+                  details: {
+                    'deletedUserId': userId,
+                    'deletedUserName': userData['fullName'],
+                    'deletedUserEmail': userData['email'],
+                    'deletedUserRole': userData['role'],
+                  },
+                );
 
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(

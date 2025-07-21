@@ -81,7 +81,7 @@ class AuthService {
       await _firestore.collection('users').doc(user.uid).set(userData);
 
       // Create audit log - use uppercase org code
-      await _createAuditLog(
+      await createAuditLog(
         organizationCode: orgCode,
         action: '${role}_account_created',
         userId: user.uid,
@@ -89,6 +89,8 @@ class AuthService {
           'userEmail': email,
           'userName': fullName,
           'role': role,
+          'facultyName': facultyName,
+          'programName': programName,
         },
       );
 
@@ -151,7 +153,7 @@ class AuthService {
         });
 
         // Create audit log first (this is allowed for everyone)
-        await _createAuditLog(
+        await createAuditLog(
           organizationCode: orgCode,
           action: 'admin_joined_pending_activation',
           userId: user.uid,
@@ -248,6 +250,19 @@ class AuthService {
         });
 
         await batch.commit();
+
+        // Create audit log for organization creation
+        await createAuditLog(
+          organizationCode: orgCode,
+          action: 'organization_created',
+          userId: user.uid,
+          details: {
+            'organizationName': organizationName,
+            'organizationCode': orgCode,
+            'creatorName': fullName,
+            'creatorEmail': email,
+          },
+        );
       }
 
       return AuthResult(
@@ -338,6 +353,10 @@ class AuthService {
         throw Exception('Only organization creator can activate admins');
       }
 
+      // Get admin user data for audit log
+      DocumentSnapshot adminDoc = await _firestore.collection('users').doc(adminId).get();
+      Map<String, dynamic> adminData = adminDoc.data() as Map<String, dynamic>;
+
       // Update admin status
       await _firestore.collection('users').doc(adminId).update({
         'isActive': true,
@@ -355,12 +374,14 @@ class AuthService {
       });
 
       // Create audit log
-      await _createAuditLog(
+      await createAuditLog(
         organizationCode: organizationCode,
         action: 'admin_activated',
         userId: currentUser.uid,
         details: {
           'activatedAdminId': adminId,
+          'activatedAdminName': adminData['fullName'],
+          'activatedAdminEmail': adminData['email'],
           'activatedBy': currentUser.uid,
         },
       );
@@ -403,6 +424,10 @@ class AuthService {
         throw Exception('Cannot deactivate your own account');
       }
 
+      // Get admin user data for audit log
+      DocumentSnapshot adminDoc = await _firestore.collection('users').doc(adminId).get();
+      Map<String, dynamic> adminData = adminDoc.data() as Map<String, dynamic>;
+
       // Update admin status
       await _firestore.collection('users').doc(adminId).update({
         'isActive': false,
@@ -412,12 +437,14 @@ class AuthService {
       });
 
       // Create audit log
-      await _createAuditLog(
+      await createAuditLog(
         organizationCode: organizationCode,
         action: 'admin_deactivated',
         userId: currentUser.uid,
         details: {
           'deactivatedAdminId': adminId,
+          'deactivatedAdminName': adminData['fullName'],
+          'deactivatedAdminEmail': adminData['email'],
           'deactivatedBy': currentUser.uid,
         },
       );
@@ -650,8 +677,8 @@ class AuthService {
     }
   }
 
-  // Create audit log
-  Future<void> _createAuditLog({
+  // Public method to create audit log (can be used by other parts of the app)
+  Future<void> createAuditLog({
     required String organizationCode,
     required String action,
     required String userId,
@@ -670,6 +697,31 @@ class AuthService {
       });
     } catch (e) {
       print('Error creating audit log: $e');
+    }
+  }
+
+  // Helper method to create audit log for management actions
+  static Future<void> createManagementAuditLog({
+    required String organizationCode,
+    required String action,
+    required Map<String, dynamic> details,
+  }) async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) return;
+
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('audit_logs')
+          .add({
+        'action': action,
+        'performedBy': currentUser.uid,
+        'timestamp': FieldValue.serverTimestamp(),
+        'details': details,
+      });
+    } catch (e) {
+      print('Error creating management audit log: $e');
     }
   }
 

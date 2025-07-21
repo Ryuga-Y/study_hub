@@ -741,7 +741,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
               _buildQuickAction(
                 icon: Icons.library_books,
-                label: MediaQuery.of(context).size.width > 400 ? 'Add Lecturer' : 'Lecturer',
+                label: MediaQuery.of(context).size.width > 400 ? 'Add Course' : 'Course',
                 onTap: () => _navigateTo('Courses'),
               ),
             ],
@@ -749,49 +749,343 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
           SizedBox(height: 32),
 
-          // Recent Activity (placeholder)
-          Text(
-            'Recent Activity',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
+          // Recent Activity
+          _buildRecentActivity(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecentActivity() {
+    if (_organizationData == null) {
+      return SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Recent Activity',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _showAllActivitiesDialog(),
+              icon: Icon(Icons.history, size: 16),
+              label: Text('View All'),
+            ),
+          ],
+        ),
+        SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withValues(alpha: 0.1),
+                blurRadius: 5,
+              ),
+            ],
+          ),
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('organizations')
+                .doc(_organizationData!['code'])
+                .collection('audit_logs')
+                .orderBy('timestamp', descending: true)
+                .limit(5)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return Container(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return Container(
+                  padding: EdgeInsets.all(24),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.history,
+                          size: 48,
+                          color: Colors.grey[400],
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          'No recent activity',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return Column(
+                children: snapshot.data!.docs.map((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  return _buildActivityItem(data);
+                }).toList(),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActivityItem(Map<String, dynamic> activity) {
+    final action = activity['action'] ?? '';
+    final timestamp = activity['timestamp'] as Timestamp?;
+    final details = activity['details'] as Map<String, dynamic>? ?? {};
+    final performedBy = activity['performedBy'] ?? '';
+
+    // Get activity info
+    final activityInfo = _getActivityInfo(action, details);
+
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: Colors.grey[200]!),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Activity Icon
+          Container(
+            padding: EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: activityInfo['color'].withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              activityInfo['icon'],
+              color: activityInfo['color'],
+              size: 20,
             ),
           ),
-          SizedBox(height: 16),
-          Container(
-            padding: EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.1),
-                  blurRadius: 5,
-                ),
-              ],
-            ),
-            child: Center(
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.history,
-                    size: 48,
-                    color: Colors.grey[400],
+          SizedBox(width: 12),
+
+          // Activity Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  activityInfo['title'],
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
                   ),
-                  SizedBox(height: 16),
+                ),
+                if (activityInfo['subtitle'] != null) ...[
+                  SizedBox(height: 2),
                   Text(
-                    'Activity feed will appear here',
+                    activityInfo['subtitle'],
                     style: TextStyle(
                       color: Colors.grey[600],
-                      fontSize: 16,
+                      fontSize: 13,
                     ),
                   ),
                 ],
-              ),
+              ],
             ),
           ),
+
+          // Timestamp
+          if (timestamp != null)
+            Text(
+              _formatRelativeTime(timestamp.toDate()),
+              style: TextStyle(
+                color: Colors.grey[500],
+                fontSize: 12,
+              ),
+            ),
         ],
+      ),
+    );
+  }
+
+  Map<String, dynamic> _getActivityInfo(String action, Map<String, dynamic> details) {
+    switch (action) {
+      case 'student_account_created':
+        return {
+          'icon': Icons.school,
+          'color': Colors.blue,
+          'title': 'New student registered',
+          'subtitle': details['userName'] != null ? '${details['userName']} joined the organization' : null,
+        };
+      case 'lecturer_account_created':
+        return {
+          'icon': Icons.person,
+          'color': Colors.green,
+          'title': 'New lecturer registered',
+          'subtitle': details['userName'] != null ? '${details['userName']} joined the organization' : null,
+        };
+      case 'admin_account_created':
+        return {
+          'icon': Icons.admin_panel_settings,
+          'color': Colors.red,
+          'title': 'New admin registered',
+          'subtitle': details['userName'] != null ? '${details['userName']} joined as admin' : null,
+        };
+      case 'admin_joined_pending_activation':
+        return {
+          'icon': Icons.hourglass_empty,
+          'color': Colors.orange,
+          'title': 'Admin pending activation',
+          'subtitle': details['adminName'] != null ? '${details['adminName']} awaiting activation' : null,
+        };
+      case 'admin_activated':
+        return {
+          'icon': Icons.check_circle,
+          'color': Colors.green,
+          'title': 'Admin account activated',
+          'subtitle': 'Admin user was activated',
+        };
+      case 'admin_deactivated':
+        return {
+          'icon': Icons.block,
+          'color': Colors.orange,
+          'title': 'Admin account deactivated',
+          'subtitle': 'Admin user was deactivated',
+        };
+      case 'faculty_created':
+        return {
+          'icon': Icons.school,
+          'color': Colors.blue,
+          'title': 'New faculty created',
+          'subtitle': details['facultyName'] != null ? 'Faculty: ${details['facultyName']}' : null,
+        };
+      case 'program_created':
+        return {
+          'icon': Icons.book,
+          'color': Colors.purple,
+          'title': 'New program created',
+          'subtitle': details['programName'] != null ? 'Program: ${details['programName']}' : null,
+        };
+      case 'course_created':
+        return {
+          'icon': Icons.library_books,
+          'color': Colors.indigo,
+          'title': 'New course created',
+          'subtitle': details['courseName'] != null ? 'Course: ${details['courseName']}' : null,
+        };
+      default:
+        return {
+          'icon': Icons.info,
+          'color': Colors.grey,
+          'title': action.replaceAll('_', ' ').split(' ').map((word) =>
+          word.isEmpty ? word : word[0].toUpperCase() + word.substring(1)).join(' '),
+          'subtitle': null,
+        };
+    }
+  }
+
+  String _formatRelativeTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inMinutes < 1) {
+      return 'Just now';
+    } else if (difference.inMinutes < 60) {
+      return '${difference.inMinutes}m ago';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours}h ago';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays}d ago';
+    } else {
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+    }
+  }
+
+  void _showAllActivitiesDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Container(
+          width: 600,
+          height: 700,
+          padding: EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'All Recent Activities',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('organizations')
+                      .doc(_organizationData!['code'])
+                      .collection('audit_logs')
+                      .orderBy('timestamp', descending: true)
+                      .limit(50)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(child: CircularProgressIndicator());
+                    }
+
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.history, size: 64, color: Colors.grey[400]),
+                            SizedBox(height: 16),
+                            Text('No activities found', style: TextStyle(color: Colors.grey[600])),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      itemCount: snapshot.data!.docs.length,
+                      itemBuilder: (context, index) {
+                        final doc = snapshot.data!.docs[index];
+                        final data = doc.data() as Map<String, dynamic>;
+                        return _buildActivityItem(data);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

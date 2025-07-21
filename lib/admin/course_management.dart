@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../Authentication/auth_services.dart';
 
 class CourseManagementPage extends StatefulWidget {
   final String organizationId;
@@ -19,7 +20,6 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
   String? _selectedProgramId;
   List<Map<String, dynamic>> _faculties = [];
   List<Map<String, dynamic>> _programs = [];
-  // Removed _lecturers as it's not used
   List<Map<String, dynamic>> _baseCourses = [];
 
   @override
@@ -30,7 +30,6 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
 
   Future<void> _loadData() async {
     await _loadFaculties();
-    // Removed _loadLecturers() call as it's not used
     await _loadBaseCourses();
   }
 
@@ -149,8 +148,6 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
       print('Error loading programs: $e');
     }
   }
-
-  // Removed _loadLecturers() method as it's not used
 
   @override
   void dispose() {
@@ -699,10 +696,10 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                         break;
                       case 'activate':
                       case 'deactivate':
-                        _toggleCourseStatus(courseId, !isActive);
+                        _toggleCourseStatus(courseId, !isActive, data);
                         break;
                       case 'delete':
-                        _showDeleteDialog(context, courseId, data['name']);
+                        _showDeleteDialog(context, courseId, data['name'], data);
                         break;
                     }
                   },
@@ -871,15 +868,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                   final selectedFaculty = _faculties.firstWhere((f) => f['id'] == selectedFacultyId);
                   final selectedProgram = tempPrograms.firstWhere((p) => p['id'] == selectedProgramId);
 
-                  await FirebaseFirestore.instance
-                      .collection('organizations')
-                      .doc(widget.organizationId)
-                      .collection('faculties')
-                      .doc(selectedFacultyId)
-                      .collection('programs')
-                      .doc(selectedProgramId)
-                      .collection('courseTemplates')
-                      .add({
+                  final templateData = {
                     'name': nameController.text.trim(),
                     'code': codeController.text.trim().toUpperCase(),
                     'defaultDescription': defaultDescriptionController.text.trim(),
@@ -892,7 +881,30 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                     'isActive': true,
                     'createdAt': FieldValue.serverTimestamp(),
                     'createdBy': FirebaseAuth.instance.currentUser?.uid,
-                  });
+                  };
+
+                  await FirebaseFirestore.instance
+                      .collection('organizations')
+                      .doc(widget.organizationId)
+                      .collection('faculties')
+                      .doc(selectedFacultyId)
+                      .collection('programs')
+                      .doc(selectedProgramId)
+                      .collection('courseTemplates')
+                      .add(templateData);
+
+                  // Create audit log
+                  await AuthService.createManagementAuditLog(
+                    organizationCode: widget.organizationId,
+                    action: 'course_template_created',
+                    details: {
+                      'courseName': templateData['name'],
+                      'courseCode': templateData['code'],
+                      'facultyName': selectedFaculty['name'],
+                      'programName': selectedProgram['name'],
+                      'description': templateData['defaultDescription'],
+                    },
+                  );
 
                   navigator.pop();
                   _loadBaseCourses();
@@ -1171,6 +1183,14 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
               }
 
               try {
+                final updatedData = {
+                  'name': nameController.text.trim(),
+                  'code': codeController.text.trim().toUpperCase(),
+                  'defaultDescription': defaultDescriptionController.text.trim(),
+                  'updatedAt': FieldValue.serverTimestamp(),
+                  'updatedBy': FirebaseAuth.instance.currentUser?.uid,
+                };
+
                 await FirebaseFirestore.instance
                     .collection('organizations')
                     .doc(widget.organizationId)
@@ -1180,13 +1200,22 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                     .doc(courseTemplate['programId'])
                     .collection('courseTemplates')
                     .doc(courseTemplate['id'])
-                    .update({
-                  'name': nameController.text.trim(),
-                  'code': codeController.text.trim().toUpperCase(),
-                  'defaultDescription': defaultDescriptionController.text.trim(),
-                  'updatedAt': FieldValue.serverTimestamp(),
-                  'updatedBy': FirebaseAuth.instance.currentUser?.uid,
-                });
+                    .update(updatedData);
+
+                // Create audit log
+                await AuthService.createManagementAuditLog(
+                  organizationCode: widget.organizationId,
+                  action: 'course_template_updated',
+                  details: {
+                    'courseTemplateId': courseTemplate['id'],
+                    'oldName': courseTemplate['name'],
+                    'newName': updatedData['name'],
+                    'oldCode': courseTemplate['code'],
+                    'newCode': updatedData['code'],
+                    'facultyName': courseTemplate['facultyName'],
+                    'programName': courseTemplate['programName'],
+                  },
+                );
 
                 navigator.pop();
                 _loadBaseCourses();
@@ -1261,6 +1290,19 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
             .collection('courseTemplates')
             .doc(courseTemplate['id'])
             .delete();
+
+        // Create audit log
+        await AuthService.createManagementAuditLog(
+          organizationCode: widget.organizationId,
+          action: 'course_template_deleted',
+          details: {
+            'courseTemplateId': courseTemplate['id'],
+            'courseName': courseTemplate['name'],
+            'courseCode': courseTemplate['code'],
+            'facultyName': courseTemplate['facultyName'],
+            'programName': courseTemplate['programName'],
+          },
+        );
 
         _loadBaseCourses();
 
@@ -1409,18 +1451,35 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
               }
 
               try {
-                await FirebaseFirestore.instance
-                    .collection('organizations')
-                    .doc(widget.organizationId)
-                    .collection('courses')
-                    .doc(courseId)
-                    .update({
+                final updatedData = {
                   'name': nameController.text.trim(),
                   'code': codeController.text.trim().toUpperCase(),
                   'description': descriptionController.text.trim(),
                   'updatedAt': FieldValue.serverTimestamp(),
                   'updatedBy': FirebaseAuth.instance.currentUser?.uid,
-                });
+                };
+
+                await FirebaseFirestore.instance
+                    .collection('organizations')
+                    .doc(widget.organizationId)
+                    .collection('courses')
+                    .doc(courseId)
+                    .update(updatedData);
+
+                // Create audit log
+                await AuthService.createManagementAuditLog(
+                  organizationCode: widget.organizationId,
+                  action: 'course_updated',
+                  details: {
+                    'courseId': courseId,
+                    'oldName': data['name'],
+                    'newName': updatedData['name'],
+                    'oldCode': data['code'],
+                    'newCode': updatedData['code'],
+                    'facultyName': data['facultyName'],
+                    'programName': data['programName'],
+                  },
+                );
 
                 navigator.pop();
                 scaffoldMessenger.showSnackBar(
@@ -1451,7 +1510,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
     );
   }
 
-  void _toggleCourseStatus(String courseId, bool isActive) async {
+  void _toggleCourseStatus(String courseId, bool isActive, Map<String, dynamic> data) async {
     // Store context reference before async operation
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
@@ -1466,6 +1525,20 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
         'updatedAt': FieldValue.serverTimestamp(),
         'updatedBy': FirebaseAuth.instance.currentUser?.uid,
       });
+
+      // Create audit log
+      await AuthService.createManagementAuditLog(
+        organizationCode: widget.organizationId,
+        action: isActive ? 'course_activated' : 'course_deactivated',
+        details: {
+          'courseId': courseId,
+          'courseName': data['name'],
+          'courseCode': data['code'],
+          'facultyName': data['facultyName'],
+          'programName': data['programName'],
+          'newStatus': isActive ? 'active' : 'inactive',
+        },
+      );
 
       if (mounted) {
         scaffoldMessenger.showSnackBar(
@@ -1487,7 +1560,7 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
     }
   }
 
-  void _showDeleteDialog(BuildContext context, String courseId, String courseName) {
+  void _showDeleteDialog(BuildContext context, String courseId, String courseName, Map<String, dynamic> data) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1543,6 +1616,19 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
                     .collection('courses')
                     .doc(courseId)
                     .delete();
+
+                // Create audit log
+                await AuthService.createManagementAuditLog(
+                  organizationCode: widget.organizationId,
+                  action: 'course_deleted',
+                  details: {
+                    'courseId': courseId,
+                    'courseName': data['name'],
+                    'courseCode': data['code'],
+                    'facultyName': data['facultyName'],
+                    'programName': data['programName'],
+                  },
+                );
 
                 navigator.pop();
                 scaffoldMessenger.showSnackBar(
