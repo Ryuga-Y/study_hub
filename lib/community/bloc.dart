@@ -83,6 +83,30 @@ class AddReaction extends CommunityEvent {
   List<Object> get props => [postId, reaction];
 }
 
+class SharePost extends CommunityEvent {
+  final String postId;
+  final String? comment;
+  final PostPrivacy privacy;
+
+  SharePost({
+    required this.postId,
+    this.comment,
+    required this.privacy,
+  });
+
+  @override
+  List<Object?> get props => [postId, comment, privacy];
+}
+
+class ExternalSharePost extends CommunityEvent {
+  final Post post;
+
+  ExternalSharePost(this.post);
+
+  @override
+  List<Object> get props => [post];
+}
+
 // Comment Events
 class LoadComments extends CommunityEvent {
   final String postId;
@@ -327,6 +351,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<DeletePost>(_onDeletePost);
     on<ToggleLike>(_onToggleLike);
     on<AddReaction>(_onAddReaction);
+    on<SharePost>(_onSharePost);
+    on<ExternalSharePost>(_onExternalSharePost);
 
     // Comment Events
     on<LoadComments>(_onLoadComments);
@@ -569,6 +595,51 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
+  // Share post handlers
+  Future<void> _onSharePost(SharePost event, Emitter<CommunityState> emit) async {
+    try {
+      emit(state.copyWith(isCreatingPost: true, error: null));
+
+      await _service.sharePost(
+        postId: event.postId,
+        comment: event.comment,
+        privacy: event.privacy,
+      );
+
+      emit(state.copyWith(
+        isCreatingPost: false,
+        successMessage: 'Post shared successfully!',
+      ));
+
+      // Reload feed to show the repost
+      add(LoadFeed(
+        organizationCode: state.currentUserProfile?.organizationCode ?? '',
+        refresh: true,
+      ));
+    } catch (e) {
+      emit(state.copyWith(
+        isCreatingPost: false,
+        error: e.toString(),
+      ));
+    }
+  }
+
+  Future<void> _onExternalSharePost(
+      ExternalSharePost event,
+      Emitter<CommunityState> emit
+      ) async {
+    try {
+      await _service.externalSharePost(event.post);
+      emit(state.copyWith(
+        successMessage: 'Post shared!',
+      ));
+    } catch (e) {
+      emit(state.copyWith(
+        error: 'Failed to share post',
+      ));
+    }
+  }
+
   // Comment Handlers
   Future<void> _onLoadComments(LoadComments event, Emitter<CommunityState> emit) async {
     try {
@@ -660,7 +731,6 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       emit(state.copyWith(error: e.toString()));
     }
   }
-
 
   Future<void> _onLoadPendingRequests(LoadPendingRequests event, Emitter<CommunityState> emit) async {
     try {

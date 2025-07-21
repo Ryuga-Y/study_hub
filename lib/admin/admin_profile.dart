@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../Authentication/auth_services.dart';
 
 class AdminProfilePage extends StatefulWidget {
   final String userId;
@@ -20,16 +21,11 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
-  final _currentPasswordController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
+  final _authService = AuthService();
 
   bool _isEditingProfile = false;
-  bool _isChangingPassword = false;
+  bool _isResettingPassword = false;
   bool _isLoading = false;
-  bool _obscureCurrentPassword = true;
-  bool _obscureNewPassword = true;
-  bool _obscureConfirmPassword = true;
 
   Map<String, dynamic>? _userData;
   Map<String, dynamic>? _organizationData;
@@ -435,150 +431,210 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (!_isChangingPassword)
-                  TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _isChangingPassword = true;
-                      });
-                    },
-                    icon: Icon(Icons.lock, size: 18),
-                    label: Text('Change Password'),
-                  ),
+                TextButton.icon(
+                  onPressed: _isResettingPassword ? null : _showResetPasswordDialog,
+                  icon: Icon(Icons.lock_reset, size: 18),
+                  label: Text('Reset Password'),
+                ),
               ],
             ),
           ),
-          if (_isChangingPassword) ...[
-            Divider(height: 1),
-            Padding(
-              padding: EdgeInsets.all(20),
-              child: _buildChangePasswordForm(),
-            ),
-          ] else
-            Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: Container(
-                padding: EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green[200]!),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.check_circle, color: Colors.green[700]),
-                    SizedBox(width: 12),
-                    Text(
-                      'Your account is secure',
-                      style: TextStyle(
-                        color: Colors.green[700],
-                        fontWeight: FontWeight.w500,
-                      ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green[200]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.green[700]),
+                  SizedBox(width: 12),
+                  Text(
+                    'Your account is secure',
+                    style: TextStyle(
+                      color: Colors.green[700],
+                      fontWeight: FontWeight.w500,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildChangePasswordForm() {
-    return Column(
-      children: [
-        TextFormField(
-          controller: _currentPasswordController,
-          obscureText: _obscureCurrentPassword,
-          decoration: InputDecoration(
-            labelText: 'Current Password',
-            border: OutlineInputBorder(),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureCurrentPassword ? Icons.visibility : Icons.visibility_off,
-              ),
-              onPressed: () {
-                setState(() {
-                  _obscureCurrentPassword = !_obscureCurrentPassword;
-                });
-              },
-            ),
+  void _showResetPasswordDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-        ),
-        SizedBox(height: 16),
-        TextFormField(
-          controller: _newPasswordController,
-          obscureText: _obscureNewPassword,
-          decoration: InputDecoration(
-            labelText: 'New Password',
-            border: OutlineInputBorder(),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureNewPassword ? Icons.visibility : Icons.visibility_off,
-              ),
-              onPressed: () {
-                setState(() {
-                  _obscureNewPassword = !_obscureNewPassword;
-                });
-              },
-            ),
+          title: Row(
+            children: [
+              Icon(Icons.lock_reset, color: Colors.redAccent, size: 28),
+              SizedBox(width: 12),
+              Text('Reset Password'),
+            ],
           ),
-        ),
-        SizedBox(height: 16),
-        TextFormField(
-          controller: _confirmPasswordController,
-          obscureText: _obscureConfirmPassword,
-          decoration: InputDecoration(
-            labelText: 'Confirm New Password',
-            border: OutlineInputBorder(),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Are you sure you want to reset your password?',
+                style: TextStyle(fontSize: 16),
               ),
-              onPressed: () {
-                setState(() {
-                  _obscureConfirmPassword = !_obscureConfirmPassword;
-                });
-              },
-            ),
+              SizedBox(height: 12),
+              Text(
+                'We will send a password reset link to:',
+                style: TextStyle(color: Colors.grey[600], fontSize: 14),
+              ),
+              SizedBox(height: 8),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.email, color: Colors.grey[600], size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _userData?['email'] ?? '',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 16),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange[200]!),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.orange[700], size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'You will be signed out after requesting the password reset.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.orange[800],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ),
-        SizedBox(height: 20),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
+          actions: [
             TextButton(
-              onPressed: () {
-                setState(() {
-                  _isChangingPassword = false;
-                  _currentPasswordController.clear();
-                  _newPasswordController.clear();
-                  _confirmPasswordController.clear();
-                });
-              },
-              child: Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancel', style: TextStyle(color: Colors.grey[600])),
             ),
-            SizedBox(width: 12),
             ElevatedButton(
-              onPressed: _isLoading ? null : _changePassword,
+              onPressed: _isResettingPassword ? null : () async {
+                Navigator.of(context).pop();
+                await _resetPassword();
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
-              ),
-              child: _isLoading
-                  ? SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              )
-                  : Text('Update Password'),
+              ),
+              child: Text('Send Reset Link', style: TextStyle(color: Colors.white)),
             ),
           ],
-        ),
-      ],
+        );
+      },
     );
+  }
+
+  Future<void> _resetPassword() async {
+    setState(() {
+      _isResettingPassword = true;
+    });
+
+    try {
+      final email = _userData?['email'] ?? '';
+      if (email.isEmpty) {
+        throw Exception('Email not found');
+      }
+
+      final result = await _authService.resetPassword(email);
+
+      if (result.success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text('Password reset link sent! Check your email.'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green[600],
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            margin: EdgeInsets.all(20),
+            duration: Duration(seconds: 4),
+          ),
+        );
+
+        // Sign out the user after sending reset email
+        await Future.delayed(Duration(seconds: 2));
+        await _authService.signOut();
+
+        if (mounted) {
+          Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending reset email: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isResettingPassword = false;
+        });
+      }
+    }
   }
 
   Widget _buildPreferencesCard() {
@@ -721,91 +777,6 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
     }
   }
 
-  Future<void> _changePassword() async {
-    // Validate passwords
-    if (_currentPasswordController.text.isEmpty ||
-        _newPasswordController.text.isEmpty ||
-        _confirmPasswordController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Please fill all password fields'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    if (_newPasswordController.text != _confirmPasswordController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('New passwords do not match'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    if (_newPasswordController.text.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Password must be at least 6 characters'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null && user.email != null) {
-        // Re-authenticate user
-        final credential = EmailAuthProvider.credential(
-          email: user.email!,
-          password: _currentPasswordController.text,
-        );
-
-        await user.reauthenticateWithCredential(credential);
-
-        // Update password
-        await user.updatePassword(_newPasswordController.text);
-
-        setState(() {
-          _isChangingPassword = false;
-          _currentPasswordController.clear();
-          _newPasswordController.clear();
-          _confirmPasswordController.clear();
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Password updated successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } on FirebaseAuthException catch (e) {
-      String message = 'Error updating password';
-      if (e.code == 'wrong-password') {
-        message = 'Current password is incorrect';
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
   Future<void> _updatePreference(String key, bool value) async {
     try {
       await FirebaseFirestore.instance
@@ -813,13 +784,14 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
           .doc(widget.organizationId)
           .collection('admin_settings')
           .doc(widget.userId)
-          .update({
+          .set({
         key: value,
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
 
       setState(() {
-        _adminSettings?[key] = value;
+        _adminSettings ??= {};
+        _adminSettings![key] = value;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -842,9 +814,6 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
-    _currentPasswordController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
     super.dispose();
   }
 }

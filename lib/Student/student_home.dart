@@ -7,6 +7,7 @@ import '../Authentication/custom_widgets.dart';
 import '../community/bloc.dart';
 import '../community/feed_screen.dart';
 import '../community/models.dart';
+import '../profile_page.dart';
 import 'student_course.dart';
 import 'calendar.dart'; // Import the calendar page
 import '../Stu_goal.dart'; // Import the goal page
@@ -885,7 +886,10 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
               title: const Text('Profile'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Navigate to profile page
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => ProfilePage()),
+                );
               },
             ),
             ListTile(
@@ -1299,7 +1303,11 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
             }
             break;
           case 4:
-          // TODO: Navigate to profile
+          // Navigate to profile
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => ProfilePage()),
+            );
             break;
         }
       },

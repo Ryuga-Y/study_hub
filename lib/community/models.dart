@@ -78,6 +78,11 @@ class Post {
   final Map<String, String> userReactions; // userId -> reaction emoji
   final bool isEdited;
   final DateTime? editedAt;
+  final bool isRepost;
+  final String? originalPostId;
+  final Post? originalPost;
+  final String? repostComment;
+  final int shareCount;
 
   Post({
     required this.id,
@@ -96,6 +101,11 @@ class Post {
     this.userReactions = const {},
     this.isEdited = false,
     this.editedAt,
+    this.isRepost = false,
+    this.originalPostId,
+    this.originalPost,
+    this.repostComment,
+    this.shareCount = 0,
   });
 
   factory Post.fromFirestore(DocumentSnapshot doc) {
@@ -138,6 +148,62 @@ class Post {
       userReactions: userReactions,
       isEdited: data['isEdited'] ?? false,
       editedAt: (data['editedAt'] as Timestamp?)?.toDate(),
+      isRepost: data['isRepost'] ?? false,
+      originalPostId: data['originalPostId'],
+      originalPost: data['originalPost'] != null
+          ? Post._fromMap(data['originalPost'])
+          : null,
+      repostComment: data['repostComment'],
+      shareCount: data['shareCount'] ?? 0,
+    );
+  }
+
+  static Post _fromMap(Map<String, dynamic> data) {
+    // Convert reactions from Map<String, dynamic> to Map<String, List<String>>
+    final reactionsData = data['reactions'] as Map<String, dynamic>? ?? {};
+    final Map<String, List<String>> reactions = {};
+    reactionsData.forEach((emoji, users) {
+      if (users is List) {
+        reactions[emoji] = List<String>.from(users);
+      }
+    });
+
+    // Build userReactions map
+    final Map<String, String> userReactions = {};
+    final userReactionsData = data['userReactions'] as Map<String, dynamic>? ?? {};
+    userReactionsData.forEach((userId, reaction) {
+      if (reaction is String) {
+        userReactions[userId] = reaction;
+      }
+    });
+
+    // Similar to fromFirestore but for nested data
+    return Post(
+      id: data['id'] ?? '',
+      userId: data['userId'] ?? '',
+      userName: data['userName'] ?? '',
+      userAvatar: data['userAvatar'],
+      mediaUrls: List<String>.from(data['mediaUrls'] ?? []),
+      mediaTypes: (data['mediaTypes'] as List?)
+          ?.map((type) => MediaType.values.firstWhere(
+            (e) => e.toString() == 'MediaType.$type',
+        orElse: () => MediaType.image,
+      ))
+          .toList() ?? [],
+      caption: data['caption'] ?? '',
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      likeCount: data['likeCount'] ?? 0,
+      commentCount: data['commentCount'] ?? 0,
+      shareCount: data['shareCount'] ?? 0,
+      privacy: PostPrivacy.values.firstWhere(
+            (e) => e.toString() == 'PostPrivacy.${data['privacy'] ?? 'public'}',
+        orElse: () => PostPrivacy.public,
+      ),
+      likedBy: List<String>.from(data['likedBy'] ?? []),
+      reactions: reactions,
+      userReactions: userReactions,
+      isEdited: data['isEdited'] ?? false,
+      editedAt: (data['editedAt'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -164,6 +230,11 @@ class Post {
       'userReactions': userReactions,
       'isEdited': isEdited,
       'editedAt': editedAt != null ? Timestamp.fromDate(editedAt!) : null,
+      'isRepost': isRepost,
+      'originalPostId': originalPostId,
+      'originalPost': originalPost?.toMap(),
+      'repostComment': repostComment,
+      'shareCount': shareCount,
     };
   }
 

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:share_plus/share_plus.dart';
 import 'models.dart';
 import '../chat_integrated.dart';
 import '../chat.dart';
@@ -1206,6 +1207,157 @@ class CommunityService {
       return suggestedUsers.take(10).toList();
     } catch (e) {
       return [];
+    }
+  }
+
+  Future<void> sharePost({
+    required String postId,
+    String? comment,
+    required PostPrivacy privacy,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Get the original post
+      final postDoc = await _firestore.collection('posts').doc(postId).get();
+      if (!postDoc.exists) throw Exception('Post not found');
+
+      final originalPost = Post.fromFirestore(postDoc);
+
+      // Check if user can share this post based on privacy
+      if (!await _canSharePost(originalPost)) {
+        throw Exception('You cannot share this post due to privacy settings');
+      }
+
+      // Get user data
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      final userData = userDoc.data()!;
+
+      // Create repost document
+      final repostRef = _firestore.collection('posts').doc();
+      final repost = {
+        'id': repostRef.id,
+        'userId': userId,
+        'userName': userData['fullName'] ?? 'Unknown',
+        'userAvatar': userData['avatarUrl'],
+        'isRepost': true,
+        'originalPostId': originalPost.id,
+        'originalPost': originalPost.toMap(),
+        'repostComment': comment,
+        'caption': '', // Reposts don't have their own caption
+        'mediaUrls': [], // Reposts don't have their own media
+        'mediaTypes': [],
+        'createdAt': FieldValue.serverTimestamp(),
+        'privacy': privacy.toString().split('.').last,
+        'likeCount': 0,
+        'commentCount': 0,
+        'shareCount': 0,
+        'likedBy': [],
+        'reactions': {},
+        'userReactions': {},
+      };
+
+      // Use transaction to update both documents
+      await _firestore.runTransaction((transaction) async {
+        // Create the repost
+        transaction.set(repostRef, repost);
+
+        // Update share count on original post
+        transaction.update(
+          _firestore.collection('posts').doc(postId),
+          {'shareCount': FieldValue.increment(1)},
+        );
+      });
+
+      // Update user's post count
+      await _firestore.collection('users').doc(userId).update({
+        'postCount': FieldValue.increment(1),
+      });
+
+      // Send notification to original poster
+      if (originalPost.userId != userId) {
+        await _createNotification(
+          userId: originalPost.userId,
+          type: NotificationType.newPost,
+          title: 'Your post was shared',
+          message: '${userData['fullName']} shared your post',
+          actionUserId: userId,
+          postId: repostRef.id,
+        );
+      }
+    } catch (e) {
+      throw Exception('Failed to share post: $e');
+    }
+  }
+
+  Future<bool> _canSharePost(Post post) async {
+    final userId = currentUserId;
+    if (userId == null) return false;
+
+    switch (post.privacy) {
+      case PostPrivacy.public:
+        return true;
+      case PostPrivacy.friendsOnly:
+      // Check if user is friends with the poster
+        return post.userId == userId || await _areFriends(userId, post.userId);
+      case PostPrivacy.private:
+      // Private posts cannot be shared
+        return false;
+    }
+  }
+
+  Future<void> externalSharePost(Post post) async {
+    try {
+      print('🔄 External share started for post: ${post.id}');
+
+      final shareText = StringBuffer();
+
+      // Build the text content
+      if (post.isRepost && post.originalPost != null) {
+        shareText.write('Check out this post by ${post.originalPost!.userName}');
+        if (post.repostComment != null && post.repostComment!.isNotEmpty) {
+          shareText.write('\n\n"${post.repostComment}"');
+        }
+        shareText.write('\n\nOriginal: "${post.originalPost!.caption}"');
+      } else {
+        shareText.write('Check out this post by ${post.userName}');
+        if (post.caption.isNotEmpty) {
+          shareText.write('\n\n"${post.caption}"');
+        }
+      }
+      shareText.write('\n\n📚 Shared from Study Hub');
+
+      final textToShare = shareText.toString();
+      print('📤 Sharing text: $textToShare');
+
+      // Get media URLs for sharing
+      final mediaUrls = post.isRepost && post.originalPost != null
+          ? post.originalPost!.mediaUrls
+          : post.mediaUrls;
+
+      if (mediaUrls.isNotEmpty) {
+        // Share with subject for posts with media
+        try {
+          await SharePlus.instance.share(
+            textToShare as ShareParams,
+          );
+          print('✅ Share with subject completed successfully');
+        } catch (e) {
+          print('❌ Failed to share with subject, falling back to simple share: $e');
+          // Fallback to simple share
+          await SharePlus.instance.share(textToShare as ShareParams);
+          print('✅ Simple share completed successfully');
+        }
+      } else {
+        // Share text only for posts without media
+        await SharePlus.instance.share(textToShare as ShareParams);
+        print('✅ Text-only share completed successfully');
+      }
+
+    } catch (e) {
+      print('❌ External share error: $e');
+      throw Exception('Failed to share: $e');
     }
   }
 }

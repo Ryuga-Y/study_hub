@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:study_hub/community/profile_screen.dart';
+import 'package:study_hub/community/share_modal.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../community/models.dart';
 import '../community/bloc.dart';
@@ -38,7 +39,8 @@ class _PostCardState extends State<PostCard> {
   @override
   void initState() {
     super.initState();
-    if (widget.post.mediaUrls.length > 1) {
+    final mediaUrls = _getMediaUrls();
+    if (mediaUrls.length > 1) {
       _pageController = PageController();
     }
   }
@@ -47,6 +49,82 @@ class _PostCardState extends State<PostCard> {
   void dispose() {
     _pageController?.dispose();
     super.dispose();
+  }
+
+  // Helper method to get media URLs from either repost or original post
+  List<String> _getMediaUrls() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.mediaUrls;
+    }
+    return widget.post.mediaUrls;
+  }
+
+  // Helper method to get media types from either repost or original post
+  List<MediaType> _getMediaTypes() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.mediaTypes;
+    }
+    return widget.post.mediaTypes;
+  }
+
+  // Helper method to get the correct avatar
+  ImageProvider? _getPostAvatar() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.userAvatar != null
+          ? CachedNetworkImageProvider(widget.post.originalPost!.userAvatar!)
+          : null;
+    }
+    return widget.post.userAvatar != null
+        ? CachedNetworkImageProvider(widget.post.userAvatar!)
+        : null;
+  }
+
+  // Helper method to get the correct user name
+  String _getPostUserName() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.userName;
+    }
+    return widget.post.userName;
+  }
+
+  // Helper method to get the correct user ID
+  String _getPostUserId() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.userId;
+    }
+    return widget.post.userId;
+  }
+
+  // Helper method to get the correct caption
+  String _getPostCaption() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.caption;
+    }
+    return widget.post.caption;
+  }
+
+  // Helper method to get the correct created date
+  DateTime _getPostCreatedAt() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.createdAt;
+    }
+    return widget.post.createdAt;
+  }
+
+  // Helper method to get the correct privacy
+  PostPrivacy _getPostPrivacy() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.privacy;
+    }
+    return widget.post.privacy;
+  }
+
+  // Helper method to check if the post is edited
+  bool _isPostEdited() {
+    if (widget.post.isRepost && widget.post.originalPost != null) {
+      return widget.post.originalPost!.isEdited;
+    }
+    return widget.post.isEdited;
   }
 
   @override
@@ -62,15 +140,28 @@ class _PostCardState extends State<PostCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Header
-              _buildHeader(),
+              _buildHeader(state),
 
-              // Caption
-              if (widget.post.caption.isNotEmpty)
-                _buildCaption(),
+              // Repost comment (if it's a repost with a comment)
+              if (widget.post.isRepost &&
+                  widget.post.repostComment != null &&
+                  widget.post.repostComment!.isNotEmpty)
+                _buildRepostComment(),
 
-              // Media
-              if (widget.post.mediaUrls.isNotEmpty)
-                _buildMediaSection(),
+              // Original post container for reposts
+              if (widget.post.isRepost)
+                _buildOriginalPostContainer(),
+
+              // Regular post content (for non-reposts)
+              if (!widget.post.isRepost) ...[
+                // Caption
+                if (_getPostCaption().isNotEmpty)
+                  _buildCaption(),
+
+                // Media
+                if (_getMediaUrls().isNotEmpty)
+                  _buildMediaSection(),
+              ],
 
               // Stats
               _buildStats(),
@@ -88,34 +179,62 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  Widget _buildHeader() {
-    return BlocBuilder<CommunityBloc, CommunityState>(
-      builder: (context, state) {
-        final currentUserId = state.currentUserProfile?.uid;
+  Widget _buildHeader(CommunityState state) {
+    final currentUserId = state.currentUserProfile?.uid;
 
-        return Padding(
-          padding: EdgeInsets.all(12),
-          child: Row(
+    return Padding(
+      padding: EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Show repost indicator
+          if (widget.post.isRepost) ...[
+            Row(
+              children: [
+                Icon(Icons.repeat, size: 16, color: Colors.grey[600]),
+                SizedBox(width: 4),
+                Text(
+                  '${widget.post.userName} shared',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Spacer(),
+                Text(
+                  timeago.format(widget.post.createdAt),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+          ],
+
+          // Original post info (or regular post info if not a repost)
+          Row(
             children: [
               // Avatar
               GestureDetector(
                 onTap: () {
+                  final userToNavigate = _getPostUserId();
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (context) => ProfileScreen(
-                        userId: widget.post.userId,
-                        isCurrentUser: widget.post.userId == currentUserId,
+                        userId: userToNavigate,
+                        isCurrentUser: userToNavigate == currentUserId,
                       ),
                     ),
                   );
                 },
                 child: CircleAvatar(
                   radius: 20,
-                  backgroundImage: widget.post.userAvatar != null
-                      ? CachedNetworkImageProvider(widget.post.userAvatar!)
-                      : null,
-                  child: widget.post.userAvatar == null
+                  backgroundImage: _getPostAvatar(),
+                  child: _getPostAvatar() == null
                       ? Icon(Icons.person)
                       : null,
                 ),
@@ -132,18 +251,19 @@ class _PostCardState extends State<PostCard> {
                       children: [
                         GestureDetector(
                           onTap: () {
+                            final userToNavigate = _getPostUserId();
                             Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => ProfileScreen(
-                                  userId: widget.post.userId,
-                                  isCurrentUser: widget.post.userId == currentUserId,
+                                  userId: userToNavigate,
+                                  isCurrentUser: userToNavigate == currentUserId,
                                 ),
                               ),
                             );
                           },
                           child: Text(
-                            widget.post.userName,
+                            _getPostUserName(),
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 15,
@@ -151,7 +271,7 @@ class _PostCardState extends State<PostCard> {
                           ),
                         ),
                         SizedBox(width: 8),
-                        if (widget.post.isEdited)
+                        if (_isPostEdited())
                           Text(
                             '• edited',
                             style: TextStyle(
@@ -164,18 +284,20 @@ class _PostCardState extends State<PostCard> {
                     SizedBox(height: 2),
                     Row(
                       children: [
-                        Text(
-                          timeago.format(widget.post.createdAt),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
+                        if (!widget.post.isRepost) // Don't show time for reposts here (shown above)
+                          Text(
+                            timeago.format(_getPostCreatedAt()),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
                           ),
-                        ),
-                        SizedBox(width: 8),
+                        if (!widget.post.isRepost)
+                          SizedBox(width: 8),
                         Icon(
-                          widget.post.privacy == PostPrivacy.public
+                          _getPostPrivacy() == PostPrivacy.public
                               ? Icons.public
-                              : widget.post.privacy == PostPrivacy.friendsOnly
+                              : _getPostPrivacy() == PostPrivacy.friendsOnly
                               ? Icons.people
                               : Icons.lock,
                           size: 12,
@@ -187,13 +309,13 @@ class _PostCardState extends State<PostCard> {
                 ),
               ),
 
-              // More button
+              // More button (only for the current user's posts)
               if (widget.post.userId == currentUserId &&
                   (widget.onDelete != null || widget.onEdit != null))
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_horiz, color: Colors.grey[700]),
                   itemBuilder: (context) => [
-                    if (widget.onEdit != null)
+                    if (widget.onEdit != null && !widget.post.isRepost) // Don't allow editing reposts
                       PopupMenuItem(
                         value: 'edit',
                         child: Row(
@@ -226,8 +348,58 @@ class _PostCardState extends State<PostCard> {
                 ),
             ],
           ),
-        );
-      },
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRepostComment() {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 12).copyWith(bottom: 12),
+      child: Text(
+        widget.post.repostComment!,
+        style: TextStyle(fontSize: 15),
+        maxLines: widget.isDetailView ? null : 3,
+        overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
+      ),
+    );
+  }
+
+  Widget _buildOriginalPostContainer() {
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Original post caption
+          if (_getPostCaption().isNotEmpty)
+            Padding(
+              padding: EdgeInsets.all(12),
+              child: Text(
+                _getPostCaption(),
+                style: TextStyle(fontSize: 15),
+                maxLines: widget.isDetailView ? null : 3,
+                overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
+              ),
+            ),
+
+          // Original post media
+          if (_getMediaUrls().isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.only(
+                bottomLeft: Radius.circular(12),
+                bottomRight: Radius.circular(12),
+                topLeft: _getPostCaption().isEmpty ? Radius.circular(12) : Radius.zero,
+                topRight: _getPostCaption().isEmpty ? Radius.circular(12) : Radius.zero,
+              ),
+              child: _buildMediaSection(),
+            ),
+        ],
+      ),
     );
   }
 
@@ -235,7 +407,7 @@ class _PostCardState extends State<PostCard> {
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 12).copyWith(bottom: 12),
       child: Text(
-        widget.post.caption,
+        _getPostCaption(),
         style: TextStyle(fontSize: 15),
         maxLines: widget.isDetailView ? null : 3,
         overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
@@ -244,7 +416,10 @@ class _PostCardState extends State<PostCard> {
   }
 
   Widget _buildMediaSection() {
-    if (widget.post.mediaUrls.length == 1) {
+    final mediaUrls = _getMediaUrls();
+    final mediaTypes = _getMediaTypes();
+
+    if (mediaUrls.length == 1) {
       return _buildSingleMedia(0);
     }
 
@@ -257,7 +432,7 @@ class _PostCardState extends State<PostCard> {
             onPageChanged: (index) {
               setState(() => _currentPage = index);
             },
-            itemCount: widget.post.mediaUrls.length,
+            itemCount: mediaUrls.length,
             itemBuilder: (context, index) {
               return _buildSingleMedia(index);
             },
@@ -265,13 +440,13 @@ class _PostCardState extends State<PostCard> {
         ),
 
         // Page indicators
-        if (widget.post.mediaUrls.length > 1)
+        if (mediaUrls.length > 1)
           Container(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(
-                widget.post.mediaUrls.length,
+                mediaUrls.length,
                     (index) => Container(
                   width: 6,
                   height: 6,
@@ -291,8 +466,11 @@ class _PostCardState extends State<PostCard> {
   }
 
   Widget _buildSingleMedia(int index) {
-    final mediaUrl = widget.post.mediaUrls[index];
-    final mediaType = widget.post.mediaTypes[index];
+    final mediaUrls = _getMediaUrls();
+    final mediaTypes = _getMediaTypes();
+
+    final mediaUrl = mediaUrls[index];
+    final mediaType = mediaTypes[index];
 
     if (mediaType == MediaType.video) {
       return Stack(
@@ -454,7 +632,14 @@ class _PostCardState extends State<PostCard> {
           _buildActionButton(
             icon: Icons.share_outlined,
             label: 'Share',
-            onTap: widget.onShare,
+            onTap: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (context) => SharePostModal(post: widget.post),
+              );
+            },
           ),
         ],
       ),

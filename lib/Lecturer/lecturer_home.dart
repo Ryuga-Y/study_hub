@@ -6,6 +6,7 @@ import '../Authentication/custom_widgets.dart';
 import '../community/bloc.dart';
 import '../community/feed_screen.dart';
 import '../community/models.dart';
+import '../profile_page.dart';
 import 'course_page.dart';
 import 'create_course.dart';
 
@@ -607,35 +608,22 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
               title: Text('Profile'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: Navigate to profile page
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => ProfilePage()),
+                );
               },
             ),
-            ListTile(
-              leading: Icon(Icons.calendar_today),
-              title: Text('Calendar'),
-              onTap: () {
-                Navigator.pop(context);
-                // TODO: Navigate to calendar page
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.settings),
-              title: Text('Settings'),
-              onTap: () {
-                Navigator.pop(context);
-                // TODO: Navigate to settings page
-              },
-            ),
-            Divider(),
+            //Divider(),
             // Debug button added to drawer
-            ListTile(
-              leading: Icon(Icons.bug_report, color: Colors.orange),
-              title: Text('Debug Enrollments', style: TextStyle(color: Colors.orange)),
-              onTap: () {
-                Navigator.pop(context);
-                debugEnrollmentAndCalendar();
-              },
-            ),
+            //ListTile(
+            // leading: Icon(Icons.bug_report, color: Colors.orange),
+            //  title: Text('Debug Enrollments', style: TextStyle(color: Colors.orange)),
+            //  onTap: () {
+            //    Navigator.pop(context);
+            //    debugEnrollmentAndCalendar();
+            //  },
+            //),
             Divider(),
             ListTile(
               leading: Icon(Icons.business),
@@ -938,10 +926,11 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
           // TODO: Navigate to chat
             break;
           case 3:
-          // TODO: Navigate to calendar
-            break;
-          case 4:
-          // TODO: Navigate to profile
+          // Navigate to profile
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => ProfilePage()),
+            );
             break;
         }
       },
@@ -960,10 +949,6 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
         BottomNavigationBarItem(
           icon: Icon(Icons.chat_bubble_outline),
           label: 'Chat',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.calendar_today),
-          label: 'Calendar',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.person_outline),
