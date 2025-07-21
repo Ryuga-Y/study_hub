@@ -4,8 +4,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:badges/badges.dart' as badges;
 import 'dart:async';
 import '../Student/student_assignment_details.dart';
-import '../Student/student_tutorial.dart';
 import '../Student/student_course.dart';
+import '../Student/student_submit_view.dart';
+import '../Student/student_tutorial.dart';
 
 class NotificationService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -1107,21 +1108,262 @@ class _NotificationDialogState extends State<NotificationDialog> {
       return;
     }
 
-    // Close notification dialog first
+    // Close notification dialog first - but keep context reference for error handling
     Navigator.pop(context);
 
+    // Get the main app context for error messages
+    final scaffoldContext = Navigator.of(context, rootNavigator: true).context;
+
     try {
-      if (notification.sourceType == 'assignment' && notification.sourceId != null) {
-        // Navigate to assignment
-        await _navigateToAssignment(context, notification, orgCode);
-      } else if (notification.sourceType == 'tutorial' && notification.sourceId != null) {
-        // Navigate to tutorial
-        await _navigateToTutorial(context, notification, orgCode);
-      } else {
-        _showNavigationError(context, 'Cannot open this notification');
+      // FIXED: Handle different notification types more specifically
+
+      // 1. Handle "New Material" or "New Tutorial" notifications specifically
+      if (notification.title.toLowerCase().contains('new material') ||
+          notification.title.toLowerCase().contains('new tutorial')) {
+        print('🔍 Detected new material/tutorial notification');
+        await _navigateToTutorialDirectly(scaffoldContext, notification, orgCode);
+        return;
+      }
+
+      // 2. Handle assignment due notifications
+      if (notification.title.toLowerCase().contains('assignment due')) {
+        print('🔍 Detected assignment due notification');
+        await _navigateToAssignmentWithStatusCheck(scaffoldContext, notification, orgCode);
+        return;
+      }
+
+      // 3. Handle based on notification type
+      switch (notification.type) {
+        case NotificationType.assignment:
+          await _navigateToAssignmentWithStatusCheck(scaffoldContext, notification, orgCode);
+          break;
+
+        case NotificationType.tutorial:
+          await _navigateToTutorialDirectly(scaffoldContext, notification, orgCode);
+          break;
+
+        case NotificationType.learning:
+          await _navigateToLearningMaterial(scaffoldContext, notification, orgCode);
+          break;
+
+        case NotificationType.reminder:
+          await _handleReminderNavigation(scaffoldContext, notification, orgCode);
+          break;
+
+        default:
+        // 4. Handle based on sourceType as fallback
+          if (notification.sourceType == 'assignment' && notification.sourceId != null) {
+            await _navigateToAssignmentWithStatusCheck(scaffoldContext, notification, orgCode);
+          } else if (notification.sourceType == 'tutorial' && notification.sourceId != null) {
+            await _navigateToTutorialDirectly(scaffoldContext, notification, orgCode);
+          } else if (notification.sourceType == 'learning' && notification.sourceId != null) {
+            await _navigateToLearningMaterial(scaffoldContext, notification, orgCode);
+          } else {
+            _showNavigationError(scaffoldContext, 'Cannot open this notification type');
+          }
       }
     } catch (e) {
-      _showNavigationError(context, 'Navigation failed: $e');
+      print('❌ Navigation error: $e');
+      _showNavigationError(scaffoldContext, 'Navigation failed: $e');
+    }
+  }
+
+
+  // Navigate to course page with tutorial modal
+  Future<void> _navigateToTutorialDirectly(BuildContext context, NotificationModel notification, String orgCode) async {
+    try {
+      print('🔍 Direct tutorial navigation for: ${notification.sourceId}');
+
+      // Find course ID if missing
+      String? courseId = notification.courseId;
+      if (courseId == null && notification.sourceId != null) {
+        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'tutorial');
+      }
+
+      if (courseId == null) {
+        _showNavigationError(context, 'Tutorial course not found');
+        return;
+      }
+
+      // Load course data
+      final courseDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .get();
+
+      if (!courseDoc.exists) {
+        _showNavigationError(context, 'Course not found');
+        return;
+      }
+
+      final courseData = {'id': courseId, ...courseDoc.data()!};
+
+      // Navigate to course page with highlighted material
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StudentCoursePage(
+            courseId: courseId!,
+            courseData: courseData,
+            highlightMaterialId: notification.sourceId, // This passes the tutorial ID
+          ),
+        ),
+      );
+
+      print('✅ Successfully navigated to course page with tutorial highlighted');
+    } catch (e) {
+      print('❌ Error in direct tutorial navigation: $e');
+      _showNavigationError(context, 'Failed to load tutorial: $e');
+    }
+  }
+
+// NEW: Handle reminder notifications
+  Future<void> _handleReminderNavigation(BuildContext context, NotificationModel notification, String orgCode) async {
+    try {
+      if (notification.eventId != null) {
+        final courseId = await _notificationService.findCourseIdFromEventId(orgCode, notification.eventId!);
+        if (courseId != null && notification.sourceId != null) {
+          final updatedNotification = NotificationModel(
+            id: notification.id,
+            title: notification.title,
+            body: notification.body,
+            type: notification.type,
+            eventId: notification.eventId,
+            sourceId: notification.sourceId,
+            sourceType: notification.sourceType,
+            courseId: courseId,
+            organizationCode: orgCode,
+            dueDate: notification.dueDate,
+            createdAt: notification.createdAt,
+            isRead: notification.isRead,
+          );
+
+          if (notification.sourceType == 'assignment') {
+            await _navigateToAssignmentWithStatusCheck(context, updatedNotification, orgCode);
+          } else if (notification.sourceType == 'tutorial') {
+            await _navigateToTutorialDirectly(context, updatedNotification, orgCode);
+          }
+        } else {
+          _showNavigationError(context, 'Cannot find related content');
+        }
+      } else {
+        _showNavigationError(context, 'Cannot open reminder notification');
+      }
+    } catch (e) {
+      _showNavigationError(context, 'Failed to handle reminder: $e');
+    }
+  }
+
+  Future<void> _navigateToAssignmentWithStatusCheck(BuildContext context, NotificationModel notification, String orgCode) async {
+    try {
+      if (!mounted) return;
+
+      // Find course ID if missing
+      String? courseId = notification.courseId;
+      if (courseId == null) {
+        if (notification.sourceId != null) {
+          courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'assignment');
+        }
+        if (courseId == null && notification.eventId != null) {
+          courseId = await _notificationService.findCourseIdFromEventId(orgCode, notification.eventId!);
+        }
+        if (courseId == null) {
+          _showNavigationError(context, 'Assignment not found');
+          return;
+        }
+      }
+
+      String? assignmentId = notification.sourceId;
+      if (assignmentId == null && notification.eventId != null) {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          final eventDoc = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(orgCode)
+              .collection('students')
+              .doc(user.uid)
+              .collection('calendar_events')
+              .doc(notification.eventId!)
+              .get();
+
+          if (eventDoc.exists) {
+            assignmentId = eventDoc.data()?['sourceId'];
+          }
+        }
+      }
+
+      if (assignmentId == null) {
+        _showNavigationError(context, 'Assignment ID not found');
+        return;
+      }
+
+      // Check assignment status by looking at submissions
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final submissionSnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('assignments')
+            .doc(assignmentId)
+            .collection('submissions')
+            .where('studentId', isEqualTo: user.uid)
+            .get();
+
+        bool isCompleted = false;
+        if (submissionSnapshot.docs.isNotEmpty) {
+          // Sort manually to avoid composite index
+          final sortedDocs = submissionSnapshot.docs.toList();
+          sortedDocs.sort((a, b) {
+            final aTime = a.data()['submittedAt'] as Timestamp?;
+            final bTime = b.data()['submittedAt'] as Timestamp?;
+            if (aTime == null || bTime == null) return 0;
+            return bTime.compareTo(aTime);
+          });
+
+          final submission = sortedDocs.first.data();
+          isCompleted = submission['grade'] != null; // Check if graded (completed)
+        }
+
+        if (isCompleted) {
+          // Navigate to My Submissions page (completed assignment)
+          final assignmentDoc = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(orgCode)
+              .collection('courses')
+              .doc(courseId)
+              .collection('assignments')
+              .doc(assignmentId)
+              .get();
+
+          if (assignmentDoc.exists && mounted) {
+            final assignmentData = {'id': assignmentDoc.id, ...assignmentDoc.data()!};
+
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => StudentSubmissionView(
+                  courseId: courseId!,
+                  assignmentId: assignmentId!,
+                  assignmentData: assignmentData,
+                  organizationCode: orgCode,
+                ),
+              ),
+            );
+            return;
+          }
+        }
+      }
+
+      // If not completed or no submission, navigate to assignment details (pending)
+      await _navigateToAssignment(context, notification, orgCode);
+    } catch (e) {
+      if (mounted) {
+        _showNavigationError(context, 'Failed to check assignment status');
+      }
     }
   }
 
@@ -1162,7 +1404,43 @@ class _NotificationDialogState extends State<NotificationDialog> {
       final assignmentData = {'id': assignmentDoc.id, ...assignmentDoc.data()!};
       final courseData = {'id': courseId, ...courseDoc.data()!};
 
-      // Navigate to assignment details
+      // Check if user has submitted and if it's graded
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final submissionSnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('assignments')
+            .doc(notification.sourceId!)
+            .collection('submissions')
+            .where('studentId', isEqualTo: user.uid)
+            .get();
+
+        if (submissionSnapshot.docs.isNotEmpty) {
+          final submission = submissionSnapshot.docs.first.data();
+          final isGraded = submission['grade'] != null;
+
+          if (isGraded) {
+            // Navigate to My Submissions page if graded
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => StudentSubmissionView(
+                  courseId: courseId!,
+                  assignmentId: notification.sourceId!,
+                  assignmentData: assignmentData,
+                  organizationCode: orgCode,
+                ),
+              ),
+            );
+            return;
+          }
+        }
+      }
+
+      // Navigate to assignment details page if not graded or not submitted
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -1179,6 +1457,48 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
+  Future<void> _navigateToLearningMaterial(BuildContext context, NotificationModel notification, String orgCode) async {
+    try {
+      // Find course ID if missing
+      String? courseId = notification.courseId;
+      if (courseId == null) {
+        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'learning');
+        if (courseId == null) {
+          _showNavigationError(context, 'Learning material not found');
+          return;
+        }
+      }
+
+      // Load course data
+      final courseDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .get();
+
+      if (!courseDoc.exists) {
+        _showNavigationError(context, 'Course not found');
+        return;
+      }
+
+      final courseData = {'id': courseId, ...courseDoc.data()!};
+
+      // Navigate to course page (materials tab)
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StudentCoursePage(
+            courseId: courseId!,
+            courseData: courseData,
+          ),
+        ),
+      );
+    } catch (e) {
+      _showNavigationError(context, 'Failed to load learning material');
+    }
+  }
+
   Future<void> _navigateToTutorial(BuildContext context, NotificationModel notification, String orgCode) async {
     try {
       // Find course ID if missing
@@ -1191,7 +1511,7 @@ class _NotificationDialogState extends State<NotificationDialog> {
         }
       }
 
-      // Load tutorial data
+      // Load the material data first to determine if it's a tutorial
       final materialDoc = await FirebaseFirestore.instance
           .collection('organizations')
           .doc(orgCode)
@@ -1208,65 +1528,74 @@ class _NotificationDialogState extends State<NotificationDialog> {
 
       final materialData = {'id': materialDoc.id, ...materialDoc.data()!};
 
-      // Check if user has submitted
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final submissionSnapshot = await FirebaseFirestore.instance
+      // Check if this is actually a tutorial
+      if (materialData['materialType'] == 'tutorial') {
+        // For tutorials, navigate directly to the tutorial submission view
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => StudentTutorialSubmissionView(
+              courseId: courseId!,
+              materialId: notification.sourceId!,
+              materialData: materialData,
+              organizationCode: orgCode,
+            ),
+          ),
+        );
+      } else {
+        // For other materials, navigate to course page
+        final courseDoc = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(orgCode)
             .collection('courses')
             .doc(courseId)
-            .collection('materials')
-            .doc(notification.sourceId!)
-            .collection('submissions')
-            .where('studentId', isEqualTo: user.uid)
             .get();
 
-        if (submissionSnapshot.docs.isNotEmpty) {
-          // Has submission - go to submission view
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => StudentTutorialSubmissionView(
-                courseId: courseId!,
-                materialId: notification.sourceId!,
-                materialData: materialData,
-                organizationCode: orgCode,
-              ),
-            ),
-          );
-        } else {
-          // No submission - go to course page to submit
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => StudentCoursePage(
-                courseId: courseId!,
-                courseData: {'id': courseId, 'organizationCode': orgCode},
-              ),
-            ),
-          );
+        if (!courseDoc.exists) {
+          _showNavigationError(context, 'Course not found');
+          return;
         }
+
+        final courseData = {'id': courseId, ...courseDoc.data()!};
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => StudentCoursePage(
+              courseId: courseId!,
+              courseData: courseData,
+              highlightMaterialId: notification.sourceId,
+            ),
+          ),
+        );
       }
     } catch (e) {
-      _showNavigationError(context, 'Failed to load tutorial');
+      _showNavigationError(context, 'Failed to load tutorial: $e');
     }
   }
 
+  // FIXED _showNavigationError method with mounted check
   void _showNavigationError(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.error_outline, color: Colors.white),
-            SizedBox(width: 8),
-            Expanded(child: Text(message)),
-          ],
+    // Check if the widget is still mounted and context is valid
+    if (!mounted) return;
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.error_outline, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text(message)),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 4),
         ),
-        backgroundColor: Colors.red,
-        duration: Duration(seconds: 4),
-      ),
-    );
+      );
+    } catch (e) {
+      print('❌ Error showing navigation error: $e');
+    }
   }
 
   @override

@@ -706,14 +706,10 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
       elevation: 0,
       title: Row(
         children: [
-          Image.asset(
-            'assets/images/logo.png',
-            height: 32,
-            errorBuilder: (context, error, stackTrace) => Icon(
-              Icons.school,
-              color: Colors.purple[400],
-              size: 32,
-            ),
+          Icon(
+            Icons.school,
+            color: Colors.purple[400],
+            size: 32,
           ),
           const SizedBox(width: 12),
           const Text(

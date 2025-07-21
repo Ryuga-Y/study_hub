@@ -21,11 +21,13 @@ enum CalendarView { month, week, day }
 class StudentCoursePage extends StatefulWidget {
   final String courseId;
   final Map<String, dynamic> courseData;
+  final String? highlightMaterialId;
 
   const StudentCoursePage({
     Key? key,
     required this.courseId,
     required this.courseData,
+    this.highlightMaterialId,
   }) : super(key: key);
 
   @override
@@ -59,6 +61,23 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
   DateTime _focusedDate = DateTime.now();
   CalendarView _currentView = CalendarView.month;
 
+  // Auto-open tutorial modal for highlighted material
+  void _autoOpenTutorialModal() {
+    final material = materials.firstWhere(
+          (m) => m['id'] == widget.highlightMaterialId,
+      orElse: () => <String, dynamic>{},
+    );
+
+    if (material.isNotEmpty && material['materialType'] == 'tutorial') {
+      // Small delay to ensure the UI is ready
+      Future.delayed(Duration(milliseconds: 500), () {
+        if (mounted) {
+          _viewMaterial(material);
+        }
+      });
+    }
+  }
+
   // FIXED: Update the initState method in student_course.dart
   @override
   void initState() {
@@ -66,10 +85,16 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     _tabController = TabController(length: 3, vsync: this);
 
     // Initialize notification service immediately
-    // Initialize notification service immediately
     _notificationService.initialize();
 
-    _loadData();
+    _loadData().then((_) {
+      // Auto-open tutorial modal if highlightMaterialId is provided
+      if (widget.highlightMaterialId != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _autoOpenTutorialModal();
+        });
+      }
+    });
   }
 
 
@@ -895,7 +920,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     // Check if already submitted
     final existingSubmission = tutorialSubmissions[material['id']];
     if (existingSubmission != null) {
-      // Tutorial already submitted - navigate to view/update it
+      // Tutorial already submitted - show update dialog and continue with file picker
       final shouldUpdate = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -1783,14 +1808,10 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       elevation: 0,
       title: Row(
         children: [
-          Image.asset(
-            'assets/images/logo.png',
-            height: 32,
-            errorBuilder: (context, error, stackTrace) => Icon(
-              Icons.school,
-              color: Colors.purple[400],
-              size: 32,
-            ),
+          Icon(
+            Icons.school,
+            color: Colors.purple[400],
+            size: 32,
           ),
           SizedBox(width: 12),
           Text(
