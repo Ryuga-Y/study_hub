@@ -280,7 +280,7 @@ class GoalProgressService {
     }
   }
 
-  // Use a water bucket with validation and consumption tracking
+  // UPDATED: Enhanced useWaterBucket method with tree level up notifications
   Future<bool> useWaterBucket() async {
     final userId = _auth.currentUser?.uid;
     if (userId == null) throw Exception('User not authenticated');
@@ -301,6 +301,9 @@ class GoalProgressService {
     try {
       _userLocks[userId] = true;
       bool success = false;
+      bool levelUpOccurred = false;
+      String? newTreeLevel;
+      int? newCompletedTrees;
 
       await _firestore.runTransaction((transaction) async {
         final progressDocRef = _firestore.collection('goalProgress').doc(userId);
@@ -341,25 +344,34 @@ class GoalProgressService {
 
         Map<String, dynamic> updatedProgress = {
           'waterBuckets': waterBuckets,
-          'wateringCount': wateringCount,  // MAKE SURE THIS IS INCLUDED
+          'wateringCount': wateringCount,
           'treeGrowth': treeGrowth,
           'totalProgress': totalProgress,
           'lastUpdated': FieldValue.serverTimestamp(),
           'lastWatered': FieldValue.serverTimestamp(),
         };
 
-        // Check if tree is complete (100% growth)
+        // 🆕 NEW: Check if tree is complete (100% growth) and handle level up
         if (treeGrowth >= 1.0) {
           // Tree completed, level up
           String currentTreeLevel = currentProgress['currentTreeLevel'] ?? 'bronze';
           int completedTrees = currentProgress['completedTrees'] ?? 0;
           completedTrees++;
 
+          String previousLevel = currentTreeLevel;
+
           // Determine next tree level
           if (currentTreeLevel == 'bronze' && completedTrees >= 1) {
             currentTreeLevel = 'silver';
           } else if (currentTreeLevel == 'silver' && completedTrees >= 2) {
             currentTreeLevel = 'gold';
+          }
+
+          // Check if level actually changed
+          if (currentTreeLevel != previousLevel) {
+            levelUpOccurred = true;
+            newTreeLevel = currentTreeLevel;
+            newCompletedTrees = completedTrees;
           }
 
           // Reset for next tree
@@ -401,12 +413,159 @@ class GoalProgressService {
         print('💧 Water bucket used successfully. Remaining: $waterBuckets, Growth: ${(treeGrowth * 100).toStringAsFixed(0)}%, WateringCount: $wateringCount');
       });
 
+      // 🆕 NEW: Create level up notification outside of transaction
+      if (success && levelUpOccurred && newTreeLevel != null && newCompletedTrees != null) {
+        await _createTreeLevelUpNotification(newTreeLevel!, newCompletedTrees!);
+      }
+
       return success;
     } catch (e) {
       print('❌ Error using water bucket: $e');
       return false;
     } finally {
       _userLocks.remove(userId);
+    }
+  }
+
+  // 🆕 NEW: Create tree level up notification
+  Future<void> _createTreeLevelUpNotification(String newTreeLevel, int completedTrees) async {
+    try {
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) return;
+
+      // Get user's organization code
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) return;
+
+      final organizationCode = userDoc.data()?['organizationCode'];
+      if (organizationCode == null) return;
+
+      String notificationTitle;
+      String notificationBody;
+      String emoji;
+
+      switch (newTreeLevel) {
+        case 'silver':
+          emoji = '🥈';
+          notificationTitle = '🥈 Congratulations! Silver Tree Unlocked!';
+          notificationBody = 'Amazing work! You\'ve completed your first tree and unlocked the Silver Tree level. Your dedication is paying off!';
+          break;
+        case 'gold':
+          emoji = '🥇';
+          notificationTitle = '🥇 Incredible! Gold Tree Unlocked!';
+          notificationBody = 'Outstanding achievement! You\'ve reached the prestigious Gold Tree level. You\'re a true study champion!';
+          break;
+        default:
+          emoji = '🌳';
+          notificationTitle = '🌳 Tree Completed!';
+          notificationBody = 'Congratulations! You\'ve completed another tree. Keep growing!';
+      }
+
+      // Create the level up notification
+      await _firestore
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('students')
+          .doc(userId)
+          .collection('notifications')
+          .add({
+        'title': notificationTitle,
+        'body': notificationBody,
+        'type': 'NotificationType.achievement',
+        'sourceId': 'tree_level_${newTreeLevel}',
+        'sourceType': 'tree_levelup',
+        'achievementType': 'tree_level',
+        'treeLevel': newTreeLevel,
+        'completedTrees': completedTrees,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'priority': 'high', // High priority for achievements
+      });
+
+      print('🎉 Created tree level up notification: $newTreeLevel level unlocked!');
+
+      // 🆕 NEW: Also create a special achievement notification
+      await _createAchievementBadgeNotification(newTreeLevel, completedTrees);
+
+    } catch (e) {
+      print('❌ Error creating tree level up notification: $e');
+    }
+  }
+
+  // 🆕 NEW: Create achievement badge notification
+  Future<void> _createAchievementBadgeNotification(String treeLevel, int completedTrees) async {
+    try {
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) return;
+
+      // Get user's organization code
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) return;
+
+      final organizationCode = userDoc.data()?['organizationCode'];
+      if (organizationCode == null) return;
+
+      String badgeName;
+      String badgeDescription;
+      String badgeIcon;
+
+      switch (treeLevel) {
+        case 'silver':
+          badgeName = 'Silver Gardener';
+          badgeDescription = 'Completed 1 tree and unlocked Silver level';
+          badgeIcon = '🥈🌱';
+          break;
+        case 'gold':
+          badgeName = 'Gold Gardener';
+          badgeDescription = 'Completed 2 trees and unlocked Gold level';
+          badgeIcon = '🥇🌳';
+          break;
+        default:
+          badgeName = 'Tree Master';
+          badgeDescription = 'Completed multiple trees';
+          badgeIcon = '🌳✨';
+      }
+
+      // Create achievement badge record
+      await _firestore
+          .collection('goalProgress')
+          .doc(userId)
+          .collection('achievements')
+          .add({
+        'badgeName': badgeName,
+        'badgeDescription': badgeDescription,
+        'badgeIcon': badgeIcon,
+        'achievementType': 'tree_level',
+        'treeLevel': treeLevel,
+        'completedTrees': completedTrees,
+        'earnedAt': FieldValue.serverTimestamp(),
+        'isSpecial': true,
+      });
+
+      // Create notification about the new badge
+      await _firestore
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('students')
+          .doc(userId)
+          .collection('notifications')
+          .add({
+        'title': '🏆 New Badge Earned!',
+        'body': 'You\'ve earned the "$badgeName" badge! $badgeDescription',
+        'type': 'NotificationType.achievement',
+        'sourceId': 'badge_${treeLevel}',
+        'sourceType': 'badge_earned',
+        'badgeName': badgeName,
+        'badgeIcon': badgeIcon,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'priority': 'high',
+      });
+
+      print('🏆 Created achievement badge: $badgeName');
+
+    } catch (e) {
+      print('❌ Error creating achievement badge notification: $e');
     }
   }
 

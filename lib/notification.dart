@@ -3,94 +3,275 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:badges/badges.dart' as badges;
 import 'dart:async';
+import '../Student/student_assignment_details.dart';
+import '../Student/student_tutorial.dart';
+import '../Student/student_course.dart';
 
 class NotificationService {
-  static final NotificationService _instance = NotificationService._internal();
-  factory NotificationService() => _instance;
-  NotificationService._internal();
-
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Stream controller for notification count
+  // Stream controllers
   final StreamController<int> _notificationCountController = StreamController<int>.broadcast();
   Stream<int> get notificationCountStream => _notificationCountController.stream;
 
-  // Stream controller for notifications list
   final StreamController<List<NotificationModel>> _notificationsController =
   StreamController<List<NotificationModel>>.broadcast();
   Stream<List<NotificationModel>> get notificationsStream => _notificationsController.stream;
 
+  // Real-time listeners
+  StreamSubscription<QuerySnapshot>? _notificationSubscription;
+  StreamSubscription<QuerySnapshot>? _calendarEventsSubscription;
   Timer? _checkTimer;
+
   String? _userOrgCode;
   String? _userRole;
+  bool _isInitialized = false;
 
-  // Real-time listeners
-  StreamSubscription<QuerySnapshot>? _calendarEventsSubscription;
-  StreamSubscription<QuerySnapshot>? _notificationSubscription;
+// Getter for organization code
+  String? get userOrgCode => _userOrgCode;
 
-  // Get notification badge icon widget
+  // FIXED: Get notification badge icon widget
   Widget getNotificationBadgeIcon({VoidCallback? onTap}) {
     return StreamBuilder<int>(
       stream: notificationCountStream,
       initialData: 0,
       builder: (context, snapshot) {
-        return badges.Badge(
-          badgeContent: Text(
-            snapshot.data.toString(),
-            style: TextStyle(color: Colors.white),
-          ),
-          showBadge: snapshot.data! > 0,
-          child: IconButton(
-            icon: Icon(Icons.notifications),
-            onPressed: onTap ??
-                    () => showDialog(
+        final count = snapshot.data ?? 0;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              icon: Icon(Icons.notifications_outlined, color: Colors.black87),
+              onPressed: onTap ?? () {
+                showDialog(
                   context: context,
                   builder: (context) => NotificationDialog(),
+                );
+              },
+            ),
+            if (count > 0)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  padding: EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  constraints: BoxConstraints(
+                    minWidth: 18,
+                    minHeight: 18,
+                  ),
+                  child: Center(
+                    child: Text(
+                      count > 99 ? '99+' : count.toString(),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 ),
-          ),
+              ),
+          ],
         );
       },
     );
   }
 
-  // Initialize notification service
+  // FIXED: Initialize method with better error handling
   Future<void> initialize() async {
+    if (_isInitialized) {
+      print('✅ NotificationService already initialized');
+      return;
+    }
+
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      print('❌ No authenticated user found');
+      _setEmptyState();
+      return;
+    }
 
-    // Get user's organization code and role
-    final userDoc = await _firestore.collection('users').doc(user.uid).get();
-    if (!userDoc.exists) return;
+    try {
+      print('🔍 Initializing NotificationService for user: ${user.uid}');
 
-    final userData = userDoc.data()!;
-    _userOrgCode = userData['organizationCode'];
-    _userRole = userData['role'];
+      // Cancel existing subscriptions
+      await _dispose();
 
-    if (_userOrgCode == null) return;
+      // Get user data
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      if (!userDoc.exists) {
+        print('❌ User document not found');
+        _setEmptyState();
+        return;
+      }
 
-    // Only start deadline checking for students
-    if (_userRole == 'student') {
-      // Start checking for upcoming deadlines
-      _startDeadlineChecker();
+      final userData = userDoc.data()!;
+      _userOrgCode = userData['organizationCode'];
+      _userRole = userData['role'];
 
-      // Start real-time calendar event listener
-      _startCalendarEventListener();
+      print('✅ User data loaded:');
+      print('   - Organization: $_userOrgCode');
+      print('   - Role: $_userRole');
 
-      // Load existing notifications
-      await _loadNotifications();
+      if (_userOrgCode == null) {
+        print('❌ No organization code found');
+        _setEmptyState();
+        return;
+      }
 
-      // Start real-time notification listener
-      _startNotificationListener();
+      // FIXED: Allow any authenticated user with valid role
+      if (_userRole != null) {
+        print('✅ Starting notification services for user with role: $_userRole');
+
+        // Start real-time notification listener first
+        _startNotificationListener();
+
+        // Load initial notifications
+        await _loadNotifications();
+
+        // Start other services
+        _startDeadlineChecker();
+        _startCalendarEventListener();
+
+        _isInitialized = true;
+        print('✅ NotificationService fully initialized');
+      } else {
+        print('❌ User has no valid role: $_userRole');
+        _setEmptyState();
+      }
+    } catch (e) {
+      print('❌ Error initializing notification service: $e');
+      _setEmptyState();
     }
   }
 
-  // Start real-time calendar event listener (Students only)
+  // Helper to set empty state
+  void _setEmptyState() {
+    _notificationsController.add([]);
+    _notificationCountController.add(0);
+  }
+
+  // FIXED: Start real-time notification listener
+  void _startNotificationListener() {
+    final user = _auth.currentUser;
+    if (user == null || _userOrgCode == null || _userRole == null) {
+      print('❌ Cannot start notification listener: missing user, org code, or role');
+      _setEmptyState();
+      return;
+    }
+
+    final notificationPath = 'organizations/$_userOrgCode/students/${user.uid}/notifications';
+    print('📍 Setting up notification listener at: $notificationPath');
+
+    _notificationSubscription = _firestore
+        .collection('organizations')
+        .doc(_userOrgCode!)
+        .collection('students')
+        .doc(user.uid)
+        .collection('notifications')
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .snapshots()
+        .listen((snapshot) {
+      print('📬 Real-time notification received: ${snapshot.docs.length} notifications');
+
+      List<NotificationModel> notifications = [];
+      int unreadCount = 0;
+
+      for (var doc in snapshot.docs) {
+        try {
+          final data = doc.data();
+
+          // Skip test notifications
+          if (data['type'] == 'test' || data['title']?.toString().toLowerCase().contains('test') == true) {
+            continue;
+          }
+
+          final notification = NotificationModel.fromMap(doc.id, data);
+          notifications.add(notification);
+
+          if (!notification.isRead) {
+            unreadCount++;
+          }
+        } catch (e) {
+          print('❌ Error processing notification ${doc.id}: $e');
+        }
+      }
+
+        // Update streams
+        _notificationsController.add(notifications);
+        _notificationCountController.add(unreadCount);
+        print('✅ Updated: ${notifications.length} notifications, $unreadCount unread');
+      },
+      onError: (error) {
+        print('❌ Error in notification listener: $error');
+        _setEmptyState();
+      },
+    );
+  }
+
+  // Load notifications manually (fallback)
+  Future<void> _loadNotifications() async {
+    final user = _auth.currentUser;
+    if (user == null || _userOrgCode == null || _userRole == null) return;
+
+    try {
+      print('📱 Loading notifications manually for user: ${user.uid}');
+
+      final snapshot = await _firestore
+          .collection('organizations')
+          .doc(_userOrgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('notifications')
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get();
+
+      print('📋 Found ${snapshot.docs.length} notifications');
+
+      List<NotificationModel> notifications = [];
+      int unreadCount = 0;
+
+      for (var doc in snapshot.docs) {
+        try {
+          final data = doc.data();
+          final notification = NotificationModel.fromMap(doc.id, data);
+          notifications.add(notification);
+
+          if (!notification.isRead) {
+            unreadCount++;
+          }
+        } catch (e) {
+          print('❌ Error processing notification ${doc.id}: $e');
+        }
+      }
+
+      // Update streams only if no real-time listener
+      if (_notificationSubscription == null) {
+        _notificationsController.add(notifications);
+        _notificationCountController.add(unreadCount);
+      }
+
+      print('📊 Loaded $unreadCount unread notifications');
+    } catch (e) {
+      print('❌ Error loading notifications: $e');
+    }
+  }
+
+  // FIXED: Start calendar event listener for deadline notifications
   void _startCalendarEventListener() {
     final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null || _userRole != 'student') return;
+    if (user == null || _userOrgCode == null || _userRole == null) return;
 
-    // Listen to calendar events for real-time updates
+    print('📅 Starting calendar event listener');
+
     _calendarEventsSubscription = _firestore
         .collection('organizations')
         .doc(_userOrgCode)
@@ -100,350 +281,343 @@ class NotificationService {
         .where('startTime', isGreaterThan: Timestamp.fromDate(DateTime.now()))
         .snapshots()
         .listen((snapshot) {
-      // Check for new events that need notifications
+      print('📅 Calendar events updated: ${snapshot.docs.length} upcoming events');
+
+      // Check for new events and existing events that need reminder notifications
       for (var change in snapshot.docChanges) {
-        if (change.type == DocumentChangeType.added) {
+        if (change.type == DocumentChangeType.added || change.type == DocumentChangeType.modified) {
           final eventData = change.doc.data() as Map<String, dynamic>;
-          _checkAndCreateNotificationForEvent(change.doc.id, eventData);
+          final sourceType = eventData['sourceType'] ?? '';
+
+          // Only process assignments and tutorials for reminders
+          if (sourceType == 'assignment' || sourceType == 'tutorial') {
+            _checkAndCreateNotificationForEvent(change.doc.id, eventData);
+          }
         }
       }
     });
   }
 
-  // Start real-time notification listener
-  void _startNotificationListener() {
-    final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null) return;
-
-    // Different listener path based on user role
-    Query notificationQuery;
-
-    if (_userRole == 'student') {
-      notificationQuery = _firestore
-          .collection('organizations')
-          .doc(_userOrgCode)
-          .collection('students')
-          .doc(user.uid)
-          .collection('notifications');
-    } else {
-      // For lecturers, they would have their own notification system
-      return;
-    }
-
-    _notificationSubscription = notificationQuery
-        .orderBy('createdAt', descending: true)
-        .limit(50)
-        .snapshots()
-        .listen((snapshot) {
-      List<NotificationModel> notifications = [];
-      int unreadCount = 0;
-
-      for (var doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final notification = NotificationModel.fromMap(doc.id, data);
-        notifications.add(notification);
-
-        if (!notification.isRead) {
-          unreadCount++;
-        }
-      }
-
-      // Update streams
-      _notificationsController.add(notifications);
-      _notificationCountController.add(unreadCount);
-    });
-  }
-
-  // Check and create notification for a calendar event
+  // Check and create notification for calendar events
   Future<void> _checkAndCreateNotificationForEvent(String eventId, Map<String, dynamic> eventData) async {
     try {
       final eventTime = (eventData['startTime'] as Timestamp).toDate();
       final now = DateTime.now();
-      final hoursUntilDue = eventTime.difference(now).inHours;
+      final minutesUntilDue = eventTime.difference(now).inMinutes;
+      final sourceType = eventData['sourceType'] ?? '';
 
-      // Create notification if event is within 24 hours
-      if (hoursUntilDue <= 24 && hoursUntilDue > 0) {
-        // Check if notification already exists
-        final existingNotifications = await _firestore
-            .collection('organizations')
-            .doc(_userOrgCode)
-            .collection('students')
-            .doc(_auth.currentUser!.uid)
-            .collection('notifications')
-            .where('eventId', isEqualTo: eventId)
-            .get();
+      // Only process assignments and tutorials
+      if (sourceType != 'assignment' && sourceType != 'tutorial') return;
 
-        if (existingNotifications.docs.isEmpty) {
-          String title = '';
-          String body = '';
-          NotificationType type = NotificationType.reminder;
-
-          final sourceType = eventData['sourceType'] ?? '';
-          final eventTitle = eventData['title'] ?? 'Event';
-
-          switch (sourceType) {
-            case 'assignment':
-              title = '📝 Assignment Due Soon';
-              body = '$eventTitle is due in $hoursUntilDue hours!';
-              type = NotificationType.assignment;
-              break;
-            case 'tutorial':
-              title = '📚 Tutorial Due Soon';
-              body = '$eventTitle is due in $hoursUntilDue hours!';
-              type = NotificationType.tutorial;
-              break;
-            case 'goal':
-              title = '🎯 Goal Target Date Approaching';
-              body = '$eventTitle target date is in $hoursUntilDue hours!';
-              type = NotificationType.goal;
-              break;
-            default:
-              title = '📅 Event Reminder';
-              body = '$eventTitle is in $hoursUntilDue hours!';
-          }
-
-          await _createStudentNotification(
-            studentId: _auth.currentUser!.uid,
-            title: title,
-            body: body,
-            type: type,
-            eventId: eventId,
-            sourceId: eventData['sourceId'],
-            sourceType: sourceType,
-            dueDate: eventTime,
-          );
-        }
-      }
-    } catch (e) {
-      print('Error checking event for notification: $e');
-    }
-  }
-
-  // Create immediate notification and calendar event for new assignments/tutorials/goals
-  Future<void> createNewItemNotification({
-    required String itemType,
-    required String itemTitle,
-    DateTime? dueDate,
-    required String sourceId,
-    String? courseId,
-    String? studentId, // If null, send to all students in course
-  }) async {
-    final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null) return;
-
-    try {
-      String title = '';
-      String body = '';
-      NotificationType type = NotificationType.announcement;
-
-      if (itemType == 'assignment') {
-        title = '📝 New Assignment Posted';
-        body = '$itemTitle has been posted.';
-        if (dueDate != null) {
-          body += ' Due: ${_formatDate(dueDate)}';
-        }
-        type = NotificationType.assignment;
-      } else if (itemType == 'tutorial') {
-        title = '📚 New Tutorial Posted';
-        body = '$itemTitle has been posted.';
-        if (dueDate != null) {
-          body += ' Due: ${_formatDate(dueDate)}';
-        }
-        type = NotificationType.tutorial;
-      } else if (itemType == 'goal') {
-        title = '🎯 New Goal Created';
-        body = '$itemTitle has been set as your new goal.';
-        if (dueDate != null) {
-          body += ' Target: ${_formatDate(dueDate)}';
-        }
-        type = NotificationType.goal;
-      }
-
-      if (studentId != null) {
-        // Send to specific student
-        await _createStudentNotification(
-          studentId: studentId,
-          title: title,
-          body: body,
-          type: type,
-          sourceId: sourceId,
-          sourceType: itemType,
-          dueDate: dueDate,
-          courseId: courseId,
-        );
-
-        // Create calendar event for specific student
-        if (dueDate != null && (itemType == 'assignment' || itemType == 'tutorial')) {
-          await _createCalendarEvent(
-            studentId: studentId,
-            title: itemTitle,
-            dueDate: dueDate,
-            sourceId: sourceId,
-            sourceType: itemType,
-            courseId: courseId,
-          );
-        }
-      } else if (courseId != null) {
-        // Send to all students enrolled in the course
-        await _sendNotificationToAllStudentsInCourse(
-          courseId: courseId,
-          title: title,
-          body: body,
-          type: type,
-          sourceId: sourceId,
-          sourceType: itemType,
-          dueDate: dueDate,
-        );
-
-        // Create calendar events for all students in the course
-        if (dueDate != null && (itemType == 'assignment' || itemType == 'tutorial')) {
-          final enrollmentsSnapshot = await _firestore
-              .collection('organizations')
-              .doc(_userOrgCode)
-              .collection('courses')
-              .doc(courseId)
-              .collection('enrollments')
-              .get();
-
-          for (var enrollmentDoc in enrollmentsSnapshot.docs) {
-            final enrollmentData = enrollmentDoc.data();
-            final studentId = enrollmentData['studentId'];
-
-            if (studentId != null) {
-              await _createCalendarEvent(
-                studentId: studentId,
-                title: itemTitle,
-                dueDate: dueDate,
-                sourceId: sourceId,
-                sourceType: itemType,
-                courseId: courseId,
-              );
-            }
-          }
-        }
-      } else {
-        // For goals, send to current user
-        await _createStudentNotification(
-          studentId: user.uid,
-          title: title,
-          body: body,
-          type: type,
-          sourceId: sourceId,
-          sourceType: itemType,
-          dueDate: dueDate,
-        );
-
-        // Calendar event for goals is handled in set_goal.dart
-      }
-
-      print('✅ Created notification for new $itemType: $itemTitle');
-    } catch (e) {
-      print('Error creating new item notification: $e');
-    }
-  }
-
-  // Create calendar event for a student
-  Future<void> _createCalendarEvent({
-    required String studentId,
-    required String title,
-    required DateTime dueDate,
-    required String sourceId,
-    required String sourceType,
-    String? courseId,
-  }) async {
-    try {
-      await _firestore
+      // Check existing reminder notifications for this event
+      final existingNotifications = await _firestore
           .collection('organizations')
           .doc(_userOrgCode)
+          .collection('students')
+          .doc(_auth.currentUser!.uid)
+          .collection('notifications')
+          .where('eventId', isEqualTo: eventId)
+          .where('type', whereIn: ['NotificationType.assignment', 'NotificationType.tutorial'])
+          .get();
+
+      // Track what reminder types have been sent
+      Set<String> sentReminders = {};
+      for (var doc in existingNotifications.docs) {
+        final data = doc.data();
+        if (data['reminderType'] != null) {
+          sentReminders.add(data['reminderType']);
+        }
+      }
+
+      final eventTitle = eventData['title'] ?? 'Event';
+
+      // Check for 1-day reminder (1440 minutes = 24 hours)
+      if (minutesUntilDue <= 1440 && minutesUntilDue > 600 && !sentReminders.contains('1day')) {
+        await _createReminderNotification(
+          eventId: eventId,
+          eventData: eventData,
+          reminderType: '1day',
+          title: sourceType == 'assignment'
+              ? '📝 Assignment Due Tomorrow'
+              : '📚 Tutorial Due Tomorrow',
+          body: '$eventTitle is due tomorrow!',
+          minutesUntil: minutesUntilDue,
+        );
+      }
+
+      // Check for 10-minute reminder
+      if (minutesUntilDue <= 10 && minutesUntilDue > 0 && !sentReminders.contains('10min')) {
+        await _createReminderNotification(
+          eventId: eventId,
+          eventData: eventData,
+          reminderType: '10min',
+          title: sourceType == 'assignment'
+              ? '📝 Assignment Due in 10 Minutes!'
+              : '📚 Tutorial Due in 10 Minutes!',
+          body: '$eventTitle is due in ${minutesUntilDue} minutes!',
+          minutesUntil: minutesUntilDue,
+        );
+      }
+    } catch (e) {
+      print('❌ Error checking event for notification: $e');
+    }
+  }
+
+  // Start periodic deadline checker
+  void _startDeadlineChecker() {
+    _checkTimer?.cancel();
+
+    // Check every hour
+    _checkTimer = Timer.periodic(Duration(hours: 1), (timer) {
+      _checkUpcomingDeadlines();
+    });
+
+    // Also check immediately
+    _checkUpcomingDeadlines();
+  }
+
+  // Check for upcoming deadlines (24 hours before)
+  // Check for upcoming deadlines (24 hours before)
+  Future<void> _checkUpcomingDeadlines() async {
+    final user = _auth.currentUser;
+    if (user == null || _userOrgCode == null || _userRole == null) return;
+
+    try {
+      final now = DateTime.now();
+      final twoDaysFromNow = now.add(Duration(days: 2)); // Extended range
+
+      // Get all upcoming calendar events
+      final eventsSnapshot = await _firestore
+          .collection('organizations')
+          .doc(_userOrgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('calendar_events')
+          .where('startTime', isGreaterThan: Timestamp.fromDate(now))
+          .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(twoDaysFromNow))
+          .get();
+
+      // Get existing reminder notifications to track what's already been sent
+      final existingNotifications = await _firestore
+          .collection('organizations')
+          .doc(_userOrgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('notifications')
+          .where('type', whereIn: ['NotificationType.assignment', 'NotificationType.tutorial'])
+          .get();
+
+      // Track sent reminders: eventId -> Set of reminder types sent
+      Map<String, Set<String>> sentReminders = {};
+      for (var doc in existingNotifications.docs) {
+        final data = doc.data();
+        if (data['eventId'] != null && data['reminderType'] != null) {
+          final eventId = data['eventId'] as String;
+          final reminderType = data['reminderType'] as String;
+          sentReminders.putIfAbsent(eventId, () => {}).add(reminderType);
+        }
+      }
+
+      // Process each event for reminder notifications
+      for (var eventDoc in eventsSnapshot.docs) {
+        final eventData = eventDoc.data();
+        final eventId = eventDoc.id;
+        final eventTime = (eventData['startTime'] as Timestamp).toDate();
+        final minutesUntilDue = eventTime.difference(now).inMinutes;
+        final sourceType = eventData['sourceType'] ?? '';
+
+        // Only process assignments and tutorials
+        if (sourceType != 'assignment' && sourceType != 'tutorial') continue;
+
+        final eventTitle = eventData['title'] ?? 'Event';
+        final alreadySent = sentReminders[eventId] ?? <String>{};
+
+        // Check for 1-day reminder (1440 minutes = 24 hours)
+        if (minutesUntilDue <= 1440 && minutesUntilDue > 600 && !alreadySent.contains('1day')) {
+          await _createReminderNotification(
+            eventId: eventId,
+            eventData: eventData,
+            reminderType: '1day',
+            title: sourceType == 'assignment'
+                ? '📝 Assignment Due Tomorrow'
+                : '📚 Tutorial Due Tomorrow',
+            body: '$eventTitle is due tomorrow!',
+            minutesUntil: minutesUntilDue,
+          );
+        }
+
+        // Check for 10-minute reminder
+        if (minutesUntilDue <= 10 && minutesUntilDue > 0 && !alreadySent.contains('10min')) {
+          await _createReminderNotification(
+            eventId: eventId,
+            eventData: eventData,
+            reminderType: '10min',
+            title: sourceType == 'assignment'
+                ? '📝 Assignment Due in 10 Minutes!'
+                : '📚 Tutorial Due in 10 Minutes!',
+            body: '$eventTitle is due in ${minutesUntilDue} minutes!',
+            minutesUntil: minutesUntilDue,
+          );
+        }
+      }
+    } catch (e) {
+      print('❌ Error checking deadlines: $e');
+    }
+  }
+
+  // Create notification for new items with integrated calendar creation
+  // AFTER: Replace the _createNewItemStudentNotification method
+  Future<void> _createNewItemStudentNotification({
+    required String organizationCode,
+    required String studentId,
+    required String itemType,
+    required String itemTitle,
+    required String sourceId,
+    String? courseId,
+    String? courseName,
+  }) async {
+    // Determine notification title and body based on item type
+    String notificationTitle;
+    String notificationBody;
+
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        notificationTitle = '📝 New Assignment Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle assignment has been posted';
+        break;
+      case 'tutorial':
+        notificationTitle = '📚 New Tutorial Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle tutorial has been posted';
+        break;
+      case 'learning':
+        notificationTitle = '📖 New Learning Material Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle learning material has been posted';
+        break;
+      default:
+        notificationTitle = '📢 New Item Posted';
+        notificationBody = '$itemTitle has been posted';
+    }
+
+    print('📬 Creating enhanced notification for student: $studentId');
+    print('📍 Path: organizations/$organizationCode/students/$studentId/notifications');
+
+    // CREATE ENHANCED NOTIFICATION WITH COMPLETE NAVIGATION DATA
+    await _firestore
+        .collection('organizations')
+        .doc(organizationCode)
+        .collection('students')
+        .doc(studentId)
+        .collection('notifications')
+        .add({
+      'title': notificationTitle,
+      'body': notificationBody,
+      'type': 'NotificationType.$itemType',
+      'sourceId': sourceId,
+      'sourceType': itemType,
+      'courseId': courseId,                  // ✅ CRITICAL: Always include courseId
+      'courseName': courseName,              // ✅ ENHANCED: Add course name
+      'organizationCode': organizationCode,  // ✅ CRITICAL: Always include org code
+      'itemTitle': itemTitle,                // ✅ ENHANCED: Add item title for reference
+      'createdAt': FieldValue.serverTimestamp(),
+      'isRead': false,
+      // ✅ ENHANCED: Add navigation hints
+      'navigationData': {
+        'sourceId': sourceId,
+        'courseId': courseId,
+        'orgCode': organizationCode,
+        'type': itemType,
+        'title': itemTitle,
+      },
+    });
+
+    print('✅ Created enhanced notification for student: $studentId');
+  }
+
+  // Method to create calendar events for students
+  Future<void> _createCalendarEvent({
+    required String organizationCode,
+    required String studentId,
+    required String itemTitle,
+    required DateTime dueDate,
+    required String itemType,
+    required String sourceId,
+    String? courseId,
+  }) async {
+    try {
+      print('📅 Creating calendar event for student: $studentId');
+      print('📍 Path: organizations/$organizationCode/students/$studentId/calendar_events');
+
+      await _firestore
+          .collection('organizations')
+          .doc(organizationCode)
           .collection('students')
           .doc(studentId)
           .collection('calendar_events')
           .add({
-        'title': sourceType == 'assignment' ? '📝 Assignment: $title Due' : '📚 Tutorial: $title Due',
-        'description': '$title deadline',
+        'title': itemTitle, // Just use the title directly
+        'description': _getCalendarEventDescription(itemType),
         'startTime': Timestamp.fromDate(dueDate),
         'endTime': Timestamp.fromDate(dueDate),
-        'color': sourceType == 'assignment' ? Colors.orange.value : Colors.blue.value,
-        'calendar': sourceType,
-        'eventType': EventType.normal.index,
-        'recurrenceType': RecurrenceType.none.index,
+        'color': _getCalendarEventColor(itemType),
+        'calendar': _getCalendarCategory(itemType),
+        'eventType': 0, // EventType.normal.index
+        'recurrenceType': 0, // RecurrenceType.none.index
         'reminderMinutes': 1440, // 24 hours before
         'location': '',
         'isRecurring': false,
         'originalEventId': '',
         'sourceId': sourceId,
-        'sourceType': sourceType,
+        'sourceType': itemType,
         'courseId': courseId,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      print('✅ Created calendar event for $sourceType: $title for student $studentId');
+      print('✅ Created calendar event for student: $studentId');
     } catch (e) {
-      print('Error creating calendar event: $e');
+      print('❌ Error creating calendar event: $e');
     }
   }
 
-  // Send notification to all students in a course
-  Future<void> _sendNotificationToAllStudentsInCourse({
-    required String courseId,
-    required String title,
-    required String body,
-    required NotificationType type,
-    String? sourceId,
-    String? sourceType,
-    DateTime? dueDate,
-  }) async {
-    final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null) return;
-
-    try {
-      // Get all enrollments for the course
-      final enrollmentsSnapshot = await _firestore
-          .collection('organizations')
-          .doc(_userOrgCode)
-          .collection('courses')
-          .doc(courseId)
-          .collection('enrollments')
-          .get();
-
-      // Create notifications for each enrolled student
-      final batch = _firestore.batch();
-
-      for (var enrollmentDoc in enrollmentsSnapshot.docs) {
-        final enrollmentData = enrollmentDoc.data();
-        final studentId = enrollmentData['studentId'];
-
-        if (studentId != null) {
-          final notificationRef = _firestore
-              .collection('organizations')
-              .doc(_userOrgCode)
-              .collection('students')
-              .doc(studentId)
-              .collection('notifications')
-              .doc();
-
-          batch.set(notificationRef, {
-            'title': title,
-            'body': body,
-            'type': type.toString(),
-            'sourceId': sourceId,
-            'sourceType': sourceType,
-            'courseId': courseId,
-            'dueDate': dueDate != null ? Timestamp.fromDate(dueDate) : null,
-            'createdAt': FieldValue.serverTimestamp(),
-            'isRead': false,
-          });
-        }
-      }
-
-      await batch.commit();
-      print('✅ Sent notifications to all students in course $courseId');
-    } catch (e) {
-      print('Error sending notifications to course students: $e');
+  String _getCalendarEventDescription(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return 'Assignment deadline';
+      case 'tutorial':
+        return 'Tutorial deadline';
+      default:
+        return 'Item deadline';
     }
   }
 
-  // Create notification for a specific student
+  int _getCalendarEventColor(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return Colors.red.value; // RED for assignments
+      case 'tutorial':
+        return Colors.red.value; // RED for tutorials
+      default:
+        return Colors.purple.value;
+    }
+  }
+
+  String _getCalendarCategory(String itemType) {
+    switch (itemType.toLowerCase()) {
+      case 'assignment':
+        return 'assignments';
+      case 'tutorial':
+        return 'tutorials';
+      default:
+        return 'general';
+    }
+  }
+
+  // FIXED: Complete notification data with organizationCode
   Future<void> _createStudentNotification({
     required String studentId,
     required String title,
@@ -455,8 +629,7 @@ class NotificationService {
     DateTime? dueDate,
     String? courseId,
   }) async {
-    final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null) return;
+    if (_userOrgCode == null) return;
 
     try {
       Map<String, dynamic> notificationData = {
@@ -465,6 +638,7 @@ class NotificationService {
         'type': type.toString(),
         'createdAt': FieldValue.serverTimestamp(),
         'isRead': false,
+        'organizationCode': _userOrgCode,  // ✅ ADDED: Critical for navigation
       };
 
       // Add optional fields
@@ -484,168 +658,56 @@ class NotificationService {
 
       print('✅ Created notification for student $studentId: $title');
     } catch (e) {
-      print('Error creating student notification: $e');
+      print('❌ Error creating student notification: $e');
     }
   }
 
-  // Start periodic deadline checker
-  void _startDeadlineChecker() {
-    // Cancel existing timer
-    _checkTimer?.cancel();
-
-    // Check every hour
-    _checkTimer = Timer.periodic(Duration(hours: 1), (timer) {
-      _checkUpcomingDeadlines();
-    });
-
-    // Also check immediately
-    _checkUpcomingDeadlines();
-  }
-
-  // Check for upcoming deadlines (24 hours before)
-  Future<void> _checkUpcomingDeadlines() async {
+  Future<void> _createReminderNotification({
+    required String eventId,
+    required Map<String, dynamic> eventData,
+    required String reminderType,
+    required String title,
+    required String body,
+    required int minutesUntil,
+  }) async {
     final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null || _userRole != 'student') return;
+    if (user == null || _userOrgCode == null) return;
 
     try {
-      final now = DateTime.now();
-      final tomorrow = now.add(Duration(days: 1));
-
-      // Get all calendar events for the user
-      final eventsSnapshot = await _firestore
-          .collection('organizations')
-          .doc(_userOrgCode)
-          .collection('students')
-          .doc(user.uid)
-          .collection('calendar_events')
-          .where('startTime', isGreaterThan: Timestamp.fromDate(now))
-          .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(tomorrow))
-          .get();
-
-      // Get existing notifications to avoid duplicates
-      final existingNotifications = await _firestore
+      await _firestore
           .collection('organizations')
           .doc(_userOrgCode)
           .collection('students')
           .doc(user.uid)
           .collection('notifications')
-          .where('isRead', isEqualTo: false)
-          .get();
+          .add({
+        'title': title,
+        'body': body,
+        'type': eventData['sourceType'] == 'assignment'
+            ? 'NotificationType.assignment'
+            : 'NotificationType.tutorial',
+        'eventId': eventId,
+        'reminderType': reminderType, // '1day' or '10min'
+        'sourceId': eventData['sourceId'],
+        'sourceType': eventData['sourceType'],
+        'courseId': eventData['courseId'],
+        'organizationCode': _userOrgCode,
+        'minutesUntilDue': minutesUntil,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isRead': false,
+      });
 
-      Set<String> existingEventIds = {};
-      for (var doc in existingNotifications.docs) {
-        final data = doc.data();
-        if (data['eventId'] != null) {
-          existingEventIds.add(data['eventId']);
-        }
-      }
-
-      // Create notifications for events due tomorrow
-      for (var eventDoc in eventsSnapshot.docs) {
-        final eventData = eventDoc.data();
-        final eventId = eventDoc.id;
-
-        // Skip if notification already exists
-        if (existingEventIds.contains(eventId)) continue;
-
-        // Check if it's within 24 hours
-        final eventTime = (eventData['startTime'] as Timestamp).toDate();
-        final hoursUntilDue = eventTime.difference(now).inHours;
-
-        if (hoursUntilDue <= 24 && hoursUntilDue > 0) {
-          String title = '';
-          String body = '';
-          NotificationType type = NotificationType.reminder;
-
-          // Customize notification based on source type
-          final sourceType = eventData['sourceType'] ?? '';
-          final eventTitle = eventData['title'] ?? 'Event';
-
-          switch (sourceType) {
-            case 'assignment':
-              title = '📝 Assignment Due Tomorrow';
-              body = '$eventTitle is due in $hoursUntilDue hours!';
-              type = NotificationType.assignment;
-              break;
-            case 'tutorial':
-              title = '📚 Tutorial Due Tomorrow';
-              body = '$eventTitle is due in $hoursUntilDue hours!';
-              type = NotificationType.tutorial;
-              break;
-            case 'goal':
-              title = '🎯 Goal Target Date Tomorrow';
-              body = '$eventTitle target date is in $hoursUntilDue hours!';
-              type = NotificationType.goal;
-              break;
-            default:
-              title = '📅 Event Tomorrow';
-              body = '$eventTitle is in $hoursUntilDue hours!';
-          }
-
-          // Create notification
-          await _createStudentNotification(
-            studentId: user.uid,
-            title: title,
-            body: body,
-            type: type,
-            eventId: eventId,
-            sourceId: eventData['sourceId'],
-            sourceType: sourceType,
-            dueDate: eventTime,
-          );
-        }
-      }
-
-      // Reload notifications if using timer-based checking
-      if (_notificationSubscription == null) {
-        await _loadNotifications();
-      }
+      print('✅ Created $reminderType reminder for ${eventData['sourceType']}: ${eventData['title']}');
     } catch (e) {
-      print('Error checking deadlines: $e');
+      print('❌ Error creating reminder notification: $e');
     }
   }
 
-  // Load notifications
-  Future<void> _loadNotifications() async {
-    final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null || _userRole != 'student') return;
-
-    try {
-      final snapshot = await _firestore
-          .collection('organizations')
-          .doc(_userOrgCode)
-          .collection('students')
-          .doc(user.uid)
-          .collection('notifications')
-          .orderBy('createdAt', descending: true)
-          .limit(50)
-          .get();
-
-      List<NotificationModel> notifications = [];
-      int unreadCount = 0;
-
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final notification = NotificationModel.fromMap(doc.id, data);
-        notifications.add(notification);
-
-        if (!notification.isRead) {
-          unreadCount++;
-        }
-      }
-
-      // Update streams
-      _notificationsController.add(notifications);
-      _notificationCountController.add(unreadCount);
-    } catch (e) {
-      print('Error loading notifications: $e');
-    }
-  }
 
   // Mark notification as read
   Future<void> markAsRead(String notificationId) async {
     final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null || _userRole != 'student') return;
+    if (user == null || _userOrgCode == null || _userRole == null) return;
 
     try {
       await _firestore
@@ -656,20 +718,15 @@ class NotificationService {
           .collection('notifications')
           .doc(notificationId)
           .update({'isRead': true});
-
-      // Reload notifications if not using real-time listener
-      if (_notificationSubscription == null) {
-        await _loadNotifications();
-      }
     } catch (e) {
-      print('Error marking notification as read: $e');
+      print('❌ Error marking notification as read: $e');
     }
   }
 
   // Mark all as read
   Future<void> markAllAsRead() async {
     final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null || _userRole != 'student') return;
+    if (user == null || _userOrgCode == null || _userRole == null) return;
 
     try {
       final batch = _firestore.batch();
@@ -688,20 +745,15 @@ class NotificationService {
       }
 
       await batch.commit();
-
-      // Reload notifications if not using real-time listener
-      if (_notificationSubscription == null) {
-        await _loadNotifications();
-      }
     } catch (e) {
-      print('Error marking all as read: $e');
+      print('❌ Error marking all as read: $e');
     }
   }
 
   // Delete notification
   Future<void> deleteNotification(String notificationId) async {
     final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null || _userRole != 'student') return;
+    if (user == null || _userOrgCode == null || _userRole == null) return;
 
     try {
       await _firestore
@@ -712,95 +764,184 @@ class NotificationService {
           .collection('notifications')
           .doc(notificationId)
           .delete();
-
-      // Reload notifications if not using real-time listener
-      if (_notificationSubscription == null) {
-        await _loadNotifications();
-      }
     } catch (e) {
-      print('Error deleting notification: $e');
+      print('❌ Error deleting notification: $e');
     }
   }
 
-  // Send custom announcement (Lecturer functionality)
-  Future<void> sendAnnouncementToStudents({
-    required String courseId,
-    required String title,
-    required String message,
-    List<String>? specificStudentIds,
-  }) async {
-    final user = _auth.currentUser;
-    if (user == null || _userOrgCode == null || _userRole != 'lecturer') return;
-
-    try {
-      if (specificStudentIds != null) {
-        // Send to specific students
-        for (String studentId in specificStudentIds) {
-          await _createStudentNotification(
-            studentId: studentId,
-            title: title,
-            body: message,
-            type: NotificationType.announcement,
-            courseId: courseId,
-          );
-        }
-      } else {
-        // Send to all students in course
-        await _sendNotificationToAllStudentsInCourse(
-          courseId: courseId,
-          title: title,
-          body: message,
-          type: NotificationType.announcement,
-        );
-      }
-
-      print('✅ Sent announcement to students in course $courseId');
-    } catch (e) {
-      print('Error sending announcement: $e');
-    }
+  // Force reload notifications
+  Future<void> forceReload() async {
+    print('🔄 Force reloading notifications...');
+    _isInitialized = false;
+    await initialize();
   }
 
-  // Format date helper
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year} at ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-  }
-
-  // Get user role
-  String? get userRole => _userRole;
-
-  // Dispose
-  void dispose() {
+  // Dispose method
+  Future<void> _dispose() async {
     _checkTimer?.cancel();
-    _calendarEventsSubscription?.cancel();
-    _notificationSubscription?.cancel();
+    await _calendarEventsSubscription?.cancel();
+    await _notificationSubscription?.cancel();
+  }
+
+  // Public dispose method
+  void dispose() {
+    _dispose();
     _notificationCountController.close();
     _notificationsController.close();
   }
+
+  // UPDATED: Find course ID from content - Made PUBLIC for dialog access
+  Future<String?> findCourseIdFromContent(String orgCode, String sourceId, String sourceType) async {
+    try {
+      print('🔍 Searching for courseId in organization: $orgCode');
+      print('📍 Looking for sourceId: $sourceId of type: $sourceType');
+
+      // Search all courses for the content
+      final coursesSnapshot = await _firestore
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .get();
+
+      print('📚 Found ${coursesSnapshot.docs.length} courses to search');
+
+      for (var courseDoc in coursesSnapshot.docs) {
+        final courseId = courseDoc.id;
+        print('🔍 Searching in course: $courseId');
+
+        // Check assignments
+        if (sourceType == 'assignment') {
+          final assignmentDoc = await _firestore
+              .collection('organizations')
+              .doc(orgCode)
+              .collection('courses')
+              .doc(courseId)
+              .collection('assignments')
+              .doc(sourceId)
+              .get();
+
+          if (assignmentDoc.exists) {
+            print('✅ Found assignment in course: $courseId');
+            return courseId;
+          }
+        }
+
+        // Check materials/tutorials
+        if (sourceType == 'tutorial' || sourceType == 'learning') {
+          final materialDoc = await _firestore
+              .collection('organizations')
+              .doc(orgCode)
+              .collection('courses')
+              .doc(courseId)
+              .collection('materials')
+              .doc(sourceId)
+              .get();
+
+          if (materialDoc.exists) {
+            print('✅ Found material in course: $courseId');
+            return courseId;
+          }
+        }
+      }
+
+      print('❌ Content not found in any course');
+      return null;
+    } catch (e) {
+      print('❌ Error finding course ID: $e');
+      return null;
+    }
+  }
+
+  // NEW: Find course ID from event ID - Made PUBLIC for dialog access
+  Future<String?> findCourseIdFromEventId(String orgCode, String eventId) async {
+    try {
+      print('🔍 Searching for courseId from eventId: $eventId');
+
+      final user = _auth.currentUser;
+      if (user == null) return null;
+
+      // Get the calendar event first
+      final eventDoc = await _firestore
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('calendar_events')
+          .doc(eventId)
+          .get();
+
+      if (!eventDoc.exists) {
+        print('❌ Calendar event not found');
+        return null;
+      }
+
+      final eventData = eventDoc.data()!;
+      final courseId = eventData['courseId'] as String?;
+
+      if (courseId != null) {
+        print('✅ Found courseId from event: $courseId');
+        return courseId;
+      }
+
+      // If no direct courseId, try to find from sourceId and sourceType
+      final sourceId = eventData['sourceId'] as String?;
+      final sourceType = eventData['sourceType'] as String?;
+
+      if (sourceId != null && sourceType != null) {
+        print('🔍 Trying to find courseId from sourceId: $sourceId');
+        return await findCourseIdFromContent(orgCode, sourceId, sourceType);
+      }
+
+      print('❌ No courseId found from event');
+      return null;
+    } catch (e) {
+      print('❌ Error finding course ID from event: $e');
+      return null;
+    }
+  }
+
+  // Clean up existing test notifications in Firestore
+  // This method is correct - keep it as is
+  Future<void> cleanupTestNotifications() async {
+    final user = _auth.currentUser;
+    if (user == null || _userOrgCode == null) return;
+
+    try {
+      // Delete all test notifications
+      final testNotifications = await _firestore
+          .collection('organizations')
+          .doc(_userOrgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('notifications')
+          .where('type', isEqualTo: 'test')
+          .get();
+
+      final batch = _firestore.batch();
+      for (var doc in testNotifications.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      print('✅ Cleaned up ${testNotifications.docs.length} test notifications');
+    } catch (e) {
+      print('❌ Error cleaning up test notifications: $e');
+    }
+  }
+
+  // Getters
+  String? get userRole => _userRole;
+  bool get isInitialized => _isInitialized;
 }
 
-// Notification types
+// Notification types enum should be OUTSIDE the class
 enum NotificationType {
   assignment,
   tutorial,
   goal,
   reminder,
   announcement,
-}
-
-// Event types (for calendar events)
-enum EventType {
-  normal,
-  important,
-  urgent,
-}
-
-// Recurrence types (for calendar events)
-enum RecurrenceType {
-  none,
-  daily,
-  weekly,
-  monthly,
-  yearly,
+  learning,
 }
 
 // Notification model
@@ -813,6 +954,8 @@ class NotificationModel {
   final String? sourceId;
   final String? sourceType;
   final String? courseId;
+  final String? courseName;
+  final String? organizationCode;  // ADD THIS LINE
   final DateTime? dueDate;
   final DateTime createdAt;
   final bool isRead;
@@ -826,6 +969,8 @@ class NotificationModel {
     this.sourceId,
     this.sourceType,
     this.courseId,
+    this.courseName,
+    this.organizationCode,  // ADD THIS LINE
     this.dueDate,
     required this.createdAt,
     required this.isRead,
@@ -841,6 +986,8 @@ class NotificationModel {
       sourceId: data['sourceId'],
       sourceType: data['sourceType'],
       courseId: data['courseId'],
+      courseName: data['courseName'],              // ADD THIS LINE
+      organizationCode: data['organizationCode'],  // ADD THIS LINE
       dueDate: data['dueDate'] != null ? (data['dueDate'] as Timestamp).toDate() : null,
       createdAt: data['createdAt'] != null
           ? (data['createdAt'] as Timestamp).toDate()
@@ -852,28 +999,26 @@ class NotificationModel {
   static NotificationType _parseNotificationType(String? type) {
     if (type == null) return NotificationType.reminder;
 
-    try {
-      return NotificationType.values.firstWhere(
-            (e) => e.toString() == type,
-        orElse: () => NotificationType.reminder,
-      );
-    } catch (e) {
-      return NotificationType.reminder;
+    String cleanType = type.toLowerCase();
+    if (cleanType.contains('.')) {
+      cleanType = cleanType.split('.').last;
     }
-  }
 
-  IconData get icon {
-    switch (type) {
-      case NotificationType.assignment:
-        return Icons.assignment;
-      case NotificationType.tutorial:
-        return Icons.quiz;
-      case NotificationType.goal:
-        return Icons.flag;
-      case NotificationType.announcement:
-        return Icons.campaign;
+    switch (cleanType) {
+      case 'assignment':
+        return NotificationType.assignment;
+      case 'tutorial':
+        return NotificationType.tutorial;
+      case 'goal':
+        return NotificationType.goal;
+      case 'announcement':
+        return NotificationType.announcement;
+      case 'reminder':
+        return NotificationType.reminder;
+      case 'learning':
+        return NotificationType.learning;
       default:
-        return Icons.notifications;
+        return NotificationType.reminder;
     }
   }
 
@@ -887,15 +1032,242 @@ class NotificationModel {
         return Colors.purple;
       case NotificationType.announcement:
         return Colors.green;
+      case NotificationType.learning:
+        return Colors.teal;
       default:
         return Colors.grey;
     }
   }
+
+  IconData get icon {
+    switch (type) {
+      case NotificationType.assignment:
+        return Icons.assignment;
+      case NotificationType.tutorial:
+        return Icons.book;
+      case NotificationType.goal:
+        return Icons.flag;
+      case NotificationType.announcement:
+        return Icons.campaign;
+      case NotificationType.learning:
+        return Icons.school;
+      default:
+        return Icons.notifications;
+    }
+  }
 }
 
-// Notification dialog widget
-class NotificationDialog extends StatelessWidget {
+// FIXED: Notification dialog widget
+class NotificationDialog extends StatefulWidget {
+  @override
+  _NotificationDialogState createState() => _NotificationDialogState();
+}
+
+class _NotificationDialogState extends State<NotificationDialog> {
   final NotificationService _notificationService = NotificationService();
+
+  @override
+  void initState() {
+    super.initState();
+    // Ensure notification service is initialized when dialog opens
+    if (!_notificationService.isInitialized) {
+      _notificationService.initialize();
+    }
+  }
+
+  // DEBUG: Helper method to debug notification data
+  void _debugNotificationData(NotificationModel notification) {
+    print('🔍 DEBUG NOTIFICATION DATA:');
+    print('   - ID: ${notification.id}');
+    print('   - Title: ${notification.title}');
+    print('   - Body: ${notification.body}');
+    print('   - SourceId: ${notification.sourceId}');
+    print('   - SourceType: ${notification.sourceType}');
+    print('   - CourseId: ${notification.courseId}');
+    print('   - CourseName: ${notification.courseName}');
+    print('   - OrganizationCode: ${notification.organizationCode}');
+    print('   - EventId: ${notification.eventId}');
+    print('   - IsRead: ${notification.isRead}');
+    print('   - Type: ${notification.type}');
+  }
+
+  // AFTER: Replace the entire _navigateToSource method in notification.dart
+  Future<void> _navigateToSource(BuildContext context, NotificationModel notification) async {
+    print('🔍 Navigating to: ${notification.sourceType} - ${notification.title}');
+
+    // Mark as read
+    if (!notification.isRead) {
+      await _notificationService.markAsRead(notification.id);
+    }
+
+    // Get organization code
+    String? orgCode = notification.organizationCode ?? _notificationService.userOrgCode;
+    if (orgCode == null) {
+      _showNavigationError(context, 'Organization code missing');
+      return;
+    }
+
+    // Close notification dialog first
+    Navigator.pop(context);
+
+    try {
+      if (notification.sourceType == 'assignment' && notification.sourceId != null) {
+        // Navigate to assignment
+        await _navigateToAssignment(context, notification, orgCode);
+      } else if (notification.sourceType == 'tutorial' && notification.sourceId != null) {
+        // Navigate to tutorial
+        await _navigateToTutorial(context, notification, orgCode);
+      } else {
+        _showNavigationError(context, 'Cannot open this notification');
+      }
+    } catch (e) {
+      _showNavigationError(context, 'Navigation failed: $e');
+    }
+  }
+
+  Future<void> _navigateToAssignment(BuildContext context, NotificationModel notification, String orgCode) async {
+    try {
+      // Find course ID if missing
+      String? courseId = notification.courseId;
+      if (courseId == null) {
+        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'assignment');
+        if (courseId == null) {
+          _showNavigationError(context, 'Assignment not found');
+          return;
+        }
+      }
+
+      // Load assignment and course data
+      final assignmentDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('assignments')
+          .doc(notification.sourceId!)
+          .get();
+
+      final courseDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .get();
+
+      if (!assignmentDoc.exists || !courseDoc.exists) {
+        _showNavigationError(context, 'Assignment or course not found');
+        return;
+      }
+
+      final assignmentData = {'id': assignmentDoc.id, ...assignmentDoc.data()!};
+      final courseData = {'id': courseId, ...courseDoc.data()!};
+
+      // Navigate to assignment details
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StudentAssignmentDetailsPage(
+            assignment: assignmentData,
+            courseId: courseId!,
+            courseData: courseData,
+            organizationCode: orgCode,
+          ),
+        ),
+      );
+    } catch (e) {
+      _showNavigationError(context, 'Failed to load assignment');
+    }
+  }
+
+  Future<void> _navigateToTutorial(BuildContext context, NotificationModel notification, String orgCode) async {
+    try {
+      // Find course ID if missing
+      String? courseId = notification.courseId;
+      if (courseId == null) {
+        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'tutorial');
+        if (courseId == null) {
+          _showNavigationError(context, 'Tutorial not found');
+          return;
+        }
+      }
+
+      // Load tutorial data
+      final materialDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('materials')
+          .doc(notification.sourceId!)
+          .get();
+
+      if (!materialDoc.exists) {
+        _showNavigationError(context, 'Tutorial not found');
+        return;
+      }
+
+      final materialData = {'id': materialDoc.id, ...materialDoc.data()!};
+
+      // Check if user has submitted
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final submissionSnapshot = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('materials')
+            .doc(notification.sourceId!)
+            .collection('submissions')
+            .where('studentId', isEqualTo: user.uid)
+            .get();
+
+        if (submissionSnapshot.docs.isNotEmpty) {
+          // Has submission - go to submission view
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => StudentTutorialSubmissionView(
+                courseId: courseId!,
+                materialId: notification.sourceId!,
+                materialData: materialData,
+                organizationCode: orgCode,
+              ),
+            ),
+          );
+        } else {
+          // No submission - go to course page to submit
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => StudentCoursePage(
+                courseId: courseId!,
+                courseData: {'id': courseId, 'organizationCode': orgCode},
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      _showNavigationError(context, 'Failed to load tutorial');
+    }
+  }
+
+  void _showNavigationError(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.white),
+            SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 4),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -908,9 +1280,9 @@ class NotificationDialog extends StatelessWidget {
         height: MediaQuery.of(context).size.height * 0.7,
         child: Column(
           children: [
-            // Header with badge
+            // Header
             Container(
-              padding: EdgeInsets.all(15),
+              padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.blue[600],
                 borderRadius: BorderRadius.only(
@@ -919,43 +1291,36 @@ class NotificationDialog extends StatelessWidget {
                 ),
               ),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  StreamBuilder<int>(
-                    stream: _notificationService.notificationCountStream,
-                    initialData: 0,
-                    builder: (context, snapshot) {
-                      return badges.Badge(
-                        badgeContent: Text(
-                          snapshot.data.toString(),
+                  Row(
+                    children: [
+                      Icon(Icons.notifications, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text(
+                        'Notifications',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => _notificationService.markAllAsRead(),
+                        child: Text(
+                          'Mark all as read',
                           style: TextStyle(color: Colors.white),
                         ),
-                        showBadge: snapshot.data! > 0,
-                        child: Icon(Icons.notifications, color: Colors.white, size: 24),
-                      );
-                    },
-                  ),
-                  SizedBox(width: 8),
-                  Text(
-                    'Notifications',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Spacer(),
-                  TextButton(
-                    onPressed: () {
-                      _notificationService.markAllAsRead();
-                    },
-                    child: Text(
-                      'Mark all as read',
-                      style: TextStyle(color: Colors.white, fontSize: 10),
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.close, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.close, color: Colors.white),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -966,7 +1331,73 @@ class NotificationDialog extends StatelessWidget {
               child: StreamBuilder<List<NotificationModel>>(
                 stream: _notificationService.notificationsStream,
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  print('🔍 NotificationDialog StreamBuilder state:');
+                  print('   - connectionState: ${snapshot.connectionState}');
+                  print('   - hasData: ${snapshot.hasData}');
+                  print('   - data length: ${snapshot.data?.length ?? 0}');
+                  print('   - hasError: ${snapshot.hasError}');
+
+                  if (snapshot.hasError) {
+                    print('   - error: ${snapshot.error}');
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.error_outline, size: 48, color: Colors.red),
+                          SizedBox(height: 16),
+                          Text(
+                            'Error loading notifications',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                          Text(
+                            '${snapshot.error}',
+                            style: TextStyle(color: Colors.red, fontSize: 12),
+                          ),
+                          SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: () => _notificationService.forceReload(),
+                            child: Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text('Loading notifications...'),
+                        ],
+                      ),
+                    );
+                  }
+
+                  // Add a retry button if no data
+                  if (!snapshot.hasData && snapshot.connectionState == ConnectionState.active) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.sync_problem, size: 48, color: Colors.orange),
+                          SizedBox(height: 16),
+                          Text('Notifications not loading'),
+                          SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: () => _notificationService.forceReload(),
+                            child: Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  final notifications = snapshot.data ?? [];
+
+                  if (notifications.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -989,21 +1420,26 @@ class NotificationDialog extends StatelessWidget {
                     );
                   }
 
-                  final notifications = snapshot.data!;
-
+                  // Show notifications list
                   return ListView.separated(
                     padding: EdgeInsets.all(16),
                     itemCount: notifications.length,
                     separatorBuilder: (context, index) => SizedBox(height: 8),
                     itemBuilder: (context, index) {
                       final notification = notifications[index];
-
                       return NotificationCard(
                         notification: notification,
-                        onTap: () {
-                          if (!notification.isRead) {
-                            _notificationService.markAsRead(notification.id);
-                          }
+                        onTap: () async {
+                          // DEBUG: Enhanced tap logging
+                          print('🔍 NOTIFICATION CARD TAPPED:');
+                          print('   - Title: ${notification.title}');
+                          print('   - SourceId: ${notification.sourceId}');
+                          print('   - SourceType: ${notification.sourceType}');
+                          print('   - CourseId: ${notification.courseId}');
+                          print('   - OrgCode: ${notification.organizationCode}');
+
+                          // Enhanced navigation call with better error handling
+                          await _navigateToSource(context, notification);
                         },
                         onDelete: () {
                           _notificationService.deleteNotification(notification.id);
@@ -1052,7 +1488,10 @@ class NotificationCard extends StatelessWidget {
         ],
       ),
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          print('🟡 NOTIFICATION CARD InkWell onTap triggered');
+          onTap();
+        },
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: EdgeInsets.all(12),
@@ -1134,93 +1573,5 @@ class NotificationCard extends StatelessWidget {
     } else {
       return '${time.day}/${time.month}/${time.year}';
     }
-  }
-}
-
-// Announcement composer widget for lecturers
-class AnnouncementComposer extends StatefulWidget {
-  final String courseId;
-  final String courseName;
-
-  const AnnouncementComposer({
-    Key? key,
-    required this.courseId,
-    required this.courseName,
-  }) : super(key: key);
-
-  @override
-  _AnnouncementComposerState createState() => _AnnouncementComposerState();
-}
-
-class _AnnouncementComposerState extends State<AnnouncementComposer> {
-  final TextEditingController _titleController = TextEditingController();
-  final TextEditingController _messageController = TextEditingController();
-  final NotificationService _notificationService = NotificationService();
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('Send Announcement'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Send to all students in ${widget.courseName}',
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-            SizedBox(height: 16),
-            TextField(
-              controller: _titleController,
-              decoration: InputDecoration(
-                labelText: 'Announcement Title',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.title),
-              ),
-            ),
-            SizedBox(height: 16),
-            TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                labelText: 'Message',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.message),
-              ),
-              maxLines: 4,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () async {
-            if (_titleController.text.isNotEmpty && _messageController.text.isNotEmpty) {
-              await _notificationService.sendAnnouncementToStudents(
-                courseId: widget.courseId,
-                title: _titleController.text,
-                message: _messageController.text,
-              );
-              Navigator.pop(context);
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Announcement sent to all students!')),
-              );
-            }
-          },
-          child: Text('Send'),
-        ),
-      ],
-    );
-  }
-
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _messageController.dispose();
-    super.dispose();
   }
 }

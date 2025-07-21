@@ -7,6 +7,7 @@ import '../Authentication/custom_widgets.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File;
 import 'dart:async';
+import '../notification.dart';
 
 
 // Enum definitions
@@ -134,15 +135,13 @@ class NotificationService {
             ? '$itemTitle has been posted in $courseName'
             : '$itemTitle learning material has been posted';
         break;
-      case 'goal':
-        notificationTitle = '🎯 New Goal Created';
-        notificationBody = '$itemTitle has been set with a deadline';
-        break;
       default:
         notificationTitle = '📢 New Item Posted';
         notificationBody = '$itemTitle has been posted';
     }
 
+    // NEW CODE in _createStudentNotification method
+    // FIXED: Include all required fields for notification navigation
     await _firestore
         .collection('organizations')
         .doc(organizationCode)
@@ -152,10 +151,12 @@ class NotificationService {
         .add({
       'title': notificationTitle,
       'body': notificationBody,
-      'type': 'NotificationType.${itemType}',
+      'type': 'NotificationType.$itemType',
       'sourceId': sourceId,
       'sourceType': itemType,
       'courseId': courseId,
+      'courseName': courseName,
+      'organizationCode': organizationCode,
       'createdAt': FieldValue.serverTimestamp(),
       'isRead': false,
     });
@@ -197,7 +198,7 @@ class NotificationService {
       for (var enrollment in enrollmentsSnapshot.docs) {
         final studentId = enrollment.data()['studentId'];
 
-        await _firestore
+        final calendarEventRef = await _firestore
             .collection('organizations')
             .doc(orgCode)
             .collection('students')
@@ -212,7 +213,7 @@ class NotificationService {
           'calendar': _getCalendarCategory(itemType),
           'eventType': EventType.normal.index,
           'recurrenceType': RecurrenceType.none.index,
-          'reminderMinutes': 1440, // 24 hours before
+          'reminderMinutes': [1440, 10], // Both 24 hours and 10 minutes before
           'location': '',
           'isRecurring': false,
           'originalEventId': '',
@@ -220,7 +221,20 @@ class NotificationService {
           'sourceType': itemType,
           'courseId': courseId,
           'createdAt': FieldValue.serverTimestamp(),
+          'reminderScheduled': false, // Track if reminders have been scheduled
         });
+
+// Schedule initial reminder check for this event
+        final eventData = {
+          'title': _getCalendarEventTitle(itemType, itemTitle),
+          'startTime': Timestamp.fromDate(dueDate),
+          'sourceId': sourceId,
+          'sourceType': itemType,
+          'courseId': courseId,
+        };
+
+// Trigger reminder check (this will be handled by the deadline checker)
+        print('📅 Calendar event created, reminders will be scheduled automatically');
       }
 
       print('✅ Created calendar events for $itemType: $itemTitle');
@@ -667,11 +681,11 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         _dueTime?.minute ?? 59,
       );
 
-      // Get organization code
+      // Get organization code - ADD NULL CHECK
       final organizationCode = widget.courseData['organizationCode'];
-
-      if (organizationCode == null) {
-        throw Exception('Organization code not found');
+      if (organizationCode == null || organizationCode.isEmpty) {
+        print('❌ Organization code is null or empty in courseData');
+        throw Exception('Organization code not found in course data');
       }
 
       // Prepare assignment data
@@ -748,7 +762,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       // MERGED: Use NotificationService for both notifications and calendar events
       // This single call handles everything: notifications + calendar events with RED color for assignments
       await _notificationService.createNewItemNotification(
-        itemType: 'assignment',
+        itemType: 'assignment', // or 'tutorial'
         itemTitle: _titleController.text.trim(),
         dueDate: dueDateTime,
         sourceId: assignmentId!,
@@ -756,6 +770,8 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         courseName: widget.courseData['title'] ?? widget.courseData['name'],
         organizationCode: organizationCode,
       );
+
+      print('✅ Created notification for assignment: ${_titleController.text.trim()}');
 
       // Navigate back
       if (mounted) {
