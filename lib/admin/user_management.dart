@@ -597,15 +597,6 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                                 ],
                               ),
                             ),
-                          if (data['emailVerified'] == false)
-                            Tooltip(
-                              message: 'Email not verified',
-                              child: Icon(
-                                Icons.warning_amber_rounded,
-                                size: 20,
-                                color: Colors.orange,
-                              ),
-                            ),
                         ],
                       ),
                       SizedBox(height: 4),
@@ -714,17 +705,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                           ],
                         ),
                       ),
-                      PopupMenuDivider(),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete, size: 18, color: Colors.red),
-                            SizedBox(width: 12),
-                            Text('Delete User', style: TextStyle(color: Colors.red)),
-                          ],
-                        ),
-                      ),
+                      // Removed Delete option completely
                     ],
                     onSelected: (value) {
                       switch (value) {
@@ -742,9 +723,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
                         case 'reset_password':
                           _sendPasswordReset(data['email']);
                           break;
-                        case 'delete':
-                          _showDeleteDialog(context, userId, data['fullName'], data);
-                          break;
+                      // Removed 'delete' case
                       }
                     },
                   ),
@@ -781,6 +760,7 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
       ),
     );
   }
+
 
   Color _getRoleColor(String role) {
     switch (role) {
@@ -1124,102 +1104,5 @@ class _UserManagementPageState extends State<UserManagementPage> with SingleTick
         ),
       );
     }
-  }
-
-  void _showDeleteDialog(BuildContext context, String userId, String userName, Map<String, dynamic> userData) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Text('Delete User'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Are you sure you want to delete "$userName"?'),
-            SizedBox(height: 16),
-            Container(
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red[50],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.warning, color: Colors.red[700], size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'This action cannot be undone. The user will lose access to all data.',
-                      style: TextStyle(
-                        color: Colors.red[700],
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                // Instead of deleting, we'll mark as deleted
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(userId)
-                    .update({
-                  'isActive': false,
-                  'deletedAt': FieldValue.serverTimestamp(),
-                  'deletedBy': FirebaseAuth.instance.currentUser?.uid,
-                });
-
-                // Create audit log
-                await AuthService.createManagementAuditLog(
-                  organizationCode: widget.organizationId,
-                  action: 'user_deleted',
-                  details: {
-                    'deletedUserId': userId,
-                    'deletedUserName': userData['fullName'],
-                    'deletedUserEmail': userData['email'],
-                    'deletedUserRole': userData['role'],
-                  },
-                );
-
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('User deleted successfully'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error deleting user: ${e.toString()}'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text('Delete', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
   }
 }

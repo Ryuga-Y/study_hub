@@ -143,7 +143,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 3,
           ),
@@ -198,7 +198,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
                     Container(
                       padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.redAccent.withOpacity(0.1),
+                        color: Colors.redAccent.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -246,7 +246,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 3,
           ),
@@ -377,7 +377,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 3,
           ),
@@ -414,7 +414,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 3,
           ),
@@ -589,7 +589,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 3,
           ),

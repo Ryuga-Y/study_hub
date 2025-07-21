@@ -854,145 +854,280 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final details = activity['details'] as Map<String, dynamic>? ?? {};
     final performedBy = activity['performedBy'] ?? '';
 
-    // Get activity info
-    final activityInfo = _getActivityInfo(action, details);
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance.collection('users').doc(performedBy).get(),
+      builder: (context, userSnapshot) {
+        String performerName = 'System';
+        if (userSnapshot.hasData && userSnapshot.data!.exists) {
+          final userData = userSnapshot.data!.data() as Map<String, dynamic>;
+          performerName = userData['fullName'] ?? 'Unknown User';
+        }
 
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Colors.grey[200]!),
-        ),
-      ),
-      child: Row(
-        children: [
-          // Activity Icon
-          Container(
-            padding: EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: activityInfo['color'].withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              activityInfo['icon'],
-              color: activityInfo['color'],
-              size: 20,
+        // Get activity info with performer context
+        final activityInfo = _getActivityInfo(action, details, performerName);
+
+        return Container(
+          padding: EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: Colors.grey[200]!),
             ),
           ),
-          SizedBox(width: 12),
+          child: Row(
+            children: [
+              // Activity Icon
+              Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: activityInfo['color'].withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  activityInfo['icon'],
+                  color: activityInfo['color'],
+                  size: 20,
+                ),
+              ),
+              SizedBox(width: 12),
 
-          // Activity Details
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+              // Activity Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      activityInfo['title'],
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    if (activityInfo['subtitle'] != null) ...[
+                      SizedBox(height: 2),
+                      Text(
+                        activityInfo['subtitle'],
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              // Timestamp
+              if (timestamp != null)
                 Text(
-                  activityInfo['title'],
+                  _formatRelativeTime(timestamp.toDate()),
                   style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
+                    color: Colors.grey[500],
+                    fontSize: 12,
                   ),
                 ),
-                if (activityInfo['subtitle'] != null) ...[
-                  SizedBox(height: 2),
-                  Text(
-                    activityInfo['subtitle'],
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+            ],
           ),
-
-          // Timestamp
-          if (timestamp != null)
-            Text(
-              _formatRelativeTime(timestamp.toDate()),
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 12,
-              ),
-            ),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Map<String, dynamic> _getActivityInfo(String action, Map<String, dynamic> details) {
+  Map<String, dynamic> _getActivityInfo(String action, Map<String, dynamic> details, String performerName) {
     switch (action) {
       case 'student_account_created':
         return {
           'icon': Icons.school,
           'color': Colors.blue,
-          'title': 'New student registered',
-          'subtitle': details['userName'] != null ? '${details['userName']} joined the organization' : null,
+          'title': '$performerName registered as a student',
+          'subtitle': details['facultyName'] != null && details['programName'] != null
+              ? '${details['facultyName']} • ${details['programName']}'
+              : null,
         };
+
       case 'lecturer_account_created':
         return {
           'icon': Icons.person,
           'color': Colors.green,
-          'title': 'New lecturer registered',
-          'subtitle': details['userName'] != null ? '${details['userName']} joined the organization' : null,
+          'title': '$performerName registered as a lecturer',
+          'subtitle': details['facultyName'] != null
+              ? 'Faculty: ${details['facultyName']}'
+              : null,
         };
+
       case 'admin_account_created':
         return {
           'icon': Icons.admin_panel_settings,
           'color': Colors.red,
-          'title': 'New admin registered',
-          'subtitle': details['userName'] != null ? '${details['userName']} joined as admin' : null,
+          'title': '$performerName registered as an admin',
+          'subtitle': null,
         };
+
       case 'admin_joined_pending_activation':
         return {
           'icon': Icons.hourglass_empty,
           'color': Colors.orange,
-          'title': 'Admin pending activation',
-          'subtitle': details['adminName'] != null ? '${details['adminName']} awaiting activation' : null,
+          'title': '$performerName requested admin access',
+          'subtitle': 'Pending activation',
         };
+
       case 'admin_activated':
         return {
           'icon': Icons.check_circle,
           'color': Colors.green,
-          'title': 'Admin account activated',
-          'subtitle': 'Admin user was activated',
+          'title': '$performerName activated an admin account',
+          'subtitle': details['activatedAdminName'] != null
+              ? 'Activated: ${details['activatedAdminName']}'
+              : null,
         };
+
       case 'admin_deactivated':
         return {
           'icon': Icons.block,
           'color': Colors.orange,
-          'title': 'Admin account deactivated',
-          'subtitle': 'Admin user was deactivated',
+          'title': '$performerName deactivated an admin account',
+          'subtitle': details['deactivatedAdminName'] != null
+              ? 'Deactivated: ${details['deactivatedAdminName']}'
+              : null,
         };
+
       case 'faculty_created':
         return {
           'icon': Icons.school,
           'color': Colors.blue,
-          'title': 'New faculty created',
-          'subtitle': details['facultyName'] != null ? 'Faculty: ${details['facultyName']}' : null,
+          'title': '$performerName created a new faculty',
+          'subtitle': details['facultyName'] != null
+              ? 'Faculty: ${details['facultyName']} (${details['facultyCode'] ?? ''})'
+              : null,
         };
+
+      case 'faculty_updated':
+        return {
+          'icon': Icons.edit,
+          'color': Colors.blue,
+          'title': '$performerName updated a faculty',
+          'subtitle': details['newName'] != null
+              ? 'Faculty: ${details['newName']}'
+              : null,
+        };
+
+      case 'faculty_deleted':
+        return {
+          'icon': Icons.delete,
+          'color': Colors.red,
+          'title': '$performerName deleted a faculty',
+          'subtitle': details['facultyName'] != null
+              ? 'Deleted: ${details['facultyName']}'
+              : null,
+        };
+
       case 'program_created':
         return {
           'icon': Icons.book,
           'color': Colors.purple,
-          'title': 'New program created',
-          'subtitle': details['programName'] != null ? 'Program: ${details['programName']}' : null,
+          'title': '$performerName created a new program',
+          'subtitle': details['programName'] != null && details['facultyName'] != null
+              ? '${details['programName']} • ${details['facultyName']}'
+              : details['programName'],
         };
+
+      case 'program_updated':
+        return {
+          'icon': Icons.edit,
+          'color': Colors.purple,
+          'title': '$performerName updated a program',
+          'subtitle': details['newName'] != null
+              ? 'Program: ${details['newName']}'
+              : null,
+        };
+
+      case 'program_deleted':
+        return {
+          'icon': Icons.delete,
+          'color': Colors.red,
+          'title': '$performerName deleted a program',
+          'subtitle': details['programName'] != null
+              ? 'Deleted: ${details['programName']}'
+              : null,
+        };
+
       case 'course_created':
+      case 'course_template_created':
         return {
           'icon': Icons.library_books,
           'color': Colors.indigo,
-          'title': 'New course created',
-          'subtitle': details['courseName'] != null ? 'Course: ${details['courseName']}' : null,
+          'title': '$performerName created a new course',
+          'subtitle': details['courseName'] != null
+              ? 'Course: ${details['courseName']} (${details['courseCode'] ?? ''})'
+              : null,
         };
+
+      case 'course_updated':
+      case 'course_template_updated':
+        return {
+          'icon': Icons.edit,
+          'color': Colors.indigo,
+          'title': '$performerName updated a course',
+          'subtitle': details['newName'] != null
+              ? 'Course: ${details['newName']}'
+              : null,
+        };
+
+      case 'course_deleted':
+      case 'course_template_deleted':
+        return {
+          'icon': Icons.delete,
+          'color': Colors.red,
+          'title': '$performerName deleted a course',
+          'subtitle': details['courseName'] != null
+              ? 'Deleted: ${details['courseName']}'
+              : null,
+        };
+
+      case 'user_activated':
+        return {
+          'icon': Icons.person_add,
+          'color': Colors.green,
+          'title': '$performerName activated a user',
+          'subtitle': details['userName'] != null
+              ? 'User: ${details['userName']}'
+              : null,
+        };
+
+      case 'user_deactivated':
+        return {
+          'icon': Icons.person_off,
+          'color': Colors.orange,
+          'title': '$performerName deactivated a user',
+          'subtitle': details['userName'] != null
+              ? 'User: ${details['userName']}'
+              : null,
+        };
+
+      case 'password_reset_sent':
+        return {
+          'icon': Icons.lock_reset,
+          'color': Colors.blue,
+          'title': '$performerName sent a password reset',
+          'subtitle': details['targetEmail'] != null
+              ? 'To: ${details['targetEmail']}'
+              : null,
+        };
+
+      case 'organization_created':
+        return {
+          'icon': Icons.business,
+          'color': Colors.green,
+          'title': '$performerName created the organization',
+          'subtitle': details['organizationName'],
+        };
+
       default:
         return {
           'icon': Icons.info,
           'color': Colors.grey,
-          'title': action.replaceAll('_', ' ').split(' ').map((word) =>
+          'title': '$performerName performed an action',
+          'subtitle': action.replaceAll('_', ' ').split(' ').map((word) =>
           word.isEmpty ? word : word[0].toUpperCase() + word.substring(1)).join(' '),
-          'subtitle': null,
         };
     }
   }
