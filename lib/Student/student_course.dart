@@ -11,6 +11,7 @@ import 'student_assignment_details.dart';
 import '../goal_progress_service.dart';
 import '../Stu_goal.dart';
 import '../chat_integrated.dart';
+import '../notification.dart';
 
 // Add these enums for calendar event types
 enum EventType { normal, recurring }
@@ -33,7 +34,8 @@ class StudentCoursePage extends StatefulWidget {
 
 class _StudentCoursePageState extends State<StudentCoursePage> with TickerProviderStateMixin {
   final AuthService _authService = AuthService();
-  final GoalProgressService _goalService = GoalProgressService(); // Enhanced goal service
+  final GoalProgressService _goalService = GoalProgressService();
+  final NotificationService _notificationService = NotificationService();
   late TabController _tabController;
 
   // Add these as class variables for real-time listeners
@@ -57,12 +59,19 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
   DateTime _focusedDate = DateTime.now();
   CalendarView _currentView = CalendarView.month;
 
+  // FIXED: Update the initState method in student_course.dart
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+
+    // Initialize notification service immediately
+    // Initialize notification service immediately
+    _notificationService.initialize();
+
     _loadData();
   }
+
 
   @override
   void dispose() {
@@ -120,10 +129,11 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     }
   }
 
+  // AFTER: Replace the _startRealtimeListeners method in student_course.dart
   void _startRealtimeListeners() {
     if (_organizationCode == null) return;
 
-    // Listen for new assignments
+    // Listen for new assignments with enhanced notification creation
     _assignmentsSubscription = FirebaseFirestore.instance
         .collection('organizations')
         .doc(_organizationCode)
@@ -145,6 +155,17 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           if (isNew) {
             // Show notification for new assignment
             _showNewItemNotification('assignment', assignmentData['title'] ?? 'Assignment');
+
+            // ✅ ENHANCED: Create notification with complete navigation data
+            await _createEnhancedFirestoreNotification(
+              type: 'assignment',
+              title: assignmentData['title'] ?? 'Assignment',
+              sourceId: assignmentId,
+              courseId: widget.courseId,
+              courseName: widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course',
+              orgCode: _organizationCode!,
+              dueDate: assignmentData['dueDate'] as Timestamp?,
+            );
 
             // Create calendar event for the new assignment
             if (assignmentData['dueDate'] != null) {
@@ -171,7 +192,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
       });
     });
 
-    // Listen for new tutorials
+    // Listen for new tutorials with enhanced notification creation
     _materialsSubscription = FirebaseFirestore.instance
         .collection('organizations')
         .doc(_organizationCode)
@@ -193,6 +214,17 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           if (isNew && materialData['materialType'] == 'tutorial') {
             // Show notification for new tutorial
             _showNewItemNotification('tutorial', materialData['title'] ?? 'Tutorial');
+
+            // ✅ ENHANCED: Create notification with complete navigation data
+            await _createEnhancedFirestoreNotification(
+              type: 'tutorial',
+              title: materialData['title'] ?? 'Tutorial',
+              sourceId: materialId,
+              courseId: widget.courseId,
+              courseName: widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course',
+              orgCode: _organizationCode!,
+              dueDate: materialData['dueDate'] as Timestamp?,
+            );
 
             // Create calendar event for the new tutorial
             if (materialData['dueDate'] != null) {
@@ -218,6 +250,82 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         }).toList();
       });
     });
+  }
+
+// ✅ ENHANCED: Complete notification creation method (FIXED - Only one version)
+  Future<void> _createEnhancedFirestoreNotification({
+    required String type,
+    required String title,
+    required String sourceId,
+    required String courseId,
+    required String courseName,
+    required String orgCode,
+    Timestamp? dueDate,
+  }) async {
+    try {
+      final user = _authService.currentUser;
+      if (user == null) return;
+
+      // Get all enrolled students for this course
+      final enrollmentsSnapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('enrollments')
+          .get();
+
+      print('✅ Creating notifications for ${enrollmentsSnapshot.docs.length} students');
+
+      // Create notification for each enrolled student
+      for (var enrollment in enrollmentsSnapshot.docs) {
+        final studentId = enrollment.data()['studentId'];
+
+        // Skip if it's the lecturer who created the content
+        if (studentId == user.uid) continue;
+
+        // Create comprehensive notification data
+        final notificationData = {
+          'title': type == 'assignment' ? '📝 New Assignment Posted' : '📚 New Tutorial Posted',
+          'body': '$title has been posted in $courseName',
+          'type': 'NotificationType.$type',
+          'sourceId': sourceId,
+          'sourceType': type,
+          'courseId': courseId,                  // ✅ CRITICAL for navigation
+          'courseName': courseName,
+          'organizationCode': orgCode,           // ✅ CRITICAL for navigation
+          'itemTitle': title,                    // ✅ ENHANCED for display
+          'createdAt': FieldValue.serverTimestamp(),
+          'isRead': false,
+          // ✅ ENHANCED: Complete navigation helpers
+          'navigationData': {
+            'sourceId': sourceId,
+            'courseId': courseId,
+            'orgCode': orgCode,
+            'type': type,
+            'title': title,
+            'courseName': courseName,
+          },
+        };
+
+        // Add due date if available
+        if (dueDate != null) {
+          notificationData['dueDate'] = dueDate;
+        }
+
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('students')
+            .doc(studentId)
+            .collection('notifications')
+            .add(notificationData);
+
+        print('✅ Created notification for student: $studentId');
+      }
+    } catch (e) {
+      print('❌ Error creating enhanced notification: $e');
+    }
   }
 
   // Calendar event creation function
@@ -1700,10 +1808,69 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         onPressed: () => Navigator.pop(context),
       ),
       actions: [
-        IconButton(
-          icon: Icon(Icons.notifications_outlined, color: Colors.black87),
-          onPressed: () {
-            // TODO: Implement notifications
+        // FIXED: Real-time notification bell icon
+        StreamBuilder<int>(
+          stream: _notificationService.notificationCountStream,
+          initialData: 0,
+          builder: (context, snapshot) {
+            final count = snapshot.data ?? 0;
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.notifications_outlined, color: Colors.black87),
+                  onPressed: () {
+                    // Ensure service is initialized before showing dialog
+                    if (!_notificationService.isInitialized) {
+                      _notificationService.initialize().then((_) {
+                        showDialog(
+                          context: context,
+                          builder: (context) => NotificationDialog(),
+                        ).then((_) {
+                          // Refresh page data when returning from notification dialog
+                          _loadData();
+                        });
+                      });
+                    } else {
+                      showDialog(
+                        context: context,
+                        builder: (context) => NotificationDialog(),
+                      ).then((_) {
+                        // Refresh page data when returning from notification dialog
+                        _loadData();
+                      }); // <-- CHANGE THIS PART
+                    }
+                  },
+                ),
+                if (count > 0)
+                  Positioned(
+                    right: 8,
+                    top: 8,
+                    child: Container(
+                      padding: EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      constraints: BoxConstraints(
+                        minWidth: 18,
+                        minHeight: 18,
+                      ),
+                      child: Center(
+                        child: Text(
+                          count > 99 ? '99+' : count.toString(),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
           },
         ),
       ],

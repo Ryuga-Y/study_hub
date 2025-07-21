@@ -13,6 +13,7 @@ import '../Stu_goal.dart'; // Import the goal page
 import '../goal_progress_service.dart'; // Import the goal service
 import '../chat_integrated.dart';
 import '../stu_report.dart';
+import '../notification.dart';
 
 class StudentHomePage extends StatefulWidget {
   const StudentHomePage({Key? key}) : super(key: key);
@@ -21,9 +22,10 @@ class StudentHomePage extends StatefulWidget {
   State<StudentHomePage> createState() => _StudentHomePageState();
 }
 
-class _StudentHomePageState extends State<StudentHomePage> {
+class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingObserver {
   final AuthService _authService = AuthService();
-  final GoalProgressService _goalService = GoalProgressService(); // Add goal service
+  final GoalProgressService _goalService = GoalProgressService();
+  final NotificationService _notificationService = NotificationService();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Data
@@ -40,14 +42,109 @@ class _StudentHomePageState extends State<StudentHomePage> {
   // Navigation
   int _currentIndex = 0;
 
+  // Animation and timer variables
+  Timer? _autoSyncTimer;
+  StreamSubscription? _goalProgressSubscription;
+
+  // FIXED: Enhanced notification initialization with better error handling and debugging
   @override
   void initState() {
     super.initState();
-    _loadData();
-    _startListeningForSubmissions(); // Add automatic submission detection
+    WidgetsBinding.instance.addObserver(this);
+
+    _initializeAnimations();
+
+    // Load data first, then initialize notifications with proper delay
+    _loadData().then((_) {
+      if (mounted && _userData != null) {
+        // Add delay to ensure user data is fully loaded
+        Future.delayed(Duration(milliseconds: 1000), () {
+          if (mounted) {
+            print('🔄 Initializing notification service in student_home.dart...');
+            print('📍 User: ${_userData?['fullName']}');
+            print('📍 Role: ${_userData?['role']}');
+            print('📍 Org: ${_userData?['organizationCode']}');
+
+            _notificationService.initialize().then((_) {
+              print('✅ Notification service initialized successfully');
+              // Clean up test notifications once
+              _notificationService.cleanupTestNotifications();
+            }).catchError((error) {
+              print('❌ Error initializing notification service: $error');
+            });
+          }
+        });
+
+        _startListeningForSubmissions();
+        _startRealtimeGoalProgressListener();
+        _startAutoSyncTimer();
+        _checkForMissedRewards();
+      }
+    });
   }
 
-  // Start listening for new submissions automatically
+  @override
+  void dispose() {
+    // Remove app lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
+
+    // Cancel timers and subscriptions
+    _autoSyncTimer?.cancel();
+    _goalProgressSubscription?.cancel();
+
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed) {
+      // App came back to foreground - refresh data
+      _loadData();
+      _checkForNewSubmissions();
+    }
+  }
+
+  // Initialize animations
+  void _initializeAnimations() {
+    // Add any animation initialization code here if needed
+  }
+
+  // Load goal progress
+  Future<void> _loadGoalProgress() async {
+    try {
+      await _loadWaterBuckets();
+    } catch (e) {
+      debugPrint('Error loading goal progress: $e');
+    }
+  }
+
+  // Start realtime goal progress listener
+  void _startRealtimeGoalProgressListener() {
+    final user = _authService.currentUser;
+    if (user == null) return;
+
+    _goalProgressSubscription = FirebaseFirestore.instance
+        .collection('goalProgress')
+        .doc(user.uid)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.exists && mounted) {
+        final data = snapshot.data();
+        if (data != null) {
+          final newBuckets = data['waterBuckets'] ?? 0;
+          if (newBuckets != _waterBuckets) {
+            setState(() {
+              _waterBuckets = newBuckets;
+            });
+          }
+        }
+      }
+    });
+  }
+
+  // Start auto sync timer
   void _startListeningForSubmissions() {
     // Check for new submissions when app starts
     _checkForNewSubmissions();
@@ -58,6 +155,26 @@ class _StudentHomePageState extends State<StudentHomePage> {
         _checkForNewSubmissions();
       } else {
         timer.cancel();
+      }
+    });
+  }
+
+  // Check for missed rewards
+  Future<void> _checkForMissedRewards() async {
+    try {
+      // Implementation for checking missed rewards
+      // This would depend on your specific reward logic
+    } catch (e) {
+      debugPrint('Error checking for missed rewards: $e');
+    }
+  }
+
+  // Start listening for new submissions automatically
+  // Start auto sync timer
+  void _startAutoSyncTimer() {
+    _autoSyncTimer = Timer.periodic(Duration(minutes: 5), (timer) {
+      if (mounted) {
+        _checkForNewSubmissions();
       }
     });
   }
@@ -315,6 +432,31 @@ class _StudentHomePageState extends State<StudentHomePage> {
     }
   }
 
+  // Handle notification navigation
+  void _handleNotificationNavigation(Map<String, dynamic> arguments) {
+    if (arguments['assignmentId'] != null) {
+      // Navigate to assignment details page
+      Navigator.pushNamed(
+        context,
+        '/assignment-details',
+        arguments: {
+          'assignmentId': arguments['assignmentId'],
+          'courseId': arguments['courseId'],
+        },
+      );
+    } else if (arguments['materialId'] != null) {
+      // Navigate to tutorial details page
+      Navigator.pushNamed(
+        context,
+        '/material-details',
+        arguments: {
+          'materialId': arguments['materialId'],
+          'courseId': arguments['courseId'],
+        },
+      );
+    }
+  }
+
   Future<void> _handleLogout() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -557,6 +699,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
     );
   }
 
+  // FIXED: Update the _buildAppBar method in student_home.dart
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       backgroundColor: Colors.white,
@@ -587,11 +730,103 @@ class _StudentHomePageState extends State<StudentHomePage> {
         icon: const Icon(Icons.menu, color: Colors.black87),
         onPressed: () => _scaffoldKey.currentState?.openDrawer(),
       ),
+      // FIXED: Enhanced notification bell with proper initialization and error handling
       actions: [
-        IconButton(
-          icon: const Icon(Icons.notifications_outlined, color: Colors.black87),
-          onPressed: () {
-            // TODO: Implement notifications
+        // ✅ ENHANCED: Real-time notification bell with better error handling
+        StreamBuilder<int>(
+          stream: _notificationService.notificationCountStream,
+          initialData: 0,
+          builder: (context, snapshot) {
+            final count = snapshot.data ?? 0;
+
+            // Debug notification count
+            if (count > 0) {
+              print('📬 Student Home: $count unread notifications');
+            }
+
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.notifications_outlined, color: Colors.black87),
+                  onPressed: () async {
+                    print('🔔 Notification bell tapped');
+
+                    // Ensure service is initialized before showing dialog
+                    if (!_notificationService.isInitialized) {
+                      print('🔄 Notification service not initialized, initializing...');
+
+                      // Show loading
+                      showDialog(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (context) => Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      );
+
+                      try {
+                        await _notificationService.initialize();
+                        Navigator.pop(context); // Close loading
+
+                        // Now show notifications
+                        showDialog(
+                          context: context,
+                          builder: (context) => NotificationDialog(),
+                        ).then((_) {
+                          // Refresh data when returning from notifications
+                          _loadData();
+                        });
+                      } catch (e) {
+                        Navigator.pop(context); // Close loading
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Error loading notifications: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    } else {
+                      // Service is ready, show notifications directly
+                      showDialog(
+                        context: context,
+                        builder: (context) => NotificationDialog(),
+                      ).then((_) {
+                        // Refresh data when returning from notifications
+                        _loadData();
+                      });
+                    }
+                  },
+                ),
+                if (count > 0)
+                  Positioned(
+                    right: 8,
+                    top: 8,
+                    child: Container(
+                      padding: EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      constraints: BoxConstraints(
+                        minWidth: 18,
+                        minHeight: 18,
+                      ),
+                      child: Center(
+                        child: Text(
+                          count > 99 ? '99+' : count.toString(),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
           },
         ),
       ],

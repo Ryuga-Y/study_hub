@@ -235,6 +235,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     });
   }
 
+  // ✅ UPDATED: Added notification creation for assignments
   void _navigateToCreateAssignment() async {
     setState(() {
       showCreateOptions = false;
@@ -255,9 +256,13 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
 
     if (result == true && mounted) {
       _fetchAssignments();
+
+      // ✅ NEW: Create notifications for students when new assignment is added
+      _scheduleNotificationCreation('assignment');
     }
   }
 
+  // ✅ UPDATED: Added notification creation for materials
   void _navigateToCreateMaterial() async {
     setState(() {
       showCreateOptions = false;
@@ -278,6 +283,178 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
 
     if (result == true && mounted) {
       _fetchMaterials();
+
+      // ✅ NEW: Create notifications for students when new material is added
+      _scheduleNotificationCreation('material');
+    }
+  }
+
+  // ✅ NEW: Schedule notification creation after content is added
+  void _scheduleNotificationCreation(String contentType) {
+    // Wait a bit for the new content to be saved, then check for new items
+    Future.delayed(Duration(seconds: 2), () {
+      _checkForNewContentAndNotify(contentType);
+    });
+  }
+
+  // ✅ NEW: Check for newly added content and create notifications
+  Future<void> _checkForNewContentAndNotify(String contentType) async {
+    try {
+      if (_organizationCode == null) return;
+
+      print('🔍 Checking for new $contentType to send notifications...');
+
+      if (contentType == 'assignment') {
+        // Get the most recent assignment
+        final recentAssignments = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .orderBy('createdAt', descending: true)
+            .limit(1)
+            .get();
+
+        if (recentAssignments.docs.isNotEmpty) {
+          final assignment = recentAssignments.docs.first;
+          final assignmentData = assignment.data();
+
+          // Check if this assignment was created in the last 30 seconds (likely just created)
+          final createdAt = assignmentData['createdAt'] as Timestamp?;
+          if (createdAt != null &&
+              DateTime.now().difference(createdAt.toDate()).inSeconds < 30) {
+
+            await _createStudentNotifications(
+              itemType: 'assignment',
+              itemTitle: assignmentData['title'] ?? 'Assignment',
+              sourceId: assignment.id,
+              courseId: widget.courseId,
+              dueDate: assignmentData['dueDate'] as Timestamp?,
+            );
+          }
+        }
+      } else if (contentType == 'material') {
+        // Get the most recent material
+        final recentMaterials = await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(_organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('materials')
+            .orderBy('createdAt', descending: true)
+            .limit(1)
+            .get();
+
+        if (recentMaterials.docs.isNotEmpty) {
+          final material = recentMaterials.docs.first;
+          final materialData = material.data();
+
+          // Check if this material was created in the last 30 seconds (likely just created)
+          final createdAt = materialData['createdAt'] as Timestamp?;
+          if (createdAt != null &&
+              DateTime.now().difference(createdAt.toDate()).inSeconds < 30) {
+
+            await _createStudentNotifications(
+              itemType: 'material',
+              itemTitle: materialData['title'] ?? 'Material',
+              sourceId: material.id,
+              courseId: widget.courseId,
+              dueDate: null,
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ Error checking for new content: $e');
+    }
+  }
+
+  // ✅ NEW: Create notifications for all enrolled students
+  Future<void> _createStudentNotifications({
+    required String itemType,
+    required String itemTitle,
+    required String sourceId,
+    required String courseId,
+    Timestamp? dueDate,
+  }) async {
+    try {
+      print('📢 Creating notifications for $itemType: $itemTitle');
+
+      // Get current lecturer name
+      final currentUser = _authService.currentUser;
+      if (currentUser == null) return;
+
+      final lecturerData = await _authService.getUserData(currentUser.uid);
+      final lecturerName = lecturerData?['fullName'] ?? 'Your lecturer';
+      final courseName = widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course';
+
+      int notificationsCreated = 0;
+
+      // Create notifications for each enrolled student
+      for (final student in enrolledStudents) {
+        try {
+          String title = itemType == 'assignment' ?
+          '📝 New Assignment: $itemTitle' :
+          '📚 New Material: $itemTitle';
+
+          String body = itemType == 'assignment' ?
+          '$lecturerName has posted a new assignment in $courseName' :
+          '$lecturerName has shared new material in $courseName';
+
+          if (dueDate != null && itemType == 'assignment') {
+            final dueDateStr = _formatDate(dueDate);
+            body += ' (Due: $dueDateStr)';
+          }
+
+          await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(_organizationCode)
+              .collection('students')
+              .doc(student['id'])
+              .collection('notifications')
+              .add({
+            'title': title,
+            'body': body,
+            'type': itemType,
+            'sourceType': 'course',
+            'sourceId': sourceId,
+            'courseId': courseId,
+            'courseName': courseName,
+            'createdAt': FieldValue.serverTimestamp(),
+            'isRead': false,
+            'createdBy': currentUser.uid,
+            'lecturerName': lecturerName,
+            if (dueDate != null) 'dueDate': dueDate,
+          });
+
+          notificationsCreated++;
+        } catch (e) {
+          print('❌ Error creating notification for student ${student['id']}: $e');
+        }
+      }
+
+      print('✅ Successfully created $notificationsCreated notifications for $itemType');
+
+      if (mounted && notificationsCreated > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📢 Notifications sent to $notificationsCreated students'),
+            backgroundColor: Colors.green[600],
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error creating student notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ Error sending notifications: ${e.toString()}'),
+            backgroundColor: Colors.orange[600],
+          ),
+        );
+      }
     }
   }
 

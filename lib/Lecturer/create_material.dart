@@ -7,6 +7,7 @@ import '../Authentication/custom_widgets.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File;
 import 'dart:async';
+import '../notification.dart';
 
 // Add these enums if they don't exist in your project
 enum EventType { normal, recurring, holiday }
@@ -110,7 +111,7 @@ class NotificationService {
     }
   }
 
-  // Helper method to create individual student notification
+// Update the _createStudentNotification method to include organizationCode in the notification
   Future<void> _createStudentNotification({
     required String organizationCode,
     required String studentId,
@@ -143,18 +144,12 @@ class NotificationService {
             ? '$itemTitle has been posted in $courseName'
             : '$itemTitle learning material has been posted';
         break;
-      case 'goal':
-        notificationTitle = '🎯 New Goal Created';
-        notificationBody = '$itemTitle has been set with a deadline';
-        break;
       default:
         notificationTitle = '📢 New Item Posted';
         notificationBody = '$itemTitle has been posted';
     }
 
-    print('📬 Creating notification for student: $studentId');
-    print('📍 Path: organizations/$organizationCode/students/$studentId/notifications');
-
+    // NEW CODE in _createStudentNotification method
     await _firestore
         .collection('organizations')
         .doc(organizationCode)
@@ -164,10 +159,12 @@ class NotificationService {
         .add({
       'title': notificationTitle,
       'body': notificationBody,
-      'type': 'NotificationType.${itemType}',
+      'type': 'NotificationType.$itemType',
       'sourceId': sourceId,
       'sourceType': itemType,
       'courseId': courseId,
+      'courseName': courseName,              // ADD THIS LINE
+      'organizationCode': organizationCode,  // ADD THIS LINE
       'createdAt': FieldValue.serverTimestamp(),
       'isRead': false,
     });
@@ -224,7 +221,7 @@ class NotificationService {
         print('📅 Creating calendar event for student: $studentId');
         print('📍 Path: organizations/$orgCode/students/$studentId/calendar_events');
 
-        await _firestore
+        final calendarEventRef = await _firestore
             .collection('organizations')
             .doc(orgCode)
             .collection('students')
@@ -239,7 +236,7 @@ class NotificationService {
           'calendar': _getCalendarCategory(itemType),
           'eventType': EventType.normal.index,
           'recurrenceType': RecurrenceType.none.index,
-          'reminderMinutes': 1440, // 24 hours before
+          'reminderMinutes': [1440, 10], // Both 24 hours and 10 minutes before
           'location': '',
           'isRecurring': false,
           'originalEventId': '',
@@ -247,7 +244,20 @@ class NotificationService {
           'sourceType': itemType,
           'courseId': courseId,
           'createdAt': FieldValue.serverTimestamp(),
+          'reminderScheduled': false, // Track if reminders have been scheduled
         });
+
+// Schedule initial reminder check for this event
+        final eventData = {
+          'title': _getCalendarEventTitle(itemType, itemTitle),
+          'startTime': Timestamp.fromDate(dueDate),
+          'sourceId': sourceId,
+          'sourceType': itemType,
+          'courseId': courseId,
+        };
+
+// Trigger reminder check (this will be handled by the deadline checker)
+        print('📅 Calendar event created, reminders will be scheduled automatically');
       }
 
       print('✅ Created calendar events for $itemType: $itemTitle');
@@ -715,12 +725,11 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         materialData['isActive'] = true;
       }
 
-      // Standardize on organizationCode
+      // Get organization code - ADD NULL CHECK
       final organizationCode = widget.courseData['organizationCode'];
-
-      if (organizationCode == null) {
-        print('❌ Organization code not found in course data');
-        throw Exception('Organization code not found');
+      if (organizationCode == null || organizationCode.isEmpty) {
+        print('❌ Organization code is null or empty in courseData');
+        throw Exception('Organization code not found in course data');
       }
 
       print('🏢 Organization code: $organizationCode');
@@ -806,7 +815,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         );
       }
 
-      print('🎉 Material save process completed successfully');
+      print('✅ Created notification for material: ${_titleController.text.trim()}');
 
       // Navigate back
       if (mounted) {

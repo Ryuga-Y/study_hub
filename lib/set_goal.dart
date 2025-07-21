@@ -109,14 +109,18 @@ class _SetGoalPageState extends State<SetGoalPage> {
   Future<void> _fetchUserData() async {
     final user = _auth.currentUser;
     if (user != null) {
-      final userDoc = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      if (mounted) {
-        setState(() {
-          organizationCode = userDoc.data()?['organizationCode'];
-        });
+      try {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (mounted && userDoc.exists) {
+          setState(() {
+            organizationCode = userDoc.data()?['organizationCode'];
+          });
+        }
+      } catch (e) {
+        print('Error fetching user data: $e');
       }
     }
   }
@@ -364,13 +368,14 @@ class _SetGoalPageState extends State<SetGoalPage> {
           await _createGoalCalendarEvent(goalRef.id, _titleController.text.trim(), finalTargetDateTime);
         }
 
-        // Create notification for new goal
-        await NotificationService().createNewItemNotification(
-          itemType: 'goal',
-          itemTitle: _titleController.text.trim(),
-          dueDate: finalTargetDateTime,
-          sourceId: goalRef.id,
-        );
+        // FIXED: Create a simple notification for new goal (removed the non-existent method call)
+        if (finalTargetDateTime != null) {
+          await _createGoalNotification(
+            goalTitle: _titleController.text.trim(),
+            targetDate: finalTargetDateTime,
+            goalId: goalRef.id,
+          );
+        }
       }
 
       if (mounted) {
@@ -393,6 +398,45 @@ class _SetGoalPageState extends State<SetGoalPage> {
     }
   }
 
+  // FIXED: Simple goal notification creation method
+  Future<void> _createGoalNotification({
+    required String goalTitle,
+    required DateTime targetDate,
+    required String goalId,
+  }) async {
+    try {
+      if (organizationCode == null || userId == null) return;
+
+      // Create a simple notification document
+      await _firestore
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('students')
+          .doc(userId)
+          .collection('notifications')
+          .add({
+        'title': '🎯 New Goal Set',
+        'body': 'Goal "$goalTitle" has been set with deadline: ${targetDate.day}/${targetDate.month}/${targetDate.year}',
+        'type': 'NotificationType.goal',
+        'sourceId': goalId,
+        'sourceType': 'goal',
+        'itemTitle': goalTitle,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'dueDate': Timestamp.fromDate(targetDate),
+        'navigationData': {
+          'sourceId': goalId,
+          'type': 'goal',
+          'title': goalTitle,
+        },
+      });
+
+      print('✅ Created notification for new goal: $goalTitle');
+    } catch (e) {
+      print('❌ Error creating goal notification: $e');
+    }
+  }
+
   Future<void> _createGoalCalendarEvent(String goalId, String goalTitle, DateTime targetDate) async {
     try {
       if (organizationCode == null) {
@@ -409,8 +453,8 @@ class _SetGoalPageState extends State<SetGoalPage> {
           .add({
         'title': '🎯 Goal: $goalTitle',
         'description': 'Goal deadline',
-        'startTime': Timestamp.fromDate(targetDate.toUtc()), // Convert to UTC for storage
-        'endTime': Timestamp.fromDate(targetDate.toUtc()),   // Convert to UTC for storage
+        'startTime': Timestamp.fromDate(targetDate),
+        'endTime': Timestamp.fromDate(targetDate),
         'color': Colors.purple.value,
         'calendar': 'goals',
         'eventType': EventType.normal.index,
@@ -488,54 +532,52 @@ class _SetGoalPageState extends State<SetGoalPage> {
     try {
       Goal? goalToToggle = goals.firstWhere((g) => g.id == goalId);
 
-      if (goalToToggle != null) {
-        bool newPinState = !goalToToggle.isPinned;
+      bool newPinState = !goalToToggle.isPinned;
 
-        await _goalsRef.doc(goalId).update({
-          'isPinned': newPinState,
-        });
+      await _goalsRef.doc(goalId).update({
+        'isPinned': newPinState,
+      });
 
-        // Update the pinned goals list in goalProgress
-        final pinnedGoalsSnapshot = await _goalsRef
-            .where('isPinned', isEqualTo: true)
-            .get();
+      // Update the pinned goals list in goalProgress
+      final pinnedGoalsSnapshot = await _goalsRef
+          .where('isPinned', isEqualTo: true)
+          .get();
 
-        List<String> pinnedGoalTitles = [];
-        for (var doc in pinnedGoalsSnapshot.docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          if (doc.id == goalId) {
-            if (newPinState) {
-              pinnedGoalTitles.add(goalToToggle.title);
-            }
-          } else {
-            pinnedGoalTitles.add(data['title'] ?? '');
+      List<String> pinnedGoalTitles = [];
+      for (var doc in pinnedGoalsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (doc.id == goalId) {
+          if (newPinState) {
+            pinnedGoalTitles.add(goalToToggle.title);
           }
+        } else {
+          pinnedGoalTitles.add(data['title'] ?? '');
         }
+      }
 
-        await _goalProgressRef.update({
-          'pinnedGoals': pinnedGoalTitles,
-          'hasActiveGoal': pinnedGoalTitles.isNotEmpty,
-          'currentGoal': pinnedGoalTitles.isNotEmpty
-              ? pinnedGoalTitles.join(' • ')
-              : "No goal selected - Press 'Set Goal' to choose one",
-        });
+      await _goalProgressRef.update({
+        'pinnedGoals': pinnedGoalTitles,
+        'hasActiveGoal': pinnedGoalTitles.isNotEmpty,
+        'currentGoal': pinnedGoalTitles.isNotEmpty
+            ? pinnedGoalTitles.join(' • ')
+            : "No goal selected - Press 'Set Goal' to choose one",
+      });
 
-        if (widget.onGoalPinned != null && pinnedGoalTitles.isNotEmpty) {
-          widget.onGoalPinned!(pinnedGoalTitles.join(' • '));
-        }
+      if (widget.onGoalPinned != null && pinnedGoalTitles.isNotEmpty) {
+        widget.onGoalPinned!(pinnedGoalTitles.join(' • '));
+      }
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  newPinState
-                      ? '${goalToToggle.title} pinned to missions! 📌'
-                      : '${goalToToggle.title} unpinned from missions!'),
-              backgroundColor: newPinState ? Colors.amber : Colors.grey,
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                newPinState
+                    ? '${goalToToggle.title} pinned to missions! 📌'
+                    : '${goalToToggle.title} unpinned from missions!'),
+            backgroundColor: newPinState ? Colors.amber : Colors.grey,
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -688,7 +730,7 @@ class _SetGoalPageState extends State<SetGoalPage> {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Colors.blueAccent.withValues(alpha: 0.1), Colors.blue.withValues(alpha: 0.05)],
+                colors: [Colors.blueAccent.withOpacity(0.1), Colors.blue.withOpacity(0.05)],
               ),
             ),
             child: Column(
@@ -974,7 +1016,7 @@ class _SetGoalPageState extends State<SetGoalPage> {
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.1),
+                  color: Colors.grey.withOpacity(0.1),
                   spreadRadius: 1,
                   blurRadius: 10,
                   offset: Offset(0, -2),
