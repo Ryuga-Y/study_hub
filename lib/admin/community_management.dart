@@ -250,7 +250,7 @@ class _CommunityManagementPageState extends State<CommunityManagementPage> with 
         border: Border.all(color: Colors.red[200]!),
         boxShadow: [
           BoxShadow(
-            color: Colors.red.withOpacity(0.1),
+            color: Colors.red.withValues(alpha: 0.1),
             blurRadius: 5,
             offset: Offset(0, 2),
           ),
@@ -436,7 +436,7 @@ class _CommunityManagementPageState extends State<CommunityManagementPage> with 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: reasonColors[reason]!.withOpacity(0.1),
+        color: reasonColors[reason]!.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: reasonColors[reason]!),
       ),
@@ -711,7 +711,7 @@ class _CommunityManagementPageState extends State<CommunityManagementPage> with 
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 5,
           ),
         ],

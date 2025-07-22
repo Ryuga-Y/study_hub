@@ -1858,9 +1858,4 @@ class CommunityService {
     }
   }
 
-  // Legacy cleanup method - can be removed if not used elsewhere
-  @Deprecated('Use cleanupBrokenImagePosts instead')
-  Future<void> cleanupBrokenPosts() async {
-    await cleanupBrokenImagePosts();
-  }
 }

@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
+import '../community/bloc.dart';
+import '../community/feed_screen.dart';
+import '../community/models.dart';
+import '../profile_page.dart';
 import 'create_assignment.dart';
 import 'assignment_details.dart';
 import 'create_material.dart';
@@ -37,7 +42,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
   String? errorMessage;
   bool showCreateOptions = false;
   bool isLecturer = false;
-  int _currentIndex = 2; // Lecturer tab
+  int _currentIndex = 0; // Lecturer tab
 
   @override
   void initState() {
@@ -1766,23 +1771,32 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
         setState(() {
           _currentIndex = index;
         });
-        // Handle navigation
+
+        // Handle navigation - matching lecturer_home.dart structure
         switch (index) {
           case 0:
-          // TODO: Navigate to courses
+          // Navigate back to courses (lecturer home)
             Navigator.pop(context);
             break;
           case 1:
-          // TODO: Navigate to community
+          // Navigate to community
+            _navigateToCommunity();
             break;
           case 2:
-          // Already on course page
+          // Navigate to chat (TODO)
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Chat feature coming soon'),
+                backgroundColor: Colors.orange,
+              ),
+            );
             break;
           case 3:
-          // TODO: Navigate to calendar
-            break;
-          case 4:
-          // TODO: Navigate to profile
+          // Navigate to profile
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => ProfilePage()),
+            );
             break;
         }
       },
@@ -1803,15 +1817,126 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
           label: 'Chat',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.calendar_today),
-          label: 'Calendar',
-        ),
-        BottomNavigationBarItem(
           icon: Icon(Icons.person_outline),
           label: 'Profile',
         ),
       ],
     );
+  }
+
+  Future<void> _navigateToCommunity() async {
+    try {
+      final organizationCode = _organizationCode ?? '';
+      if (organizationCode.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Organization code not found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Get current user data
+      final user = _authService.currentUser;
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('User not authenticated'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final userData = await _authService.getUserData(user.uid);
+      if (userData == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('User data not found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Create community user object
+      final communityUser = CommunityUser(
+        uid: user.uid,
+        fullName: userData['fullName'] ?? 'Unknown',
+        email: userData['email'] ?? '',
+        avatarUrl: userData['avatarUrl'],
+        bio: userData['bio'],
+        organizationCode: userData['organizationCode'] ?? '',
+        role: userData['role'] ?? 'lecturer',
+        postCount: userData['postCount'] ?? 0,
+        friendCount: userData['friendCount'] ?? 0,
+        joinDate: userData['createdAt'] != null
+            ? (userData['createdAt'] as Timestamp).toDate()
+            : DateTime.now(),
+        isActive: userData['isActive'] ?? true,
+      );
+
+      // Get or create CommunityBloc
+      CommunityBloc communityBloc;
+      try {
+        // Try to get existing bloc
+        communityBloc = BlocProvider.of<CommunityBloc>(context);
+      } catch (e) {
+        // If no bloc exists, create a new one
+        communityBloc = CommunityBloc();
+      }
+
+      // Initialize the bloc with user profile
+      communityBloc.add(LoadUserProfile(communityUser.uid));
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      // Navigate to community feed
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => BlocProvider.value(
+            value: communityBloc,
+            child: FeedScreen(
+              organizationCode: organizationCode,
+            ),
+          ),
+        ),
+      ).then((_) {
+        // Reset bottom navigation to Courses tab when returning from community
+        setState(() {
+          _currentIndex = 0;
+        });
+      });
+    } catch (e) {
+      // Close loading dialog if open
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error accessing community: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+
+      // Reset navigation index on error as well
+      setState(() {
+        _currentIndex = 0;
+      });
+    }
   }
 
   List<Map<String, dynamic>> _getRecentActivity() {
