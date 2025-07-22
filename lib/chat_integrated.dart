@@ -12,6 +12,7 @@ import '../community/models.dart';
 import '../community/search_screen.dart';
 import '../community/feed_screen.dart';
 import '../community/community_services.dart';
+import 'dart:async';
 
 // Chat Models
 class ChatContact {
@@ -171,10 +172,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
   void initState() {
     super.initState();
     _loadFriendsAsContacts();
-    _setupRealtimeContactUpdates(); // 🆕 ADD THIS
+    _setupRealtimeContactUpdates();
+    _startPeriodicRefresh();
   }
 
-  // 🆕 ADD THIS METHOD - Real-time contact updates
+  // Real-time contact updates
   void _setupRealtimeContactUpdates() {
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
@@ -187,6 +189,16 @@ class _ChatContactPageState extends State<ChatContactPage> {
         .snapshots()
         .listen((snapshot) {
       print('🔄 Friends collection changed, refreshing contacts...');
+      _loadFriendsAsContacts();
+    });
+
+    // 🆕 ADD THIS - Also listen for any chat document changes
+    _firestore
+        .collection('chats')
+        .where('participants', arrayContains: currentUserId)
+        .snapshots()
+        .listen((snapshot) {
+      print('🔄 Chat documents changed, refreshing contacts...');
       _loadFriendsAsContacts();
     });
   }
@@ -268,6 +280,26 @@ class _ChatContactPageState extends State<ChatContactPage> {
     }
   }
 
+  // 🆕 ADD THIS METHOD - Add after _loadFriendsAsContacts method
+  Future<void> forceRefresh() async {
+    print('🔄 Force refreshing chat contacts...');
+    setState(() {
+      _isLoading = true;
+    });
+    await _loadFriendsAsContacts();
+  }
+
+// 🆕 ADD THIS METHOD - Add periodic refresh
+  void _startPeriodicRefresh() {
+    Timer.periodic(Duration(seconds: 30), (timer) {
+      if (mounted) {
+        _loadFriendsAsContacts();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
   Future<void> _createChat(String currentUserId, Friend friend) async {
     final chatId = ChatContact._generateChatId(currentUserId, friend.friendId);
 
@@ -294,7 +326,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
       },
     });
 
-    // Add welcome message
+
     await _firestore
         .collection('chats')
         .doc(chatId)
@@ -308,9 +340,23 @@ class _ChatContactPageState extends State<ChatContactPage> {
     });
   }
 
-  // Add this method to _ChatContactPageState class
+
   Future<bool> _verifyMutualFriendship(String userId1, String userId2) async {
     try {
+      // 🆕 IMPROVED: Add auth check first
+      final user = _auth.currentUser;
+      if (user == null) {
+        print('❌ No authenticated user for friendship verification');
+        return false;
+      }
+
+      // Refresh token if needed
+      try {
+        await user.getIdToken(true);
+      } catch (authError) {
+        print('⚠️ Auth refresh failed: $authError');
+      }
+
       // Check both directions of friendship
       final query1 = await _firestore
           .collection('friends')
@@ -326,9 +372,12 @@ class _ChatContactPageState extends State<ChatContactPage> {
           .where('status', isEqualTo: 'accepted')
           .get();
 
-      return query1.docs.isNotEmpty && query2.docs.isNotEmpty;
+      bool areFriends = query1.docs.isNotEmpty && query2.docs.isNotEmpty;
+      print('🔍 Friendship verification: $userId1 <-> $userId2 = $areFriends');
+
+      return areFriends;
     } catch (e) {
-      print('Error verifying friendship: $e');
+      print('❌ Error verifying friendship: $e');
       return false;
     }
   }
@@ -343,7 +392,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Refresh contacts when returning to this screen
-    _loadFriendsAsContacts();
+    Future.delayed(Duration(milliseconds: 500), () {
+      if (mounted) {
+        _loadFriendsAsContacts();
+      }
+    });
   }
 
   @override
@@ -714,31 +767,39 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _markMessagesAsRead() async {
-    final currentUserId = _auth.currentUser?.uid;
-    if (currentUserId == null) return;
+    try {
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null) return;
 
-    // Mark all messages as read
-    final messagesSnapshot = await _firestore
-        .collection('chats')
-        .doc(widget.chatId)
-        .collection('messages')
-        .where('senderId', isNotEqualTo: currentUserId)
-        .where('isRead', isEqualTo: false)
-        .get();
+      // Get all messages and filter on client side to avoid Firestore query limitations
+      final messagesSnapshot = await _firestore
+          .collection('chats')
+          .doc(widget.chatId)
+          .collection('messages')
+          .where('isRead', isEqualTo: false)
+          .get();
 
-    final batch = _firestore.batch();
+      final batch = _firestore.batch();
 
-    for (final doc in messagesSnapshot.docs) {
-      batch.update(doc.reference, {'isRead': true});
+      for (final doc in messagesSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        // Only mark messages from other users as read
+        if (data['senderId'] != currentUserId) {
+          batch.update(doc.reference, {'isRead': true});
+        }
+      }
+
+      // Reset unread count
+      batch.update(
+        _firestore.collection('chats').doc(widget.chatId),
+        {'unreadCount.${currentUserId}': 0},
+      );
+
+      await batch.commit();
+    } catch (e) {
+      print('Error marking messages as read: $e');
+      // Continue without marking as read - not critical
     }
-
-    // Reset unread count
-    batch.update(
-      _firestore.collection('chats').doc(widget.chatId),
-      {'unreadCount.${currentUserId}': 0},
-    );
-
-    await batch.commit();
   }
 
   @override

@@ -528,22 +528,27 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                           print('DEBUG: UI - Accept button pressed for request: ${request.id}');
                           context.read<CommunityBloc>().add(AcceptFriendRequest(request.id));
 
-                          // 🆕 ADD THIS - Show success message and suggest checking messages
-                          await Future.delayed(Duration(seconds: 2)); // Wait for processing
+                          // 🆕 UPDATED - Better timing and navigation
+                          await Future.delayed(Duration(milliseconds: 1500)); // Reduced wait time
 
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('Friend request accepted! You can now chat.'),
                                 backgroundColor: Colors.green,
+                                duration: Duration(seconds: 4),
                                 action: SnackBarAction(
                                   label: 'Open Chat',
                                   textColor: Colors.white,
                                   onPressed: () {
+                                    // 🆕 IMPROVED - Navigate and force refresh
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(builder: (context) => ChatContactPage()),
-                                    );
+                                    ).then((_) {
+                                      // Refresh this screen when returning from chat
+                                      context.read<CommunityBloc>().add(LoadPendingRequests());
+                                    });
                                   },
                                 ),
                               ),

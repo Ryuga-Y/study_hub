@@ -269,18 +269,12 @@ class _FeedScreenState extends State<FeedScreen> {
         elevation: 0.5,
         title: Row(
           children: [
-            Icon(
-              Icons.school,
-              color: Colors.purple[400],
-              size: 32,
-            ),
-            SizedBox(width: 12),
             Text(
               'Study Hub',
               style: TextStyle(
-                color: Colors.black87,
-                fontSize: 20,
+                fontSize: 24,
                 fontWeight: FontWeight.bold,
+                color: Colors.purple[600],
               ),
             ),
             Spacer(),
@@ -297,6 +291,24 @@ class _FeedScreenState extends State<FeedScreen> {
                 );
               },
             ),
+// Add cleanup button (you can make this conditional or hidden in production)
+            if (state.feedPosts.any((post) => post.mediaUrls.isNotEmpty))
+              IconButton(
+                icon: Icon(Icons.cleaning_services_outlined),
+                color: Colors.black87,
+                tooltip: 'Clean up broken images',
+                onPressed: () async {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Cleaning up broken images...')),
+                  );
+                  final service = CommunityService();
+                  await service.cleanupBrokenImagePosts();
+                  // Refresh feed
+                  context.read<CommunityBloc>().add(
+                    LoadFeed(organizationCode: widget.organizationCode, refresh: true),
+                  );
+                },
+              ),
             // Notification icon
             Stack(
               children: [

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:equatable/equatable.dart';
 import 'community_services.dart';
 import 'models.dart';
@@ -349,7 +350,6 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   CommunityBloc({CommunityService? service})
       : _service = service ?? CommunityService(),
         super(const CommunityState()) {
-
     // Post Events
     on<LoadFeed>(_onLoadFeed);
     on<LoadMoreFeed>(_onLoadMoreFeed);
@@ -389,6 +389,9 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   // Post Handlers
   Future<void> _onLoadFeed(LoadFeed event, Emitter<CommunityState> emit) async {
     try {
+      // Refresh authentication before loading feed
+      await _refreshAuth();
+
       emit(state.copyWith(
         isLoadingFeed: true,
         error: null,
@@ -397,15 +400,17 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
 
       await emit.forEach(
         _service.getFeedPosts(organizationCode: event.organizationCode),
-        onData: (posts) => state.copyWith(
-          feedPosts: posts,
-          isLoadingFeed: false,
-          hasMorePosts: posts.length >= 20,
-        ),
-        onError: (error, stackTrace) => state.copyWith(
-          isLoadingFeed: false,
-          error: error.toString(),
-        ),
+        onData: (posts) =>
+            state.copyWith(
+              feedPosts: posts,
+              isLoadingFeed: false,
+              hasMorePosts: posts.length >= 20,
+            ),
+        onError: (error, stackTrace) =>
+            state.copyWith(
+              isLoadingFeed: false,
+              error: error.toString(),
+            ),
       );
     } catch (e) {
       emit(state.copyWith(
@@ -415,7 +420,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onLoadMoreFeed(LoadMoreFeed event, Emitter<CommunityState> emit) async {
+  Future<void> _onLoadMoreFeed(LoadMoreFeed event,
+      Emitter<CommunityState> emit) async {
     if (state.isLoadingMore || !state.hasMorePosts) return;
 
     try {
@@ -432,7 +438,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onCreatePost(CreatePost event, Emitter<CommunityState> emit) async {
+  Future<void> _onCreatePost(CreatePost event,
+      Emitter<CommunityState> emit) async {
     try {
       emit(state.copyWith(isCreatingPost: true, error: null));
 
@@ -461,7 +468,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onUpdatePost(UpdatePost event, Emitter<CommunityState> emit) async {
+  Future<void> _onUpdatePost(UpdatePost event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.updatePost(
         postId: event.postId,
@@ -490,7 +498,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onDeletePost(DeletePost event, Emitter<CommunityState> emit) async {
+  Future<void> _onDeletePost(DeletePost event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.deletePost(event.postId);
 
@@ -509,7 +518,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   }
 
   // Updated toggle like handler to use default reaction
-  Future<void> _onToggleLike(ToggleLike event, Emitter<CommunityState> emit) async {
+  Future<void> _onToggleLike(ToggleLike event,
+      Emitter<CommunityState> emit) async {
     try {
       final currentUserId = _service.currentUserId;
       if (currentUserId == null) return;
@@ -522,7 +532,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   }
 
   // Updated add reaction handler
-  Future<void> _onAddReaction(AddReaction event, Emitter<CommunityState> emit) async {
+  Future<void> _onAddReaction(AddReaction event,
+      Emitter<CommunityState> emit) async {
     try {
       await _handleReaction(event.postId, event.reaction, emit);
     } catch (e) {
@@ -531,7 +542,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   }
 
   // Helper method to handle reactions
-  Future<void> _handleReaction(String postId, String reaction, Emitter<CommunityState> emit) async {
+  Future<void> _handleReaction(String postId, String reaction,
+      Emitter<CommunityState> emit) async {
     final currentUserId = _service.currentUserId;
     if (currentUserId == null) return;
 
@@ -562,7 +574,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
           if (currentReaction != null) {
             // Remove from old reaction
             if (reactions[currentReaction] != null) {
-              reactions[currentReaction] = List<String>.from(reactions[currentReaction]!)
+              reactions[currentReaction] =
+              List<String>.from(reactions[currentReaction]!)
                 ..remove(currentUserId);
               if (reactions[currentReaction]!.isEmpty) {
                 reactions.remove(currentReaction);
@@ -603,7 +616,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   }
 
   // Share post handlers
-  Future<void> _onSharePost(SharePost event, Emitter<CommunityState> emit) async {
+  Future<void> _onSharePost(SharePost event,
+      Emitter<CommunityState> emit) async {
     try {
       emit(state.copyWith(isCreatingPost: true, error: null));
 
@@ -631,10 +645,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onExternalSharePost(
-      ExternalSharePost event,
-      Emitter<CommunityState> emit
-      ) async {
+  Future<void> _onExternalSharePost(ExternalSharePost event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.externalSharePost(event.post);
       emit(state.copyWith(
@@ -648,12 +660,14 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   }
 
   // Comment Handlers
-  Future<void> _onLoadComments(LoadComments event, Emitter<CommunityState> emit) async {
+  Future<void> _onLoadComments(LoadComments event,
+      Emitter<CommunityState> emit) async {
     try {
       await emit.forEach(
         _service.getComments(event.postId),
         onData: (comments) {
-          final updatedComments = Map<String, List<Comment>>.from(state.postComments);
+          final updatedComments = Map<String, List<Comment>>.from(
+              state.postComments);
           updatedComments[event.postId] = comments;
           return state.copyWith(postComments: updatedComments);
         },
@@ -664,7 +678,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onAddComment(AddComment event, Emitter<CommunityState> emit) async {
+  Future<void> _onAddComment(AddComment event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.addComment(
         postId: event.postId,
@@ -690,7 +705,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onDeleteComment(DeleteComment event, Emitter<CommunityState> emit) async {
+  Future<void> _onDeleteComment(DeleteComment event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.deleteComment(
         commentId: event.commentId,
@@ -698,17 +714,20 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       );
 
       // Update the local state by removing the comment
-      final updatedComments = Map<String, List<Comment>>.from(state.postComments);
+      final updatedComments = Map<String, List<Comment>>.from(
+          state.postComments);
       final postComments = updatedComments[event.postId] ?? [];
 
       // Remove the comment from the list
-      final filteredComments = postComments.where((comment) => comment.id != event.commentId).toList();
+      final filteredComments = postComments.where((comment) =>
+      comment.id != event.commentId).toList();
       updatedComments[event.postId] = filteredComments;
 
       // Update the post's comment count
       final updatedPosts = state.feedPosts.map((post) {
         if (post.id == event.postId) {
-          return post.copyWith(commentCount: post.commentCount > 0 ? post.commentCount - 1 : 0);
+          return post.copyWith(
+              commentCount: post.commentCount > 0 ? post.commentCount - 1 : 0);
         }
         return post;
       }).toList();
@@ -724,10 +743,12 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   }
 
   // Friend Handlers
-  Future<void> _onLoadFriends(LoadFriends event, Emitter<CommunityState> emit) async {
+  Future<void> _onLoadFriends(LoadFriends event,
+      Emitter<CommunityState> emit) async {
     try {
       await emit.forEach(
-        _service.getFriends(status: FriendStatus.accepted), // Explicitly request accepted friends
+        _service.getFriends(status: FriendStatus.accepted),
+        // Explicitly request accepted friends
         onData: (friends) {
           print('DEBUG: BLoC - Loaded ${friends.length} friends');
           return state.copyWith(friends: friends);
@@ -739,7 +760,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onLoadPendingRequests(LoadPendingRequests event, Emitter<CommunityState> emit) async {
+  Future<void> _onLoadPendingRequests(LoadPendingRequests event,
+      Emitter<CommunityState> emit) async {
     try {
       await emit.forEach(
         _service.getPendingFriendRequests(),
@@ -751,7 +773,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onSendFriendRequest(SendFriendRequest event, Emitter<CommunityState> emit) async {
+  Future<void> _onSendFriendRequest(SendFriendRequest event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.sendFriendRequest(event.friendId);
 
@@ -759,7 +782,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
 
       // Refresh search results to update button states
       if (state.searchResults.isNotEmpty) {
-        final lastQuery = state.searchResults.first.fullName; // This is a hack, you might want to store the last query
+        final lastQuery = state.searchResults.first
+            .fullName; // This is a hack, you might want to store the last query
         add(SearchUsers(
           query: lastQuery,
           organizationCode: state.currentUserProfile?.organizationCode ?? '',
@@ -770,7 +794,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onAcceptFriendRequest(AcceptFriendRequest event, Emitter<CommunityState> emit) async {
+  Future<void> _onAcceptFriendRequest(AcceptFriendRequest event,
+      Emitter<CommunityState> emit) async {
     try {
       print('DEBUG: BLoC - Accepting friend request: ${event.requestId}');
 
@@ -800,7 +825,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onDeclineFriendRequest(DeclineFriendRequest event, Emitter<CommunityState> emit) async {
+  Future<void> _onDeclineFriendRequest(DeclineFriendRequest event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.declineFriendRequest(event.requestId);
 
@@ -821,7 +847,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onRemoveFriend(RemoveFriend event, Emitter<CommunityState> emit) async {
+  Future<void> _onRemoveFriend(RemoveFriend event,
+      Emitter<CommunityState> emit) async {
     try {
       print('DEBUG: Starting to remove friend: ${event.friendId}');
 
@@ -841,7 +868,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
         error: null, // Clear any previous errors
       ));
 
-      print('DEBUG: Friend removed from local state. New count: ${updatedFriends.length}');
+      print('DEBUG: Friend removed from local state. New count: ${updatedFriends
+          .length}');
 
       // Reload friends list to ensure consistency
       add(LoadFriends());
@@ -850,7 +878,6 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       if (_service.currentUserId != null) {
         add(LoadUserProfile(_service.currentUserId!));
       }
-
     } catch (e) {
       print('DEBUG: BLoC - Error removing friend: $e');
 
@@ -865,21 +892,24 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   }
 
   // User Handlers
-  Future<void> _onSearchUsers(SearchUsers event, Emitter<CommunityState> emit) async {
+  Future<void> _onSearchUsers(SearchUsers event,
+      Emitter<CommunityState> emit) async {
     try {
       if (event.query.isEmpty) {
         emit(state.copyWith(searchResults: []));
         return;
       }
 
-      final results = await _service.searchUsers(event.query, event.organizationCode);
+      final results = await _service.searchUsers(
+          event.query, event.organizationCode);
       emit(state.copyWith(searchResults: results));
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
     }
   }
 
-  Future<void> _onLoadUserProfile(LoadUserProfile event, Emitter<CommunityState> emit) async {
+  Future<void> _onLoadUserProfile(LoadUserProfile event,
+      Emitter<CommunityState> emit) async {
     try {
       if (event.userId == _service.currentUserId) {
         await _service.syncFriendCount(event.userId);
@@ -901,7 +931,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onUpdateUserProfile(UpdateUserProfile event, Emitter<CommunityState> emit) async {
+  Future<void> _onUpdateUserProfile(UpdateUserProfile event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.updateUserProfile(
         bio: event.bio,
@@ -914,7 +945,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onSyncFriendCount(SyncFriendCount event, Emitter<CommunityState> emit) async {
+  Future<void> _onSyncFriendCount(SyncFriendCount event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.syncFriendCount(event.userId);
 
@@ -926,12 +958,15 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
   }
 
   // Notification Handlers
-  Future<void> _onLoadNotifications(LoadNotifications event, Emitter<CommunityState> emit) async {
+  Future<void> _onLoadNotifications(LoadNotifications event,
+      Emitter<CommunityState> emit) async {
     try {
       await emit.forEach(
         _service.getNotifications(),
         onData: (notifications) {
-          final unreadCount = notifications.where((n) => !n.isRead).length;
+          final unreadCount = notifications
+              .where((n) => !n.isRead)
+              .length;
           return state.copyWith(
             notifications: notifications,
             unreadNotificationCount: unreadCount,
@@ -944,7 +979,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onMarkNotificationRead(MarkNotificationRead event, Emitter<CommunityState> emit) async {
+  Future<void> _onMarkNotificationRead(MarkNotificationRead event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.markNotificationAsRead(event.notificationId);
 
@@ -970,7 +1006,9 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
         return notification;
       }).toList();
 
-      final unreadCount = updatedNotifications.where((n) => !n.isRead).length;
+      final unreadCount = updatedNotifications
+          .where((n) => !n.isRead)
+          .length;
 
       emit(state.copyWith(
         notifications: updatedNotifications,
@@ -981,7 +1019,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onMarkAllNotificationsRead(MarkAllNotificationsRead event, Emitter<CommunityState> emit) async {
+  Future<void> _onMarkAllNotificationsRead(MarkAllNotificationsRead event,
+      Emitter<CommunityState> emit) async {
     try {
       await _service.markAllNotificationsAsRead();
 
@@ -1010,6 +1049,19 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       ));
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  // Add this method at the end of CommunityBloc class
+  Future<void> _refreshAuth() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await user.getIdToken(true);
+        print('✅ BLoC: Auth token refreshed');
+      }
+    } catch (e) {
+      print('❌ BLoC: Failed to refresh auth: $e');
     }
   }
 }

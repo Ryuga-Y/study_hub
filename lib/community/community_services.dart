@@ -15,15 +15,38 @@ class CommunityService {
   String? get currentUserId => _auth.currentUser?.uid;
 
   // Add this method to refresh authentication
+  // Add this method to refresh authentication
   Future<void> refreshUserAuth() async {
     try {
       final user = _auth.currentUser;
       if (user != null) {
         await user.getIdToken(true); // Force token refresh
         print('✅ Auth token refreshed successfully');
+
+        // Also verify Firestore access
+        await _firestore.collection('users').doc(user.uid).get();
+        print('✅ Firestore access verified');
       }
     } catch (e) {
       print('❌ Failed to refresh auth token: $e');
+      // If auth fails, try to re-authenticate
+      if (e.toString().contains('permission-denied')) {
+        await _handleAuthFailure();
+      }
+    }
+  }
+
+// 🆕 ADD this new method after refreshUserAuth()
+  Future<void> _handleAuthFailure() async {
+    try {
+      final user = _auth.currentUser;
+      if (user != null) {
+        await user.reload();
+        await user.getIdToken(true);
+        print('✅ Auth recovered after failure');
+      }
+    } catch (e) {
+      print('❌ Auth recovery failed: $e');
     }
   }
 
