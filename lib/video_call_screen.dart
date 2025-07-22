@@ -165,9 +165,16 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           ),
           SizedBox(height: 10),
           Text(
-            _isConnecting ? 'Connecting...' : (widget.isIncoming ? 'Incoming call' : 'Calling...'),
+            _isConnecting ? 'Connecting...' : (widget.isIncoming ? 'Incoming call' : 'Ringing...'),
             style: TextStyle(color: Colors.white70, fontSize: 16),
           ),
+          if (!widget.isIncoming && !_isConnected) ...[
+            SizedBox(height: 20),
+            Text(
+              'Calling ${widget.contactName}...',
+              style: TextStyle(color: Colors.white54, fontSize: 14),
+            ),
+          ],
           if (_isConnecting) ...[
             SizedBox(height: 20),
             CircularProgressIndicator(color: Colors.white),
