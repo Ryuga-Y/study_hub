@@ -18,204 +18,383 @@ class WebRTCService {
   // Call state
   String? currentCallId;
   bool isInitiator = false;
+  bool _isDisposed = false;
 
   Future<void> initializeWebRTC() async {
-    // Create peer connection
-    _peerConnection = await createPeerConnection({
-      'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
-        {'urls': 'stun:stun1.l.google.com:19302'},
-      ]
-    });
+    try {
+      print('🔧 Initializing WebRTC...');
 
-    // Setup event handlers
-    _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
-      _sendIceCandidate(candidate);
-    };
+      // Create peer connection with STUN servers
+      _peerConnection = await createPeerConnection({
+        'iceServers': [
+          {'urls': 'stun:stun.l.google.com:19302'},
+          {'urls': 'stun:stun1.l.google.com:19302'},
+          {'urls': 'stun:stun2.l.google.com:19302'},
+          {'urls': 'stun:stun3.l.google.com:19302'},
+        ]
+      });
 
-    _peerConnection!.onAddStream = (MediaStream stream) {
-      _remoteStream = stream;
-      onRemoteStream?.call(stream);
-    };
+      // Setup event handlers
+      _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+        print('🧊 New ICE candidate: ${candidate.candidate}');
+        _sendIceCandidate(candidate);
+      };
+
+      _peerConnection!.onAddStream = (MediaStream stream) {
+        print('📺 Remote stream received');
+        _remoteStream = stream;
+        onRemoteStream?.call(stream);
+      };
+
+      _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
+        print('🔗 ICE Connection State: $state');
+        if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+          print('✅ WebRTC connection established');
+        } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+            state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+          print('❌ WebRTC connection failed or disconnected');
+          endCall();
+        }
+      };
+
+      print('✅ WebRTC initialized successfully');
+    } catch (e) {
+      print('❌ Error initializing WebRTC: $e');
+      throw e;
+    }
   }
 
   Future<void> getUserMedia() async {
-    final constraints = {
-      'audio': true,
-      'video': {
-        'facingMode': 'user',
-        'width': {'ideal': 640},
-        'height': {'ideal': 480},
-      }
-    };
-
     try {
+      print('🎥 Getting user media...');
+
+      final constraints = {
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': {
+          'facingMode': 'user',
+          'width': {'ideal': 640},
+          'height': {'ideal': 480},
+          'frameRate': {'ideal': 30},
+        }
+      };
+
       _localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      print('✅ Local stream obtained');
+
       onLocalStream?.call(_localStream!);
 
       if (_peerConnection != null) {
         _peerConnection!.addStream(_localStream!);
+        print('✅ Local stream added to peer connection');
       }
     } catch (e) {
-      print('Error getting user media: $e');
+      print('❌ Error getting user media: $e');
       throw e;
     }
   }
 
   Future<String> startCall(String targetUserId, String targetUserName) async {
-    isInitiator = true;
-    currentCallId = Uuid().v4();
+    try {
+      print('📞 Starting call to $targetUserName ($targetUserId)');
 
-    await initializeWebRTC();
-    await getUserMedia();
+      isInitiator = true;
+      currentCallId = Uuid().v4();
 
-    // Create call document in Firebase
-    await _firestore.collection('videoCalls').doc(currentCallId).set({
-      'callId': currentCallId,
-      'callerId': _auth.currentUser!.uid,
-      'targetId': targetUserId,
-      'targetName': targetUserName,
-      'status': 'calling',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+      await initializeWebRTC();
+      await getUserMedia();
 
-    // Create offer
-    RTCSessionDescription offer = await _peerConnection!.createOffer();
-    await _peerConnection!.setLocalDescription(offer);
+      // Create call document in Firebase
+      await _firestore.collection('videoCalls').doc(currentCallId).set({
+        'callId': currentCallId,
+        'callerId': _auth.currentUser!.uid,
+        'callerName': _auth.currentUser!.displayName ?? 'Unknown',
+        'targetId': targetUserId,
+        'targetName': targetUserName,
+        'status': 'calling',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
 
-    // Save offer to Firebase
-    await _firestore.collection('videoCalls').doc(currentCallId).update({
-      'offer': {
-        'type': offer.type,
-        'sdp': offer.sdp,
-      }
-    });
+      print('✅ Call document created: $currentCallId');
 
-    // Listen for answer
-    _listenForAnswer();
+      // Listen for call status changes
+      _listenForCallStatus();
 
-    return currentCallId!;
+      // Create offer
+      RTCSessionDescription offer = await _peerConnection!.createOffer();
+      await _peerConnection!.setLocalDescription(offer);
+
+      print('📤 Created and set local offer');
+
+      // Save offer to Firebase
+      await _firestore.collection('videoCalls').doc(currentCallId).update({
+        'offer': {
+          'type': offer.type,
+          'sdp': offer.sdp,
+        }
+      });
+
+      print('✅ Offer saved to Firebase');
+
+      // Listen for answer
+      _listenForAnswer();
+
+      return currentCallId!;
+    } catch (e) {
+      print('❌ Error starting call: $e');
+      throw e;
+    }
   }
 
   Future<void> answerCall(String callId) async {
-    isInitiator = false;
-    currentCallId = callId;
+    try {
+      print('📞 Answering call: $callId');
 
-    await initializeWebRTC();
-    await getUserMedia();
+      isInitiator = false;
+      currentCallId = callId;
 
-    // Get call data
-    DocumentSnapshot callDoc = await _firestore.collection('videoCalls').doc(callId).get();
-    Map<String, dynamic> callData = callDoc.data() as Map<String, dynamic>;
+      await initializeWebRTC();
+      await getUserMedia();
 
-    // Set remote description (offer)
-    await _peerConnection!.setRemoteDescription(
-        RTCSessionDescription(callData['offer']['sdp'], callData['offer']['type'])
-    );
+      // Update call status to answered
+      await _firestore.collection('videoCalls').doc(callId).update({
+        'status': 'answered',
+        'answeredAt': FieldValue.serverTimestamp(),
+      });
 
-    // Create answer
-    RTCSessionDescription answer = await _peerConnection!.createAnswer();
-    await _peerConnection!.setLocalDescription(answer);
+      print('✅ Call status updated to answered');
 
-    // Update call with answer
-    await _firestore.collection('videoCalls').doc(callId).update({
-      'answer': {
-        'type': answer.type,
-        'sdp': answer.sdp,
-      },
-      'status': 'answered'
+      // Listen for call status changes
+      _listenForCallStatus();
+
+      // Get call data
+      DocumentSnapshot callDoc = await _firestore.collection('videoCalls').doc(callId).get();
+      Map<String, dynamic> callData = callDoc.data() as Map<String, dynamic>;
+
+      if (callData['offer'] != null) {
+        // Set remote description (offer)
+        await _peerConnection!.setRemoteDescription(
+            RTCSessionDescription(callData['offer']['sdp'], callData['offer']['type'])
+        );
+
+        print('✅ Remote offer set');
+
+        // Create answer
+        RTCSessionDescription answer = await _peerConnection!.createAnswer();
+        await _peerConnection!.setLocalDescription(answer);
+
+        print('📤 Created and set local answer');
+
+        // Update call with answer
+        await _firestore.collection('videoCalls').doc(callId).update({
+          'answer': {
+            'type': answer.type,
+            'sdp': answer.sdp,
+          },
+          'status': 'connected'
+        });
+
+        print('✅ Answer saved to Firebase');
+      }
+
+      // Listen for ICE candidates
+      _listenForIceCandidates();
+    } catch (e) {
+      print('❌ Error answering call: $e');
+      throw e;
+    }
+  }
+
+  void _listenForCallStatus() {
+    if (currentCallId == null) return;
+
+    print('👂 Listening for call status changes: $currentCallId');
+
+    _firestore.collection('videoCalls').doc(currentCallId).snapshots().listen((snapshot) {
+      if (_isDisposed || !snapshot.exists) return;
+
+      Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+      String status = data['status'] ?? 'calling';
+
+      print('📞 Call status changed to: $status');
+
+      if (status == 'ended' || status == 'declined') {
+        print('📞 Call ended remotely, cleaning up...');
+        _cleanup();
+        onCallEnd?.call();
+      }
     });
-
-    // Listen for ICE candidates
-    _listenForIceCandidates();
   }
 
   void _listenForAnswer() {
-    _firestore.collection('videoCalls').doc(currentCallId).snapshots().listen((snapshot) {
-      if (snapshot.exists) {
-        Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+    if (currentCallId == null) return;
 
-        if (data['answer'] != null && _peerConnection != null) {
-          _peerConnection!.setRemoteDescription(
+    print('👂 Listening for answer: $currentCallId');
+
+    _firestore.collection('videoCalls').doc(currentCallId).snapshots().listen((snapshot) async {
+      if (_isDisposed || !snapshot.exists) return;
+
+      Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+
+      if (data['answer'] != null && _peerConnection != null) {
+        print('📥 Answer received, setting remote description');
+
+        try {
+          await _peerConnection!.setRemoteDescription(
               RTCSessionDescription(data['answer']['sdp'], data['answer']['type'])
           );
-          _listenForIceCandidates();
-        }
 
-        if (data['status'] == 'ended') {
-          endCall();
+          print('✅ Remote answer set');
+
+          // Update status to connected
+          await _firestore.collection('videoCalls').doc(currentCallId).update({
+            'status': 'connected'
+          });
+
+          _listenForIceCandidates();
+        } catch (e) {
+          print('❌ Error setting remote description: $e');
         }
+      }
+
+      if (data['status'] == 'ended' || data['status'] == 'declined') {
+        _cleanup();
+        onCallEnd?.call();
       }
     });
   }
 
   void _listenForIceCandidates() {
+    if (currentCallId == null) return;
+
+    print('👂 Listening for ICE candidates: $currentCallId');
+
     _firestore.collection('videoCalls').doc(currentCallId)
         .collection('iceCandidates').snapshots().listen((snapshot) {
+      if (_isDisposed) return;
+
       for (var change in snapshot.docChanges) {
         if (change.type == DocumentChangeType.added) {
           Map<String, dynamic> data = change.doc.data() as Map<String, dynamic>;
-          _peerConnection!.addCandidate(RTCIceCandidate(
-            data['candidate'],
-            data['sdpMid'],
-            data['sdpMLineIndex'],
-          ));
+
+          if (_peerConnection != null) {
+            _peerConnection!.addCandidate(RTCIceCandidate(
+              data['candidate'],
+              data['sdpMid'],
+              data['sdpMLineIndex'],
+            ));
+
+            print('🧊 ICE candidate added: ${data['candidate']}');
+          }
         }
       }
     });
   }
 
   Future<void> _sendIceCandidate(RTCIceCandidate candidate) async {
-    if (currentCallId != null) {
-      await _firestore.collection('videoCalls').doc(currentCallId)
-          .collection('iceCandidates').add({
-        'candidate': candidate.candidate,
-        'sdpMid': candidate.sdpMid,
-        'sdpMLineIndex': candidate.sdpMLineIndex,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+    if (currentCallId != null && !_isDisposed) {
+      try {
+        await _firestore.collection('videoCalls').doc(currentCallId)
+            .collection('iceCandidates').add({
+          'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMLineIndex,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+
+        print('🧊 ICE candidate sent to Firebase');
+      } catch (e) {
+        print('❌ Error sending ICE candidate: $e');
+      }
     }
   }
 
   Future<void> endCall() async {
-    // Update call status
+    print('📞 Ending call: $currentCallId');
+
+    if (_isDisposed) return;
+    _isDisposed = true;
+
+    // Update call status in Firebase
     if (currentCallId != null) {
-      await _firestore.collection('videoCalls').doc(currentCallId).update({
-        'status': 'ended',
-        'endedAt': FieldValue.serverTimestamp(),
-      });
+      try {
+        await _firestore.collection('videoCalls').doc(currentCallId).update({
+          'status': 'ended',
+          'endedAt': FieldValue.serverTimestamp(),
+          'endedBy': _auth.currentUser?.uid ?? 'unknown',
+        });
+
+        print('✅ Call status updated to ended');
+      } catch (e) {
+        print('❌ Error updating call status: $e');
+      }
     }
 
-    // Clean up
-    await _localStream?.dispose();
-    await _remoteStream?.dispose();
-    await _peerConnection?.close();
+    _cleanup();
+    onCallEnd?.call();
+  }
 
+  void _cleanup() {
+    print('🧹 Cleaning up WebRTC resources...');
+
+    try {
+      // Dispose streams
+      _localStream?.getTracks().forEach((track) {
+        track.stop();
+      });
+      _localStream?.dispose();
+
+      _remoteStream?.getTracks().forEach((track) {
+        track.stop();
+      });
+      _remoteStream?.dispose();
+
+      // Close peer connection
+      _peerConnection?.close();
+
+      print('✅ WebRTC cleanup completed');
+    } catch (e) {
+      print('❌ Error during cleanup: $e');
+    }
+
+    // Reset state
     _localStream = null;
     _remoteStream = null;
     _peerConnection = null;
     currentCallId = null;
-
-    onCallEnd?.call();
+    _isDisposed = false;
   }
 
   void toggleMute() {
-    if (_localStream != null) {
+    if (_localStream != null && _localStream!.getAudioTracks().isNotEmpty) {
       bool enabled = _localStream!.getAudioTracks()[0].enabled;
       _localStream!.getAudioTracks()[0].enabled = !enabled;
+      print('🎤 Microphone ${!enabled ? 'unmuted' : 'muted'}');
     }
   }
 
   void toggleCamera() {
-    if (_localStream != null) {
+    if (_localStream != null && _localStream!.getVideoTracks().isNotEmpty) {
       bool enabled = _localStream!.getVideoTracks()[0].enabled;
       _localStream!.getVideoTracks()[0].enabled = !enabled;
+      print('📷 Camera ${!enabled ? 'enabled' : 'disabled'}');
     }
   }
 
   void switchCamera() {
-    if (_localStream != null) {
+    if (_localStream != null && _localStream!.getVideoTracks().isNotEmpty) {
       _localStream!.getVideoTracks()[0].switchCamera();
+      print('🔄 Camera switched');
     }
+  }
+
+  // Dispose method for proper cleanup
+  void dispose() {
+    print('🗑️ Disposing WebRTC service');
+    _isDisposed = true;
+    _cleanup();
   }
 }

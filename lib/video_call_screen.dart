@@ -3,6 +3,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'webrtc_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class VideoCallScreen extends StatefulWidget {
   final String contactName;
@@ -67,6 +68,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       Navigator.pop(context);
     };
 
+    // ADD THIS: Monitor call status in Firebase
+    if (widget.callId != null) {
+      _monitorCallStatus();
+    }
+
     // Start or answer call
     if (widget.isIncoming && widget.callId != null) {
       await _webRTCService.answerCall(widget.callId!);
@@ -76,6 +82,32 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
     setState(() {
       _isConnecting = false;
+    });
+  }
+
+// ADD THIS NEW METHOD:
+  void _monitorCallStatus() {
+    FirebaseFirestore.instance
+        .collection('videoCalls')
+        .doc(widget.callId)
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      if (snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        final status = data['status'] ?? 'calling';
+
+        print('📞 Video call status: $status');
+
+        if (status == 'ended' || status == 'declined') {
+          Navigator.pop(context);
+        } else if (status == 'answered') {
+          setState(() {
+            _isConnecting = false;
+          });
+        }
+      }
     });
   }
 
@@ -245,8 +277,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           _buildCallControl(
             icon: Icons.call_end,
             onPressed: () async {
+              print('📞 User pressed end call button');
               await _webRTCService.endCall();
-              Navigator.pop(context);
+              if (mounted) {
+                Navigator.pop(context);
+              }
             },
             backgroundColor: Colors.red,
           ),
