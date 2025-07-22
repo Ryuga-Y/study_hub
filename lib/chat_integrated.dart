@@ -15,6 +15,7 @@ import '../community/community_services.dart';
 import 'dart:async';
 import 'video_call_screen.dart';
 import 'chat.dart';
+import 'incoming_call_screen.dart';
 
 // Chat Models
 class ChatContact {
@@ -59,7 +60,9 @@ class ChatContact {
 
   static String _generateChatId(String userId1, String userId2) {
     final sortedIds = [userId1, userId2]..sort();
-    return '${sortedIds[0]}_${sortedIds[1]}';
+    final chatId = '${sortedIds[0]}_${sortedIds[1]}';
+    print('🔧 Generated chat ID: $chatId for users: $userId1, $userId2');
+    return chatId;
   }
 }
 
@@ -259,6 +262,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
 
   Future<void> _createChat(String currentUserId, Friend friend) async {
     final chatId = ChatContact._generateChatId(currentUserId, friend.friendId);
+    print('🔧 Creating chat with ID: $chatId');
 
     try {
       final existingChat = await _firestore.collection('chats').doc(chatId).get();
@@ -754,39 +758,35 @@ class _ChatContactPageState extends State<ChatContactPage> {
   }
 
   void _showIncomingCallDialog(String callId, String callerId, String callerName) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text('Incoming Video Call'),
-        content: Text('$callerName is calling you'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _firestore.collection('videoCalls').doc(callId).update({
-                'status': 'declined',
-              });
-            },
-            child: Text('Decline', style: TextStyle(color: Colors.red)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => VideoCallScreen(
-                    contactName: callerName,
-                    callId: callId,
-                    isIncoming: true,
-                  ),
+    print('📞 Showing incoming call from: $callerName (ID: $callerId)');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => IncomingCallScreen(
+          callId: callId,
+          callerId: callerId,
+          callerName: callerName,
+          onAccept: () {
+            print('✅ Call accepted');
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => VideoCallScreen(
+                  contactName: callerName,
+                  callId: callId,
+                  isIncoming: true,
                 ),
-              );
-            },
-            child: Text('Answer'),
-          ),
-        ],
+              ),
+            );
+          },
+          onDecline: () {
+            print('❌ Call declined');
+            _firestore.collection('videoCalls').doc(callId).update({
+              'status': 'declined',
+            });
+            Navigator.pop(context);
+          },
+        ),
       ),
     );
   }
@@ -1889,7 +1889,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _initiateVideoCall() {
+  void _initiateVideoCall() async {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1907,25 +1907,59 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => VideoCallScreen(
-                    contactName: widget.contactName,
-                    contactAvatar: widget.contactAvatar,
-                    targetUserId: widget.contactId,
-                    isIncoming: false,
+
+              // Create call document in Firebase first
+              final callId = await _createOutgoingCall();
+              if (callId != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => VideoCallScreen(
+                      contactName: widget.contactName,
+                      contactAvatar: widget.contactAvatar,
+                      targetUserId: widget.contactId,
+                      callId: callId,
+                      isIncoming: false,
+                    ),
                   ),
-                ),
-              );
+                );
+              }
             },
             child: Text('Call'),
           ),
         ],
       ),
     );
+  }
+
+  Future<String?> _createOutgoingCall() async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        print('❌ No current user for video call');
+        return null;
+      }
+
+      final callId = _firestore.collection('videoCalls').doc().id;
+      print('🔧 Creating video call: $callId from ${currentUser.uid} to ${widget.contactId}');
+
+      await _firestore.collection('videoCalls').doc(callId).set({
+        'callId': callId,
+        'callerId': currentUser.uid,
+        'callerName': currentUser.displayName ?? 'Unknown',
+        'targetId': widget.contactId,
+        'targetName': widget.contactName,
+        'status': 'calling',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      return callId;
+    } catch (e) {
+      print('Error creating call: $e');
+      return null;
+    }
   }
 
   void _showFileOptions() {
