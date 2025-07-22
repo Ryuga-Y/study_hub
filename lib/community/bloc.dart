@@ -145,7 +145,14 @@ class DeleteComment extends CommunityEvent {
 }
 
 // Friend Events
-class LoadFriends extends CommunityEvent {}
+class LoadFriends extends CommunityEvent {
+  final String? userId; // Optional userId to load friends for a specific user
+
+  LoadFriends({this.userId});
+
+  @override
+  List<Object?> get props => [userId];
+}
 
 class LoadPendingRequests extends CommunityEvent {}
 

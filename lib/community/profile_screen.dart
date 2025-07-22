@@ -71,13 +71,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   }
 
   void _loadUserFriends() {
-    _service.getFriends(status: FriendStatus.accepted).listen((allFriends) {
+    // Load friends for the user being viewed (not current user)
+    _service.getFriends(status: FriendStatus.accepted, userId: widget.userId).listen((userFriends) {
       if (mounted) {
-        // Filter friends for the user being viewed
-        final userFriends = allFriends.where((friend) =>
-        friend.userId == widget.userId || friend.friendId == widget.userId
-        ).toList();
-
         setState(() {
           _userFriends = userFriends;
           _isLoadingFriends = false;

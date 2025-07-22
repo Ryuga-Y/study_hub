@@ -904,13 +904,14 @@ class CommunityService {
     }
   }
 
-  Stream<List<Friend>> getFriends({FriendStatus? status}) {
-    final userId = currentUserId;
-    if (userId == null) return Stream.value([]);
+  Stream<List<Friend>> getFriends({FriendStatus? status, String? userId}) {
+    // Use provided userId or fall back to current user
+    final targetUserId = userId ?? currentUserId;
+    if (targetUserId == null) return Stream.value([]);
 
     Query query = _firestore
         .collection('friends')
-        .where('userId', isEqualTo: userId);
+        .where('userId', isEqualTo: targetUserId);
 
     if (status != null) {
       query = query.where('status', isEqualTo: status.toString().split('.').last);
@@ -920,7 +921,7 @@ class CommunityService {
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) {
-      print('DEBUG: getFriends - Found ${snapshot.docs.length} friend documents');
+      print('DEBUG: getFriends - Found ${snapshot.docs.length} friend documents for user $targetUserId');
       return snapshot.docs
           .map((doc) => Friend.fromFirestore(doc))
           .where((friend) => friend.status == FriendStatus.accepted) // Only show accepted friends
