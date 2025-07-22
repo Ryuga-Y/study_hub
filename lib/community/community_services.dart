@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:share_plus/share_plus.dart';
 import 'models.dart';
 import '../chat_integrated.dart';
@@ -1007,24 +1008,119 @@ class CommunityService {
     final targetUserId = userId ?? currentUserId;
     if (targetUserId == null) return Stream.value([]);
 
-    Query query = _firestore
+    // We need to query for BOTH cases:
+    // 1. Where user is the userId
+    // 2. Where user is the friendId
+    final statusFilter = status?.toString().split('.').last ?? 'accepted';
+
+    // Create two queries
+    final query1 = _firestore
         .collection('friends')
-        .where('userId', isEqualTo: targetUserId);
+        .where('userId', isEqualTo: targetUserId)
+        .where('status', isEqualTo: statusFilter);
 
-    if (status != null) {
-      query = query.where('status', isEqualTo: status.toString().split('.').last);
-    }
+    final query2 = _firestore
+        .collection('friends')
+        .where('friendId', isEqualTo: targetUserId)
+        .where('status', isEqualTo: statusFilter);
 
-    return query
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      print('DEBUG: getFriends - Found ${snapshot.docs.length} friend documents for user $targetUserId');
-      return snapshot.docs
-          .map((doc) => Friend.fromFirestore(doc))
-          .where((friend) => friend.status == FriendStatus.accepted) // Only show accepted friends
-          .toList();
-    });
+    // Combine both streams
+    return Rx.combineLatest2<QuerySnapshot, QuerySnapshot, List<Friend>>(
+      query1.snapshots(),
+      query2.snapshots(),
+          (snapshot1, snapshot2) {
+        final List<Friend> friends = [];
+
+        print('DEBUG: Query1 (userId=$targetUserId) returned ${snapshot1.docs.length} documents');
+        print('DEBUG: Query2 (friendId=$targetUserId) returned ${snapshot2.docs.length} documents');
+
+        // Process documents where user is userId
+        for (final doc in snapshot1.docs) {
+          final friend = Friend.fromFirestore(doc);
+          print('DEBUG: Query1 friend: id=${friend.friendId}, name=${friend.friendName}');
+          if (friend.status == FriendStatus.accepted || status != null) {
+            friends.add(friend);
+          }
+        }
+
+        // Process documents where user is friendId
+        // In this case, we need to create a Friend object that represents the relationship
+        // from the current user's perspective
+        for (final doc in snapshot2.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+
+          print('DEBUG: Query2 document data: $data');
+
+          // Since the current user is the friendId in this document,
+          // we need to swap the perspective
+          // For older documents: friendName contains the sender's name (the friend we want to display)
+          // For newer documents: userName contains the friend's name, friendName contains current user's name
+
+          // Determine which field contains the friend's name
+          String friendDisplayName = 'Unknown';
+          String? friendDisplayAvatar;
+
+          // If userName field exists, it's a newer document format
+          if (data.containsKey('userName') && data['userName'] != null) {
+            friendDisplayName = data['userName'];
+            friendDisplayAvatar = data['userAvatar'];
+          } else {
+            // Older document format - friendName actually contains the other person's name
+            friendDisplayName = data['friendName'] ?? 'Unknown';
+            friendDisplayAvatar = data['friendAvatar'];
+          }
+
+          final friend = Friend(
+            id: doc.id,
+            userId: targetUserId, // Current user is always userId in the result
+            friendId: data['userId'], // The other person (who was userId in the doc)
+            friendName: friendDisplayName,
+            friendAvatar: friendDisplayAvatar,
+            status: FriendStatus.values.firstWhere(
+                  (e) => e.toString() == 'FriendStatus.${data['status'] ?? 'pending'}',
+              orElse: () => FriendStatus.pending,
+            ),
+            createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            acceptedAt: (data['acceptedAt'] as Timestamp?)?.toDate(),
+            mutualFriends: List<String>.from(data['mutualFriends'] ?? []),
+            isReceived: !(data['isReceived'] ?? false), // Flip since perspective is swapped
+          );
+
+          print('DEBUG: Query2 friend after processing: id=${friend.friendId}, name=${friend.friendName}');
+
+          if (friend.status == FriendStatus.accepted || status != null) {
+            friends.add(friend);
+          }
+        }
+
+        print('DEBUG: Total friends before deduplication: ${friends.length}');
+        for (var i = 0; i < friends.length; i++) {
+          print('DEBUG: Friend $i: id=${friends[i].friendId}, name=${friends[i].friendName}');
+        }
+
+        // Remove duplicates based on friendId (in case of data inconsistency)
+        final uniqueFriends = <String, Friend>{};
+        for (final friend in friends) {
+          // Use a combination of friendId and document id to ensure uniqueness
+          final key = friend.friendId;
+          // Keep the first occurrence or the one with more complete data
+          if (!uniqueFriends.containsKey(key) ||
+              (uniqueFriends[key]!.friendName == 'Unknown' && friend.friendName != 'Unknown')) {
+            uniqueFriends[key] = friend;
+          }
+        }
+
+        final result = uniqueFriends.values.toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt)); // Sort by date
+
+        print('DEBUG: After deduplication - ${result.length} unique friends');
+        for (var i = 0; i < result.length; i++) {
+          print('DEBUG: Unique friend $i: id=${result[i].friendId}, name=${result[i].friendName}');
+        }
+
+        return result;
+      },
+    );
   }
 
   Stream<List<Friend>> getPendingFriendRequests() {

@@ -79,6 +79,13 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           _isLoadingFriends = false;
         });
       }
+    }, onError: (error) {
+      print('Error loading user friends: $error');
+      if (mounted) {
+        setState(() {
+          _isLoadingFriends = false;
+        });
+      }
     });
   }
 

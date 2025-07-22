@@ -127,6 +127,20 @@ class _PostCardState extends State<PostCard> {
     return widget.post.isEdited;
   }
 
+  // 🆕 NEW: Helper method to check if user is a friend
+  bool _isUserFriend(CommunityState state) {
+    final postUserId = _getPostUserId();
+    final currentUserId = state.currentUserProfile?.uid;
+
+    // If it's the current user's post, don't show friend tag
+    if (postUserId == currentUserId) {
+      return false;
+    }
+
+    // Check if the post author is in the current user's friends list
+    return state.friends.any((friend) => friend.friendId == postUserId);
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<CommunityBloc, CommunityState>(
@@ -181,6 +195,7 @@ class _PostCardState extends State<PostCard> {
 
   Widget _buildHeader(CommunityState state) {
     final currentUserId = state.currentUserProfile?.uid;
+    final isUserFriend = _isUserFriend(state); // 🆕 Check if user is friend
 
     return Padding(
       padding: EdgeInsets.all(12),
@@ -270,6 +285,42 @@ class _PostCardState extends State<PostCard> {
                             ),
                           ),
                         ),
+
+                        // 🆕 NEW: Friend tag
+                        if (isUserFriend) ...[
+                          SizedBox(width: 8),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[50],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.blue[300]!,
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.people,
+                                  size: 12,
+                                  color: Colors.blue[600],
+                                ),
+                                SizedBox(width: 2),
+                                Text(
+                                  'Friend',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.blue[600],
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
                         SizedBox(width: 8),
                         if (_isPostEdited())
                           Text(

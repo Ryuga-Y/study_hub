@@ -450,8 +450,14 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
         privacy: event.privacy,
       );
 
+      // Update current user's post count in local state
+      final updatedCurrentUser = state.currentUserProfile?.copyWith(
+        postCount: state.currentUserProfile!.postCount + 1,
+      );
+
       emit(state.copyWith(
         isCreatingPost: false,
+        currentUserProfile: updatedCurrentUser,
         successMessage: 'Post created successfully!',
       ));
 
@@ -508,8 +514,16 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
           .where((post) => post.id != event.postId)
           .toList();
 
+      // Update current user's post count in local state
+      final updatedCurrentUser = state.currentUserProfile?.copyWith(
+        postCount: state.currentUserProfile!.postCount > 0
+            ? state.currentUserProfile!.postCount - 1
+            : 0,
+      );
+
       emit(state.copyWith(
         feedPosts: updatedPosts,
+        currentUserProfile: updatedCurrentUser,
         successMessage: 'Post deleted successfully!',
       ));
     } catch (e) {

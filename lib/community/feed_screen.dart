@@ -276,7 +276,7 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
             SizedBox(width: 10),
             Text(
-              'Study Hub',
+              'Community',
               style: TextStyle(
                 color: Colors.black87,
                 fontSize: 20,

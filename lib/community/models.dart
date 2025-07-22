@@ -28,6 +28,34 @@ class CommunityUser {
     this.isActive = true,
   });
 
+  CommunityUser copyWith({
+    String? uid,
+    String? fullName,
+    String? email,
+    String? avatarUrl,
+    String? bio,
+    String? organizationCode,
+    String? role,
+    int? postCount,
+    int? friendCount,
+    DateTime? joinDate,
+    bool? isActive,
+  }) {
+    return CommunityUser(
+      uid: uid ?? this.uid,
+      fullName: fullName ?? this.fullName,
+      email: email ?? this.email,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      bio: bio ?? this.bio,
+      organizationCode: organizationCode ?? this.organizationCode,
+      role: role ?? this.role,
+      postCount: postCount ?? this.postCount,
+      friendCount: friendCount ?? this.friendCount,
+      joinDate: joinDate ?? this.joinDate,
+      isActive: isActive ?? this.isActive,
+    );
+  }
+
   factory CommunityUser.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return CommunityUser(
