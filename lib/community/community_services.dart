@@ -1646,6 +1646,194 @@ class CommunityService {
     }
   }
 
+  // Report Operations
+  Future<void> reportPost({
+    required String postId,
+    required String reason,
+    required String details,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Get user data
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      final userData = userDoc.data()!;
+
+      // Get post data
+      final postDoc = await _firestore.collection('posts').doc(postId).get();
+      if (!postDoc.exists) throw Exception('Post not found');
+
+      final post = Post.fromFirestore(postDoc);
+
+      // Create report document
+      final reportRef = _firestore.collection('postReports').doc();
+      await reportRef.set({
+        'postId': postId,
+        'post': post.toMap(), // Store post snapshot for evidence
+        'reportedBy': userId,
+        'reporterName': userData['fullName'] ?? 'Unknown',
+        'reporterAvatar': userData['avatarUrl'],
+        'reason': reason,
+        'details': details,
+        'reportedAt': FieldValue.serverTimestamp(),
+        'status': 'pending',
+        'organizationCode': userData['organizationCode'],
+      });
+
+      // Create notification for admins
+      await _notifyAdminsOfReport(
+        organizationCode: userData['organizationCode'],
+        reporterName: userData['fullName'],
+        postId: postId,
+      );
+    } catch (e) {
+      throw Exception('Failed to report post: $e');
+    }
+  }
+
+  Stream<List<PostReport>> getReportedPosts(String organizationCode) {
+    return _firestore
+        .collection('postReports')
+        .where('organizationCode', isEqualTo: organizationCode)
+        .orderBy('reportedAt', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+        .map((doc) => PostReport.fromFirestore(doc))
+        .toList());
+  }
+
+  Future<void> reviewReport({
+    required String reportId,
+    required String postId,
+    required bool isValid,
+    required String adminNotes,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Get admin data
+      final adminDoc = await _firestore.collection('users').doc(userId).get();
+      final adminData = adminDoc.data()!;
+
+      // Update report status
+      await _firestore.collection('postReports').doc(reportId).update({
+        'status': isValid ? 'valid' : 'invalid',
+        'reviewedBy': userId,
+        'reviewerName': adminData['fullName'] ?? 'Admin',
+        'reviewedAt': FieldValue.serverTimestamp(),
+        'adminNotes': adminNotes,
+      });
+
+      // If valid, delete the post
+      if (isValid) {
+        await adminDeletePost(postId, 'Violated community guidelines: $adminNotes');
+      }
+    } catch (e) {
+      throw Exception('Failed to review report: $e');
+    }
+  }
+
+  Future<void> adminDeletePost(String postId, String reason) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Verify admin status
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (userDoc.data()?['role'] != 'admin') {
+        throw Exception('Unauthorized: Admin access required');
+      }
+
+      // Get post data before deletion
+      final postDoc = await _firestore.collection('posts').doc(postId).get();
+      if (!postDoc.exists) throw Exception('Post not found');
+
+      final postData = postDoc.data()!;
+      final postOwnerId = postData['userId'];
+
+      // Delete media from storage
+      final mediaUrls = List<String>.from(postData['mediaUrls'] ?? []);
+      for (final url in mediaUrls) {
+        try {
+          await _storage.refFromURL(url).delete();
+        } catch (_) {}
+      }
+
+      // Delete comments
+      final commentsQuery = await _firestore
+          .collection('comments')
+          .where('postId', isEqualTo: postId)
+          .get();
+
+      final batch = _firestore.batch();
+      for (final doc in commentsQuery.docs) {
+        batch.delete(doc.reference);
+      }
+
+      // Delete post
+      batch.delete(_firestore.collection('posts').doc(postId));
+      await batch.commit();
+
+      // Update user's post count
+      await _firestore.collection('users').doc(postOwnerId).update({
+        'postCount': FieldValue.increment(-1),
+      });
+
+      // Create deletion log
+      await _firestore.collection('postDeletionLogs').add({
+        'postId': postId,
+        'postData': postData,
+        'deletedBy': userId,
+        'deletedByName': userDoc.data()?['fullName'] ?? 'Admin',
+        'reason': reason,
+        'deletedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Notify post owner
+      await _createNotification(
+        userId: postOwnerId,
+        type: NotificationType.general,
+        title: 'Post Removed',
+        message: 'Your post was removed by an administrator for violating community guidelines.',
+        actionUserId: userId,
+        data: {'reason': reason},
+      );
+    } catch (e) {
+      throw Exception('Failed to delete post: $e');
+    }
+  }
+
+  Future<void> _notifyAdminsOfReport({
+    required String organizationCode,
+    required String reporterName,
+    required String postId,
+  }) async {
+    try {
+      // Get all admins in the organization
+      final adminsQuery = await _firestore
+          .collection('users')
+          .where('organizationCode', isEqualTo: organizationCode)
+          .where('role', isEqualTo: 'admin')
+          .where('isActive', isEqualTo: true)
+          .get();
+
+      // Create notification for each admin
+      for (final adminDoc in adminsQuery.docs) {
+        await _createNotification(
+          userId: adminDoc.id,
+          type: NotificationType.general,
+          title: 'New Post Report',
+          message: '$reporterName reported a post that requires review',
+          data: {'postId': postId, 'reportType': 'post'},
+        );
+      }
+    } catch (e) {
+      print('Error notifying admins: $e');
+    }
+  }
+
   // Helper method to validate Firebase Storage URLs
   bool _isValidFirebaseStorageUrl(String url) {
     try {

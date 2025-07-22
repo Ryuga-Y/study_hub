@@ -108,6 +108,62 @@ class ExternalSharePost extends CommunityEvent {
   List<Object> get props => [post];
 }
 
+// Report Events
+class ReportPost extends CommunityEvent {
+  final String postId;
+  final String reason;
+  final String details;
+
+  ReportPost({
+    required this.postId,
+    required this.reason,
+    required this.details,
+  });
+
+  @override
+  List<Object> get props => [postId, reason, details];
+}
+
+// Admin Events
+class LoadReportedPosts extends CommunityEvent {
+  final String organizationCode;
+
+  LoadReportedPosts({required this.organizationCode});
+
+  @override
+  List<Object> get props => [organizationCode];
+}
+
+class ReviewReport extends CommunityEvent {
+  final String reportId;
+  final String postId;
+  final bool isValid;
+  final String adminNotes;
+
+  ReviewReport({
+    required this.reportId,
+    required this.postId,
+    required this.isValid,
+    required this.adminNotes,
+  });
+
+  @override
+  List<Object> get props => [reportId, postId, isValid, adminNotes];
+}
+
+class AdminDeletePost extends CommunityEvent {
+  final String postId;
+  final String reason;
+
+  AdminDeletePost({
+    required this.postId,
+    required this.reason,
+  });
+
+  @override
+  List<Object> get props => [postId, reason];
+}
+
 // Comment Events
 class LoadComments extends CommunityEvent {
   final String postId;
@@ -264,6 +320,7 @@ class CommunityState extends Equatable {
   final String? error;
   final String? successMessage;
   final int unreadNotificationCount;
+  final List<PostReport> reportedPosts;
 
   const CommunityState({
     this.feedPosts = const [],
@@ -282,6 +339,7 @@ class CommunityState extends Equatable {
     this.error,
     this.successMessage,
     this.unreadNotificationCount = 0,
+    this.reportedPosts = const [],
   });
 
   CommunityState copyWith({
@@ -301,6 +359,7 @@ class CommunityState extends Equatable {
     String? error,
     String? successMessage,
     int? unreadNotificationCount,
+    List<PostReport>? reportedPosts,
   }) {
     return CommunityState(
       feedPosts: feedPosts ?? this.feedPosts,
@@ -319,6 +378,7 @@ class CommunityState extends Equatable {
       error: error,
       successMessage: successMessage,
       unreadNotificationCount: unreadNotificationCount ?? this.unreadNotificationCount,
+      reportedPosts: reportedPosts ?? this.reportedPosts,
     );
   }
 
@@ -340,6 +400,7 @@ class CommunityState extends Equatable {
     error,
     successMessage,
     unreadNotificationCount,
+    reportedPosts,
   ];
 }
 
@@ -360,6 +421,11 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<AddReaction>(_onAddReaction);
     on<SharePost>(_onSharePost);
     on<ExternalSharePost>(_onExternalSharePost);
+
+    on<ReportPost>(_onReportPost);
+    on<LoadReportedPosts>(_onLoadReportedPosts);
+    on<ReviewReport>(_onReviewReport);
+    on<AdminDeletePost>(_onAdminDeletePost);
 
     // Comment Events
     on<LoadComments>(_onLoadComments);
@@ -1076,6 +1142,77 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       }
     } catch (e) {
       print('❌ BLoC: Failed to refresh auth: $e');
+    }
+  }
+
+  Future<void> _onReportPost(ReportPost event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.reportPost(
+        postId: event.postId,
+        reason: event.reason,
+        details: event.details,
+      );
+
+      emit(state.copyWith(
+        successMessage: 'Post reported successfully',
+      ));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  Future<void> _onLoadReportedPosts(LoadReportedPosts event, Emitter<CommunityState> emit) async {
+    try {
+      await emit.forEach(
+        _service.getReportedPosts(event.organizationCode),
+        onData: (reports) => state.copyWith(reportedPosts: reports),
+        onError: (error, stackTrace) => state.copyWith(error: error.toString()),
+      );
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  Future<void> _onReviewReport(ReviewReport event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.reviewReport(
+        reportId: event.reportId,
+        postId: event.postId,
+        isValid: event.isValid,
+        adminNotes: event.adminNotes,
+      );
+
+      emit(state.copyWith(
+        successMessage: event.isValid
+            ? 'Report marked as valid and post removed'
+            : 'Report marked as invalid',
+      ));
+
+      // Reload reported posts
+      final orgCode = state.currentUserProfile?.organizationCode ?? '';
+      if (orgCode.isNotEmpty) {
+        add(LoadReportedPosts(organizationCode: orgCode));
+      }
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  Future<void> _onAdminDeletePost(AdminDeletePost event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.adminDeletePost(event.postId, event.reason);
+
+      // Remove from local state
+      final updatedPosts = state.feedPosts
+          .where((post) => post.id != event.postId)
+          .toList();
+
+      emit(state.copyWith(
+        feedPosts: updatedPosts,
+        successMessage: 'Post deleted successfully',
+      ));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
     }
   }
 }

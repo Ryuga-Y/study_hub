@@ -692,7 +692,183 @@ class _PostCardState extends State<PostCard> {
               );
             },
           ),
+
+          // Report button - NEW (don't show for own posts)
+          if (widget.post.userId != currentUserId)
+            _buildActionButton(
+              icon: Icons.flag_outlined,
+              label: 'Report',
+              onTap: () => _showReportDialog(context),
+            ),
         ],
+      ),
+    );
+  }
+
+  void _showReportDialog(BuildContext context) {
+    final TextEditingController reasonController = TextEditingController();
+    String selectedReason = 'inappropriate';
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.flag, color: Colors.red, size: 28),
+              SizedBox(width: 12),
+              Text('Report Post'),
+            ],
+          ),
+          content: Container(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Why are you reporting this post?',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                SizedBox(height: 16),
+                // Reason dropdown
+                DropdownButtonFormField<String>(
+                  value: selectedReason,
+                  decoration: InputDecoration(
+                    labelText: 'Reason',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  items: [
+                    DropdownMenuItem(
+                      value: 'inappropriate',
+                      child: Text('Inappropriate content'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'spam',
+                      child: Text('Spam or misleading'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'harassment',
+                      child: Text('Harassment or bullying'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'violence',
+                      child: Text('Violence or dangerous content'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'misinformation',
+                      child: Text('False information'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'other',
+                      child: Text('Other'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => selectedReason = value);
+                    }
+                  },
+                ),
+                SizedBox(height: 16),
+                // Additional details
+                TextField(
+                  controller: reasonController,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    labelText: 'Additional details (optional)',
+                    hintText: 'Please provide more information...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 16),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'False reports may result in action being taken against your account.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.orange[800],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                _submitReport(
+                  context,
+                  selectedReason,
+                  reasonController.text.trim(),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('Submit Report', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submitReport(BuildContext context, String reason, String details) {
+    context.read<CommunityBloc>().add(
+      ReportPost(
+        postId: widget.post.id,
+        reason: reason,
+        details: details,
+      ),
+    );
+    Navigator.pop(context);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white),
+            SizedBox(width: 8),
+            Text('Report submitted. Thank you for helping keep our community safe.'),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
       ),
     );
   }
@@ -715,33 +891,54 @@ class _PostCardState extends State<PostCard> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (showEmoji && label != 'Like') ...[
-                // Show emoji instead of icon for reactions
-                Text(
-                  label,
-                  style: TextStyle(fontSize: 16),
-                ),
-                SizedBox(width: 4),
-                Text(
-                  'React',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: color ?? Colors.grey[700],
-                    fontWeight: FontWeight.w500,
+                // Use Flexible for emoji + text combination
+                Flexible(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(fontSize: 16),
+                      ),
+                      SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'React',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: color ?? Colors.grey[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ] else ...[
-                Icon(
-                  icon,
-                  size: 20,
-                  color: color ?? Colors.grey[700],
-                ),
-                SizedBox(width: 8),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: color ?? Colors.grey[700],
-                    fontWeight: FontWeight.w500,
+                // Use Flexible for icon + text combination
+                Flexible(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        icon,
+                        size: 20,
+                        color: color ?? Colors.grey[700],
+                      ),
+                      SizedBox(width: 6), // Reduced spacing
+                      Flexible(
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: color ?? Colors.grey[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],

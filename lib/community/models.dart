@@ -567,3 +567,101 @@ class ReactionType {
 
   static const List<String> all = [like, love, laugh, wow, sad];
 }
+
+// Post Report model
+class PostReport {
+  final String id;
+  final String postId;
+  final Post? post; // The reported post
+  final String reportedBy; // User ID who reported
+  final String reporterName;
+  final String? reporterAvatar;
+  final String reason;
+  final String details;
+  final DateTime reportedAt;
+  final String status; // 'pending', 'valid', 'invalid'
+  final String? reviewedBy; // Admin who reviewed
+  final String? reviewerName;
+  final DateTime? reviewedAt;
+  final String? adminNotes;
+
+  PostReport({
+    required this.id,
+    required this.postId,
+    this.post,
+    required this.reportedBy,
+    required this.reporterName,
+    this.reporterAvatar,
+    required this.reason,
+    required this.details,
+    required this.reportedAt,
+    this.status = 'pending',
+    this.reviewedBy,
+    this.reviewerName,
+    this.reviewedAt,
+    this.adminNotes,
+  });
+
+  factory PostReport.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return PostReport(
+      id: doc.id,
+      postId: data['postId'] ?? '',
+      post: data['post'] != null ? Post._fromMap(data['post']) : null,
+      reportedBy: data['reportedBy'] ?? '',
+      reporterName: data['reporterName'] ?? '',
+      reporterAvatar: data['reporterAvatar'],
+      reason: data['reason'] ?? '',
+      details: data['details'] ?? '',
+      reportedAt: (data['reportedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      status: data['status'] ?? 'pending',
+      reviewedBy: data['reviewedBy'],
+      reviewerName: data['reviewerName'],
+      reviewedAt: (data['reviewedAt'] as Timestamp?)?.toDate(),
+      adminNotes: data['adminNotes'],
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'postId': postId,
+      'post': post?.toMap(),
+      'reportedBy': reportedBy,
+      'reporterName': reporterName,
+      'reporterAvatar': reporterAvatar,
+      'reason': reason,
+      'details': details,
+      'reportedAt': Timestamp.fromDate(reportedAt),
+      'status': status,
+      'reviewedBy': reviewedBy,
+      'reviewerName': reviewerName,
+      'reviewedAt': reviewedAt != null ? Timestamp.fromDate(reviewedAt!) : null,
+      'adminNotes': adminNotes,
+    };
+  }
+
+  PostReport copyWith({
+    String? status,
+    String? reviewedBy,
+    String? reviewerName,
+    DateTime? reviewedAt,
+    String? adminNotes,
+  }) {
+    return PostReport(
+      id: id,
+      postId: postId,
+      post: post,
+      reportedBy: reportedBy,
+      reporterName: reporterName,
+      reporterAvatar: reporterAvatar,
+      reason: reason,
+      details: details,
+      reportedAt: reportedAt,
+      status: status ?? this.status,
+      reviewedBy: reviewedBy ?? this.reviewedBy,
+      reviewerName: reviewerName ?? this.reviewerName,
+      reviewedAt: reviewedAt ?? this.reviewedAt,
+      adminNotes: adminNotes ?? this.adminNotes,
+    );
+  }
+}
