@@ -136,9 +136,11 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
         if (data != null) {
           final newBuckets = data['waterBuckets'] ?? 0;
           if (newBuckets != _waterBuckets) {
-            setState(() {
-              _waterBuckets = newBuckets;
-            });
+            if (mounted) {
+              setState(() {
+                _waterBuckets = newBuckets;
+              });
+            }
           }
         }
       }
@@ -264,10 +266,12 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
         return;
       }
 
-      setState(() {
-        _userData = userData;
-        _isStudent = userData['role'] == 'student'; // Check if user is a student
-      });
+      if (mounted) {
+        setState(() {
+          _userData = userData;
+          _isStudent = userData['role'] == 'student'; // Check if user is a student
+        });
+      }
 
       // Load organization data
       final orgCode = userData['organizationCode'];
@@ -282,9 +286,11 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
           .get();
 
       if (orgDoc.exists) {
-        setState(() {
-          _organizationData = orgDoc.data();
-        });
+        if (mounted) {
+          setState(() {
+            _organizationData = orgDoc.data();
+          });
+        }
       }
 
       // Load enrolled courses and assignments
@@ -293,13 +299,17 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
       await _loadWaterBuckets(); // Load water bucket count
     } catch (e) {
       debugPrint('Error loading data: $e');
-      setState(() {
-        _errorMessage = 'Error loading data: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error loading data: $e';
+        });
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -311,19 +321,25 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
       if (isStudent) {
         final progress = await _goalService.getGoalProgress();
         final bucketCount = progress?['waterBuckets'] ?? 0;
-        setState(() {
-          _waterBuckets = bucketCount;
-        });
+        if (mounted) {
+          setState(() {
+            _waterBuckets = bucketCount;
+          });
+        }
       } else {
-        setState(() {
-          _waterBuckets = 0; // Non-students have no buckets
-        });
+        if (mounted) {
+          setState(() {
+            _waterBuckets = 0; // Non-students have no buckets
+          });
+        }
       }
     } catch (e) {
       debugPrint('Error loading water buckets: $e');
-      setState(() {
-        _waterBuckets = 0;
-      });
+      if (mounted) {
+        setState(() {
+          _waterBuckets = 0;
+        });
+      }
     }
   }
 
@@ -366,14 +382,18 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
         return bTime.compareTo(aTime);
       });
 
-      setState(() {
-        _enrolledCourses = coursesList;
-      });
+      if (mounted) {
+        setState(() {
+          _enrolledCourses = coursesList;
+        });
+      }
     } catch (e) {
       debugPrint('Error loading enrolled courses: $e');
-      setState(() {
-        _errorMessage = 'Error loading courses: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Error loading data: $e';
+        });
+      }
     }
   }
 
@@ -424,10 +444,12 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
         }
       }
 
-      setState(() {
-        _pendingAssignments = pending;
-        _missedAssignments = missed;
-      });
+      if (mounted) {
+        setState(() {
+          _pendingAssignments = pending;
+          _missedAssignments = missed;
+        });
+      }
     } catch (e) {
       debugPrint('Error loading assignment stats: $e');
     }
@@ -615,9 +637,11 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
         ),
       ).then((_) {
         // Reset bottom navigation to Courses tab when returning from community
-        setState(() {
-          _currentIndex = 0;
-        });
+        if (mounted) {
+          setState(() {
+            _currentIndex = 0;
+          });
+        }
       });
     } catch (e) {
       // Close loading dialog if open
@@ -673,10 +697,12 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
               CustomButton(
                 text: 'Retry',
                 onPressed: () {
-                  setState(() {
-                    _isLoading = true;
-                    _errorMessage = null;
-                  });
+                  if (mounted) {
+                    setState(() {
+                      _isLoading = true;
+                      _errorMessage = null;
+                    });
+                  }
                   _loadData();
                 },
               ),
@@ -1266,9 +1292,11 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
     return BottomNavigationBar(
       currentIndex: _currentIndex,
       onTap: (index) {
-        setState(() {
-          _currentIndex = index;
-        });
+        if (mounted) {
+          setState(() {
+            _currentIndex = index;
+          });
+        }
 
         // Handle navigation
         switch (index) {

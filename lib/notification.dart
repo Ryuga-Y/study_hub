@@ -1360,7 +1360,7 @@ class _NotificationDialogState extends State<NotificationDialog> {
       final calendarEvent = CalendarEvent.fromMap(notification.eventId!, eventData);
 
       // Navigate to calendar page with the specific date selected
-      Navigator.pushReplacement(
+      Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => CalendarPage(
@@ -1368,12 +1368,7 @@ class _NotificationDialogState extends State<NotificationDialog> {
             autoShowEventId: notification.eventId, // Pass the event ID to auto-show
           ),
         ),
-      ).then((_) {
-        // Add a small delay to ensure calendar loads before showing event details
-        Future.delayed(Duration(milliseconds: 500), () {
-          // The calendar will auto-show the event details via autoShowEventId
-        });
-      });
+      );
 
     } catch (e) {
       _showNavigationError(context, 'Failed to navigate to calendar event: $e');
