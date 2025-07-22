@@ -6,7 +6,6 @@ import 'package:share_plus/share_plus.dart';
 import 'models.dart';
 import '../chat_integrated.dart';
 import '../chat.dart';
-import 'safeNetworkImage.dart';
 
 class CommunityService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;

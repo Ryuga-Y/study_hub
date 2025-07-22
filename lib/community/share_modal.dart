@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'models.dart';
 import 'bloc.dart';
-import 'safeNetworkImage.dart';
 
 class SharePostModal extends StatefulWidget {
   final Post post;
@@ -349,16 +348,16 @@ class _SharePostModalState extends State<SharePostModal> {
                     ),
                   ),
                 )
-                    : SafeNetworkImage(
+                    : CachedNetworkImage(
                   imageUrl: widget.post.mediaUrls.first,
                   fit: BoxFit.cover,
-                  placeholder: Container(
+                  placeholder: (context, url) => Container(
                     color: Colors.grey[200],
                     child: Center(
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   ),
-                  errorWidget: Container(
+                  errorWidget: (context, url, error) => Container(
                     color: Colors.grey[200],
                     child: Center(
                       child: Icon(Icons.broken_image, color: Colors.grey[400]),

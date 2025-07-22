@@ -6,7 +6,6 @@ import 'package:study_hub/community/share_modal.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../community/models.dart';
 import '../community/bloc.dart';
-import 'safeNetworkImage.dart';
 
 class PostCard extends StatefulWidget {
   final Post post;
@@ -518,13 +517,19 @@ class _PostCardState extends State<PostCard> {
 
     return GestureDetector(
       onDoubleTap: widget.onLike,
-      child: SafeNetworkImage(
+      child: CachedNetworkImage(
         imageUrl: mediaUrl,
         fit: BoxFit.cover,
-        placeholder: Container(
+        placeholder: (context, url) => Container(
           color: Colors.grey[200],
           child: Center(
             child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+        errorWidget: (context, url, error) => Container(
+          color: Colors.grey[200],
+          child: Center(
+            child: Icon(Icons.broken_image, color: Colors.grey[400]),
           ),
         ),
       ),
