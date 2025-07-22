@@ -27,7 +27,7 @@ class ChatContact {
   final bool isOnline;
   final String chatId;
   final bool isPinned;
-  final bool isStuckOnTop; // Add this
+  final bool isStuckOnTop;
 
   ChatContact({
     required this.userId,
@@ -39,7 +39,7 @@ class ChatContact {
     this.isOnline = false,
     required this.chatId,
     this.isPinned = false,
-    this.isStuckOnTop = false, // Add this
+    this.isStuckOnTop = false,
   });
 
   factory ChatContact.fromFriend(Friend friend, {String? lastMessage, DateTime? lastMessageTime, int unreadCount = 0, bool isPinned = false, bool isStuckOnTop = false}) {
@@ -92,7 +92,7 @@ class ChatMessage {
       senderId: data['senderId'] ?? '',
       timestamp: data['timestamp'] != null
           ? (data['timestamp'] as Timestamp).toDate()
-          : DateTime.now(), // ✅ Handle null timestamp
+          : DateTime.now(),
       isRead: data['isRead'] ?? false,
       attachmentUrl: data['attachmentUrl'],
       attachmentType: data['attachmentType'],
@@ -115,24 +115,21 @@ class ChatMessage {
   }
 }
 
-
 // Main Chat Contact Page
 class ChatContactPage extends StatefulWidget {
   @override
   _ChatContactPageState createState() => _ChatContactPageState();
 }
 
-
-
 class _ChatContactPageState extends State<ChatContactPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   List<ChatContact> _contacts = [];
-  List<ChatContact> _filteredContacts = []; // Add this
+  List<ChatContact> _filteredContacts = [];
   bool _isLoading = true;
   bool _hasFriends = false;
-  bool _isSearching = false; // Add this
-  final TextEditingController _searchController = TextEditingController(); // Add this
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -140,14 +137,13 @@ class _ChatContactPageState extends State<ChatContactPage> {
     _loadFriendsAsContacts();
     _setupRealtimeContactUpdates();
     _startPeriodicRefresh();
+    _listenForIncomingCalls();
   }
 
-  // Real-time contact updates
   void _setupRealtimeContactUpdates() {
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
 
-    // Listen for friend changes in real-time
     _firestore
         .collection('friends')
         .where('userId', isEqualTo: currentUserId)
@@ -158,7 +154,6 @@ class _ChatContactPageState extends State<ChatContactPage> {
       _loadFriendsAsContacts();
     });
 
-    // 🆕 ADD THIS - Also listen for any chat document changes
     _firestore
         .collection('chats')
         .where('participants', arrayContains: currentUserId)
@@ -174,22 +169,18 @@ class _ChatContactPageState extends State<ChatContactPage> {
       final currentUserId = _auth.currentUser?.uid;
       if (currentUserId == null) return;
 
-      // Get accepted friends - ONLY accepted friends can chat
       final friendsSnapshot = await _firestore
           .collection('friends')
           .where('userId', isEqualTo: currentUserId)
           .where('status', isEqualTo: 'accepted')
           .get();
 
-      // Set hasFriends flag
       _hasFriends = friendsSnapshot.docs.isNotEmpty;
-
       List<ChatContact> contacts = [];
 
       for (final doc in friendsSnapshot.docs) {
         final friend = Friend.fromFirestore(doc);
 
-        // VERIFY: Double-check friendship status before allowing chat
         final isFriend = await _verifyMutualFriendship(currentUserId, friend.friendId);
         if (!isFriend) {
           print('⚠️ Skipping non-mutual friend: ${friend.friendName}');
@@ -197,22 +188,18 @@ class _ChatContactPageState extends State<ChatContactPage> {
         }
 
         final chatId = ChatContact._generateChatId(currentUserId, friend.friendId);
-
-        // Check if chat exists
         final chatDoc = await _firestore.collection('chats').doc(chatId).get();
 
         if (!chatDoc.exists) {
-          // Create new chat
           await _createChat(currentUserId, friend);
         }
 
-        // Get last message info with better defaults
         final chatData = chatDoc.data();
         String lastMessage;
         DateTime lastMessageTime;
         int unreadCount;
         bool isPinned = false;
-        bool isStuckOnTop = false; // Add this line
+        bool isStuckOnTop = false;
 
         if (chatData != null) {
           lastMessage = chatData['lastMessage'] ?? "I've accepted your friend request. Now let's chat!";
@@ -221,13 +208,13 @@ class _ChatContactPageState extends State<ChatContactPage> {
               : friend.acceptedAt ?? friend.createdAt;
           unreadCount = chatData['unreadCount']?[currentUserId] ?? 0;
           isPinned = chatData['isPinned'] ?? false;
-          isStuckOnTop = chatData['isStuckOnTop'] ?? false; // Add this line
+          isStuckOnTop = chatData['isStuckOnTop'] ?? false;
         } else {
           lastMessage = "You became friends with ${friend.friendName}";
           lastMessageTime = friend.acceptedAt ?? friend.createdAt;
           unreadCount = 0;
           isPinned = false;
-          isStuckOnTop = false; // Add this line
+          isStuckOnTop = false;
         }
 
         contacts.add(ChatContact.fromFriend(
@@ -236,11 +223,10 @@ class _ChatContactPageState extends State<ChatContactPage> {
           lastMessageTime: lastMessageTime,
           unreadCount: unreadCount,
           isPinned: isPinned,
-          isStuckOnTop: isStuckOnTop, // Add this line
+          isStuckOnTop: isStuckOnTop,
         ));
-      } // ADD THIS CLOSING BRACE
+      }
 
-      // Sort by last message time
       contacts.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
 
       setState(() {
@@ -253,7 +239,6 @@ class _ChatContactPageState extends State<ChatContactPage> {
     }
   }
 
-  // 🆕 ADD THIS METHOD - Add after _loadFriendsAsContacts method
   Future<void> forceRefresh() async {
     print('🔄 Force refreshing chat contacts...');
     setState(() {
@@ -262,7 +247,6 @@ class _ChatContactPageState extends State<ChatContactPage> {
     await _loadFriendsAsContacts();
   }
 
-// 🆕 ADD THIS METHOD - Add periodic refresh
   void _startPeriodicRefresh() {
     Timer.periodic(Duration(seconds: 30), (timer) {
       if (mounted) {
@@ -277,22 +261,16 @@ class _ChatContactPageState extends State<ChatContactPage> {
     final chatId = ChatContact._generateChatId(currentUserId, friend.friendId);
 
     try {
-      // Check if chat already exists first
       final existingChat = await _firestore.collection('chats').doc(chatId).get();
       if (existingChat.exists) {
         print('💬 Chat already exists: $chatId');
-        return; // Chat already exists, no need to create
+        return;
       }
 
-      // Get current user's name
       final currentUserDoc = await _firestore.collection('users').doc(currentUserId).get();
       final currentUserName = currentUserDoc.data()?['fullName'] ?? 'You';
-
-      // Welcome message
       final welcomeMessage = "You became friends with ${friend.friendName}, let's start chatting!";
 
-      // Use merge option to prevent overwriting existing chats
-      // Use merge option to prevent overwriting existing chats
       await _firestore.collection('chats').doc(chatId).set({
         'participants': [currentUserId, friend.friendId],
         'participantNames': {
@@ -306,7 +284,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
           currentUserId: 0,
           friend.friendId: 0,
         },
-        'chatType': 'friend_chat', // Add this for clarity
+        'chatType': 'friend_chat',
       }, SetOptions(merge: true));
 
       await _firestore
@@ -317,10 +295,9 @@ class _ChatContactPageState extends State<ChatContactPage> {
         'text': welcomeMessage,
         'senderId': 'system',
         'timestamp': FieldValue.serverTimestamp(),
-        'isRead': true,  // Mark as read for system messages
+        'isRead': true,
         'isSystemMessage': true,
       });
-
     } catch (e) {
       print('Error creating chat: $e');
     }
@@ -328,21 +305,18 @@ class _ChatContactPageState extends State<ChatContactPage> {
 
   Future<bool> _verifyMutualFriendship(String userId1, String userId2) async {
     try {
-      // 🆕 IMPROVED: Add auth check first
       final user = _auth.currentUser;
       if (user == null) {
         print('❌ No authenticated user for friendship verification');
         return false;
       }
 
-      // Refresh token if needed
       try {
         await user.getIdToken(true);
       } catch (authError) {
         print('⚠️ Auth refresh failed: $authError');
       }
 
-      // Check both directions of friendship
       final query1 = await _firestore
           .collection('friends')
           .where('userId', isEqualTo: userId1)
@@ -367,7 +341,6 @@ class _ChatContactPageState extends State<ChatContactPage> {
     }
   }
 
-  // 🆕 ADD THIS METHOD - Manual refresh for when returning from other screens
   Future<void> refreshContacts() async {
     print('🔄 Manually refreshing contacts...');
     await _loadFriendsAsContacts();
@@ -376,7 +349,6 @@ class _ChatContactPageState extends State<ChatContactPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Refresh contacts when returning to this screen
     Future.delayed(Duration(milliseconds: 500), () {
       if (mounted) {
         _loadFriendsAsContacts();
@@ -447,9 +419,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
         ),
         IconButton(
           icon: Icon(Icons.more_vert, color: Colors.black),
-          onPressed: () {
-            // Future menu options can be added here
-          },
+          onPressed: () {},
         ),
       ],
     );
@@ -484,12 +454,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
               color: Colors.grey[500],
             ),
           ),
-          if (!_hasFriends) ...[  // Only show if no friends
+          if (!_hasFriends) ...[
             SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: () async {
                 try {
-                  // Get the current user's organization code
                   final userDoc = await _firestore
                       .collection('users')
                       .doc(_auth.currentUser?.uid)
@@ -497,20 +466,18 @@ class _ChatContactPageState extends State<ChatContactPage> {
 
                   final organizationCode = userDoc.data()?['organizationCode'] ?? '';
 
-                  // Navigate to feed screen and then to search tab
                   Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(
                       builder: (context) => FeedScreen(
                         organizationCode: organizationCode,
-                        initialTab: 1, // Set to search tab index
+                        initialTab: 1,
                       ),
                     ),
-                        (route) => false, // Remove all previous routes
+                        (route) => false,
                   );
                 } catch (e) {
                   print('Error navigating to find friends: $e');
-                  // Fallback navigation
                   Navigator.pushReplacement(
                     context,
                     MaterialPageRoute(
@@ -542,17 +509,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
   Widget _buildContactsList() {
     final displayContacts = _isSearching ? _filteredContacts : _contacts;
 
-    // Sort contacts: stuck on top first, then pinned, then by last message time
     displayContacts.sort((a, b) {
-      // Stuck on top has highest priority
       if (a.isStuckOnTop && !b.isStuckOnTop) return -1;
       if (!a.isStuckOnTop && b.isStuckOnTop) return 1;
-
-      // Then pinned chats
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
-
-      // Finally by last message time
       return b.lastMessageTime.compareTo(a.lastMessageTime);
     });
 
@@ -585,7 +546,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         color: contact.isStuckOnTop
-            ? Colors.grey[200] // Darker background for stuck on top
+            ? Colors.grey[200]
             : contact.isPinned
             ? Colors.grey[50]
             : null,
@@ -767,11 +728,71 @@ class _ChatContactPageState extends State<ChatContactPage> {
   Future<void> _deleteChat(String chatId) async {
     // Implement delete chat functionality
   }
+
+  // ✅ INCOMING CALL METHODS - INSIDE THE CLASS
+  void _listenForIncomingCalls() {
+    final currentUserId = _auth.currentUser?.uid;
+    if (currentUserId == null) return;
+
+    _firestore
+        .collection('videoCalls')
+        .where('targetId', isEqualTo: currentUserId)
+        .where('status', isEqualTo: 'calling')
+        .snapshots()
+        .listen((snapshot) {
+      for (var change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final callData = change.doc.data() as Map<String, dynamic>;
+          _showIncomingCallDialog(
+            callData['callId'],
+            callData['callerId'],
+            callData['callerName'] ?? 'Unknown',
+          );
+        }
+      }
+    });
+  }
+
+  void _showIncomingCallDialog(String callId, String callerId, String callerName) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('Incoming Video Call'),
+        content: Text('$callerName is calling you'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _firestore.collection('videoCalls').doc(callId).update({
+                'status': 'declined',
+              });
+            },
+            child: Text('Decline', style: TextStyle(color: Colors.red)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => VideoCallScreen(
+                    contactName: callerName,
+                    callId: callId,
+                    isIncoming: true,
+                  ),
+                ),
+              );
+            },
+            child: Text('Answer'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// Rest of the ChatScreen and other classes remain the same...
-
-// Chat Screen
+// ✅ SINGLE ChatScreen CLASS
 class ChatScreen extends StatefulWidget {
   final String contactId;
   final String contactName;
@@ -800,12 +821,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _showEmojiPicker = false;
   bool _isVerifiedFriend = false;
-
-// Add these new state variables for reply functionality
   ChatMessage? _replyingToMessage;
   bool _isReplying = false;
-
-// Add search state variables
   bool _isSearching = false;
   String _searchQuery = '';
   List<ChatMessage> _searchResults = [];
@@ -814,9 +831,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    _verifyFriendshipBeforeChat();  // ✅ REPLACE _markMessagesAsRead() with this
+    _verifyFriendshipBeforeChat();
   }
-
 
   Future<void> _verifyFriendshipBeforeChat() async {
     final currentUserId = _auth.currentUser?.uid;
@@ -825,7 +841,6 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // Verify mutual friendship before allowing chat
     final isFriend = await _verifyMutualFriendship(currentUserId, widget.contactId);
 
     if (!isFriend) {
@@ -879,7 +894,6 @@ class _ChatScreenState extends State<ChatScreen> {
       final currentUserId = _auth.currentUser?.uid;
       if (currentUserId == null) return;
 
-      // Get all messages and filter on client side to avoid Firestore query limitations
       final messagesSnapshot = await _firestore
           .collection('chats')
           .doc(widget.chatId)
@@ -891,13 +905,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
       for (final doc in messagesSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
-        // Only mark messages from other users as read
         if (data['senderId'] != currentUserId) {
           batch.update(doc.reference, {'isRead': true});
         }
       }
 
-      // Reset unread count
       batch.update(
         _firestore.collection('chats').doc(widget.chatId),
         {'unreadCount.${currentUserId}': 0},
@@ -906,7 +918,6 @@ class _ChatScreenState extends State<ChatScreen> {
       await batch.commit();
     } catch (e) {
       print('Error marking messages as read: $e');
-      // Continue without marking as read - not critical
     }
   }
 
@@ -915,7 +926,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
-    _searchController.dispose(); // Add this line
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -1177,10 +1188,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-// ADD this new method after _showClearChatDialog()
   Future<void> _clearAllMessages() async {
     try {
-      // Show loading dialog
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -1203,21 +1212,18 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
-      // Get all messages in this chat
       final messagesSnapshot = await _firestore
           .collection('chats')
           .doc(widget.chatId)
           .collection('messages')
           .get();
 
-      // Delete all messages in batch
       final batch = _firestore.batch();
 
       for (final doc in messagesSnapshot.docs) {
         batch.delete(doc.reference);
       }
 
-      // Update chat document to reflect cleared state
       batch.update(
         _firestore.collection('chats').doc(widget.chatId),
         {
@@ -1228,13 +1234,9 @@ class _ChatScreenState extends State<ChatScreen> {
         },
       );
 
-      // Commit the batch
       await batch.commit();
-
-      // Close loading dialog
       Navigator.pop(context);
 
-      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Chat cleared successfully'),
@@ -1242,11 +1244,8 @@ class _ChatScreenState extends State<ChatScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-
     } catch (e) {
-      // Close loading dialog if still open
       Navigator.pop(context);
-
       print('Error clearing chat: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1275,7 +1274,6 @@ class _ChatScreenState extends State<ChatScreen> {
             .map((doc) => ChatMessage.fromFirestore(doc))
             .toList();
 
-        // Filter messages if searching
         if (_isSearching && _searchQuery.isNotEmpty) {
           messages = messages.where((message) =>
               message.text.toLowerCase().contains(_searchQuery)).toList();
@@ -1290,7 +1288,6 @@ class _ChatScreenState extends State<ChatScreen> {
           );
         }
 
-        // Auto scroll to bottom
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollController.hasClients) {
             _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
@@ -1408,7 +1405,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showMessageOptions(ChatMessage message, bool isMe) {
-    // Close emoji picker if open
     setState(() {
       _showEmojiPicker = false;
     });
@@ -1438,7 +1434,6 @@ class _ChatScreenState extends State<ChatScreen> {
               title: Text('Reply'),
               onTap: () {
                 Navigator.pop(context);
-                // Add a delay to ensure the bottom sheet closes first
                 Future.delayed(Duration(milliseconds: 200), () {
                   _replyToMessage(message);
                 });
@@ -1474,7 +1469,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _isReplying = true;
     });
 
-    // Add a small delay to ensure the UI updates first, then open keyboard
     Future.delayed(Duration(milliseconds: 100), () {
       _focusNode.requestFocus();
     });
@@ -1485,7 +1479,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _messageController.text = message.text;
     });
     _focusNode.requestFocus();
-    // You can add edit functionality here
   }
 
   void _deleteMessage(ChatMessage message) {
@@ -1825,7 +1818,6 @@ class _ChatScreenState extends State<ChatScreen> {
     if (currentUserId == null) return;
 
     try {
-      // Prepare message data
       Map<String, dynamic> messageData = {
         'text': text.trim(),
         'senderId': currentUserId,
@@ -1835,7 +1827,6 @@ class _ChatScreenState extends State<ChatScreen> {
         'textOverlays': textOverlays?.map((overlay) => overlay.toMap()).toList(),
       };
 
-      // Add reply information if replying to a message
       if (_isReplying && _replyingToMessage != null) {
         messageData['replyTo'] = {
           'messageId': _replyingToMessage!.id,
@@ -1845,22 +1836,20 @@ class _ChatScreenState extends State<ChatScreen> {
         };
       }
 
-      // Add message to Firestore
       await _firestore
           .collection('chats')
           .doc(widget.chatId)
           .collection('messages')
           .add(messageData);
 
-  // Update chat metadata
-  await _firestore.collection('chats').doc(widget.chatId).update({
-  'lastMessage': attachmentType != null ? '${attachmentType == 'image' ? '📷' : '📎'} ${text.trim()}' : text.trim(),
-  'lastMessageTime': FieldValue.serverTimestamp(),
-  'unreadCount.${widget.contactId}': FieldValue.increment(1),
-  });
+      await _firestore.collection('chats').doc(widget.chatId).update({
+        'lastMessage': attachmentType != null ? '${attachmentType == 'image' ? '📷' : '📎'} ${text.trim()}' : text.trim(),
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'unreadCount.${widget.contactId}': FieldValue.increment(1),
+      });
 
       _messageController.clear();
-      _cancelReply(); // Clear reply state
+      _cancelReply();
       _scrollToBottom();
       HapticFeedback.lightImpact();
     } catch (e) {
@@ -1926,6 +1915,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   builder: (context) => VideoCallScreen(
                     contactName: widget.contactName,
                     contactAvatar: widget.contactAvatar,
+                    targetUserId: widget.contactId,
+                    isIncoming: false,
                   ),
                 ),
               );
@@ -1981,5 +1972,4 @@ class _ChatScreenState extends State<ChatScreen> {
       attachmentType: type,
     );
   }
-
 }
