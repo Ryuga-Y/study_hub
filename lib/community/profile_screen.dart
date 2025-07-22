@@ -8,6 +8,7 @@ import 'package:study_hub/community/search_screen.dart';
 import 'bloc.dart';
 import 'community_services.dart';
 import 'models.dart';
+import 'safeNetworkImage.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userId;
@@ -508,16 +509,16 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               fit: StackFit.expand,
               children: [
                 if (post.mediaUrls.isNotEmpty)
-                  CachedNetworkImage(
+                  SafeNetworkImage(
                     imageUrl: post.mediaUrls.first,
                     fit: BoxFit.cover,
-                    placeholder: (context, url) => Container(
+                    placeholder: Container(
                       color: Colors.grey[300],
                       child: Center(
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
                     ),
-                    errorWidget: (context, url, error) => Container(
+                    errorWidget: Container(
                       color: Colors.grey[300],
                       child: Icon(Icons.broken_image, color: Colors.grey[500]),
                     ),

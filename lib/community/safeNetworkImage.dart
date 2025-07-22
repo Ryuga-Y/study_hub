@@ -47,18 +47,21 @@ class SafeNetworkImage extends StatelessWidget {
           fit: fit,
           placeholder: (context, url) => placeholder ?? _buildPlaceholder(),
           errorWidget: (context, url, error) {
-            print('🖼️ Image load error for $url: $error');
+            // Suppress excessive logging for known 404 errors
+            final errorString = error.toString().toLowerCase();
 
             // Handle specific HTTP errors
-            if (error.toString().contains('403')) {
-              print('❌ 403 Forbidden - Check Firebase Storage rules');
+            if (errorString.contains('403')) {
+              print('❌ 403 Forbidden - Check Firebase Storage rules for: ${url.substring(0, 50)}...');
               return _buildAuthErrorWidget();
-            } else if (error.toString().contains('404')) {
-              print('❌ 404 Not Found - Image may have been deleted');
+            } else if (errorString.contains('404') || errorString.contains('not found')) {
+              print('🗑️ 404 Not Found - Scheduling cleanup for broken image');
               // Automatically remove broken posts for 404 errors
               _handleBrokenImage(url);
+              return _buildBrokenImageWidget();
             }
 
+            print('🖼️ Image load error: ${errorString.substring(0, 100)}...');
             return _buildErrorWidget();
           },
           fadeInDuration: Duration(milliseconds: 300),
@@ -106,6 +109,39 @@ class SafeNetworkImage extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 color: Colors.grey[500],
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ]
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBrokenImageWidget() {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.orange[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange[200]!, width: 1),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: (height != null && height! < 100) ? 24 : 48,
+            color: Colors.orange[400],
+          ),
+          if (height == null || height! >= 60) ...[
+            SizedBox(height: 8),
+            Text(
+              'Image removed',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.orange[600],
               ),
               textAlign: TextAlign.center,
             ),

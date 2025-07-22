@@ -28,6 +28,8 @@ class FeedScreen extends StatefulWidget {
   _FeedScreenState createState() => _FeedScreenState();
 }
 
+bool _hasRunCleanup = false;
+
 class _FeedScreenState extends State<FeedScreen> {
   late int _currentIndex;
   final ScrollController _scrollController = ScrollController();
@@ -123,23 +125,20 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   void _scheduleCleanup() {
-    // Run cleanup after initial load completes
-    Future.delayed(Duration(seconds: 5), () {
-      final service = CommunityService();
-      service.cleanupBrokenImagePosts().catchError((e) {
-        print('Cleanup error: $e');
-      });
-    });
+    // Only run cleanup once per session to avoid excessive API calls
+    if (_hasRunCleanup) return;
+    _hasRunCleanup = true;
 
-    // Also run a quick check immediately for critical errors
-    Future.delayed(Duration(milliseconds: 500), () {
+    // Run cleanup after a longer delay to let everything load first
+    Future.delayed(Duration(seconds: 10), () {
       if (mounted) {
         final service = CommunityService();
         service.cleanupBrokenImagePosts().catchError((e) {
-          print('Quick cleanup error: $e');
+          print('Cleanup error (suppressed): Network/Storage issue');
         });
       }
     });
+
   }
 
   void _showError(String message) {

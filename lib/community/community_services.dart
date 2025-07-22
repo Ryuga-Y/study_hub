@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'models.dart';
 import '../chat_integrated.dart';
 import '../chat.dart';
+import 'safeNetworkImage.dart';
 
 class CommunityService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -42,7 +43,6 @@ class CommunityService {
       final userDoc = await _firestore.collection('users').doc(userId).get();
       final userData = userDoc.data()!;
 
-      // Upload media files
       // Upload media files
       List<String> mediaUrls = [];
       for (int i = 0; i < mediaFiles.length; i++) {
@@ -1438,52 +1438,87 @@ class CommunityService {
     }
   }
 
-  // 🔧 SAFE METHOD - Clean up posts with missing media
-  Future<void> cleanupBrokenPosts() async {
+  // IMPROVED Cleanup method - Fixed batch handling
+  Future<void> cleanupBrokenImagePosts() async {
     try {
-      print('🧹 Cleaning up posts with broken media...');
+      print('🧹 Starting cleanup of posts with broken images...');
 
+      // Get posts in smaller batches to avoid memory issues
+      // Get posts in smaller batches to avoid memory issues
       final postsSnapshot = await _firestore
           .collection('posts')
           .where('mediaUrls', isNotEqualTo: [])
+          .limit(20) // Reduced batch size to avoid rate limits
           .get();
 
       int cleanedCount = 0;
+      final docsToDelete = <DocumentReference>[];
 
       for (final doc in postsSnapshot.docs) {
         try {
           final postData = doc.data();
           final mediaUrls = List<String>.from(postData['mediaUrls'] ?? []);
 
-          // If no media URLs, skip
           if (mediaUrls.isEmpty) continue;
 
-          // Check if any URL returns 404 - if so, remove the post
-          bool hasValidMedia = false;
-          for (String url in mediaUrls) {
+          // Check first URL more thoroughly
+          // Check first URL more thoroughly with better validation
+          bool hasValidMedia = true;
+          final firstUrl = mediaUrls.first;
+
+// Validate URL format first
+          if (!_isValidFirebaseStorageUrl(firstUrl)) {
+            hasValidMedia = false;
+            print('📁 Invalid storage URL format: ${firstUrl.substring(0, 50)}...');
+          } else {
             try {
-              final ref = _storage.refFromURL(url);
-              await ref.getMetadata(); // This will throw if file doesn't exist
-              hasValidMedia = true;
-              break; // At least one file exists
+              final ref = _storage.refFromURL(firstUrl);
+              await ref.getMetadata();
+              print('✅ Valid image found: ${firstUrl.substring(0, 50)}...');
             } catch (e) {
-              print('📁 File not found: $url');
+              final errorString = e.toString().toLowerCase();
+              if (errorString.contains('404') ||
+                  errorString.contains('not found') ||
+                  errorString.contains('object does not exist') ||
+                  errorString.contains('no object exists') ||
+                  errorString.contains('invalid http method') ||
+                  errorString.contains('storagexception')) {
+                hasValidMedia = false;
+                print('📁 Confirmed broken/missing image: ${firstUrl.substring(0, 50)}...');
+              } else {
+                // For other errors, assume file exists to be safe
+                hasValidMedia = true;
+                print('⚠️ Unclear error, keeping post: ${e.toString().substring(0, 100)}...');
+              }
             }
           }
 
-          // If no valid media found, delete the post
           if (!hasValidMedia) {
-            await doc.reference.delete();
+            docsToDelete.add(doc.reference);
             cleanedCount++;
-            print('🗑️ Deleted post with broken media: ${doc.id}');
+            print('🗑️ Marked for deletion: ${doc.id}');
           }
 
         } catch (e) {
-          print('⚠️ Error processing post ${doc.id}: $e');
+          print('⚠️ Error processing post ${doc.id}: ${e.toString().substring(0, 100)}...');
         }
 
-        // Add delay to avoid rate limiting
-        await Future.delayed(Duration(milliseconds: 200));
+        // Add small delay to avoid overwhelming Firebase Storage API
+        await Future.delayed(Duration(milliseconds: 100));
+      }
+
+      // Delete in batches of 20 to stay within Firestore limits
+      for (int i = 0; i < docsToDelete.length; i += 20) {
+        final batchDocs = docsToDelete.skip(i).take(20);
+        final deleteBatch = _firestore.batch();
+
+        for (final docRef in batchDocs) {
+          deleteBatch.delete(docRef);
+        }
+
+        await deleteBatch.commit();
+        await Future.delayed(Duration(milliseconds: 500)); // Rate limiting
+        print('🗑️ Deleted batch of ${batchDocs.length} posts');
       }
 
       print('✅ Cleaned up $cleanedCount posts with broken media');
@@ -1493,78 +1528,33 @@ class CommunityService {
     }
   }
 
-  // Add this method before the final closing brace of CommunityService class
-  Future<void> cleanupBrokenImagePosts() async {
+  // Helper method to validate Firebase Storage URLs
+  bool _isValidFirebaseStorageUrl(String url) {
     try {
-      print('🧹 Starting cleanup of posts with broken images...');
+      if (url.isEmpty) return false;
 
-      final postsSnapshot = await _firestore
-          .collection('posts')
-          .where('mediaUrls', isNotEqualTo: [])
-          .get();
+      // Check if it's a valid Firebase Storage URL
+      final uri = Uri.parse(url);
 
-      int cleanedCount = 0;
-      final batch = _firestore.batch();
+      // Must be https
+      if (uri.scheme != 'https') return false;
 
-      for (final doc in postsSnapshot.docs) {
-        try {
-          final postData = doc.data();
-          final mediaUrls = List<String>.from(postData['mediaUrls'] ?? []);
+      // Must be firebasestorage.googleapis.com domain
+      if (!uri.host.contains('firebasestorage.googleapis.com')) return false;
 
-          if (mediaUrls.isEmpty) continue;
+      // Must have proper path structure
+      if (!uri.path.contains('/v0/b/') || !uri.path.contains('/o/')) return false;
 
-          // Check first URL for 404
-          // Check first URL for 404
-          bool hasValidMedia = false;
-          for (String url in mediaUrls.take(1)) { // Only check first URL to avoid rate limits
-            try {
-              final ref = _storage.refFromURL(url);
-              await ref.getMetadata();
-              hasValidMedia = true;
-              break;
-            } catch (e) {
-              // More comprehensive error checking
-              final errorString = e.toString().toLowerCase();
-              if (errorString.contains('404') ||
-                  errorString.contains('not found') ||
-                  errorString.contains('object does not exist') ||
-                  errorString.contains('no object exists')) {
-                print('📁 File not found: $url');
-                hasValidMedia = false;
-              } else {
-                // For other errors, assume file might exist
-                hasValidMedia = true;
-                print('⚠️ Error checking file but assuming it exists: $e');
-              }
-            }
-          }
-
-          if (!hasValidMedia) {
-            batch.delete(doc.reference);
-            cleanedCount++;
-            print('🗑️ Scheduled deletion of post with broken media: ${doc.id}');
-
-            // Process in batches to avoid memory issues
-            if (cleanedCount % 50 == 0) {
-              await batch.commit();
-              await Future.delayed(Duration(milliseconds: 500)); // Rate limiting
-            }
-          }
-
-        } catch (e) {
-          print('⚠️ Error processing post ${doc.id}: $e');
-        }
-      }
-
-      // Commit remaining changes
-      if (cleanedCount % 50 != 0) {
-        await batch.commit();
-      }
-
-      print('✅ Cleaned up $cleanedCount posts with broken media');
-
+      return true;
     } catch (e) {
-      print('❌ Error during cleanup: $e');
+      print('URL validation error: $e');
+      return false;
     }
+  }
+
+  // Legacy cleanup method - can be removed if not used elsewhere
+  @Deprecated('Use cleanupBrokenImagePosts instead')
+  Future<void> cleanupBrokenPosts() async {
+    await cleanupBrokenImagePosts();
   }
 }
