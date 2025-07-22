@@ -302,6 +302,15 @@ class MarkNotificationRead extends CommunityEvent {
 
 class MarkAllNotificationsRead extends CommunityEvent {}
 
+class LoadAnalytics extends CommunityEvent {
+  final String organizationCode;
+
+  LoadAnalytics({required this.organizationCode});
+
+  @override
+  List<Object> get props => [organizationCode];
+}
+
 // State
 class CommunityState extends Equatable {
   final List<Post> feedPosts;
@@ -321,6 +330,7 @@ class CommunityState extends Equatable {
   final String? successMessage;
   final int unreadNotificationCount;
   final List<PostReport> reportedPosts;
+  final Map<String, int> analytics;
 
   const CommunityState({
     this.feedPosts = const [],
@@ -340,6 +350,13 @@ class CommunityState extends Equatable {
     this.successMessage,
     this.unreadNotificationCount = 0,
     this.reportedPosts = const [],
+    this.analytics = const {
+      'totalPosts': 0,
+      'totalReports': 0,
+      'validReports': 0,
+      'invalidReports': 0,
+      'pendingReports': 0,
+    },
   });
 
   CommunityState copyWith({
@@ -360,6 +377,7 @@ class CommunityState extends Equatable {
     String? successMessage,
     int? unreadNotificationCount,
     List<PostReport>? reportedPosts,
+    Map<String, int>? analytics,
   }) {
     return CommunityState(
       feedPosts: feedPosts ?? this.feedPosts,
@@ -379,6 +397,7 @@ class CommunityState extends Equatable {
       successMessage: successMessage,
       unreadNotificationCount: unreadNotificationCount ?? this.unreadNotificationCount,
       reportedPosts: reportedPosts ?? this.reportedPosts,
+      analytics: analytics ?? this.analytics,
     );
   }
 
@@ -401,6 +420,7 @@ class CommunityState extends Equatable {
     successMessage,
     unreadNotificationCount,
     reportedPosts,
+    analytics,
   ];
 }
 
@@ -427,6 +447,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<ReviewReport>(_onReviewReport);
     on<AdminDeletePost>(_onAdminDeletePost);
 
+    on<LoadAnalytics>(_onLoadAnalytics);
+
     // Comment Events
     on<LoadComments>(_onLoadComments);
     on<AddComment>(_onAddComment);
@@ -450,6 +472,15 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<LoadNotifications>(_onLoadNotifications);
     on<MarkNotificationRead>(_onMarkNotificationRead);
     on<MarkAllNotificationsRead>(_onMarkAllNotificationsRead);
+  }
+
+  Future<void> _onLoadAnalytics(LoadAnalytics event, Emitter<CommunityState> emit) async {
+    try {
+      final analytics = await _service.getCommunityAnalytics(event.organizationCode);
+      emit(state.copyWith(analytics: analytics));
+    } catch (e) {
+      print('Error loading analytics: $e');
+    }
   }
 
   // Post Handlers

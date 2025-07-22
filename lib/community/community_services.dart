@@ -1805,6 +1805,74 @@ class CommunityService {
     }
   }
 
+  Future<Map<String, int>> getCommunityAnalytics(String organizationCode) async {
+    try {
+      // Get total posts count
+      final postsQuery = await _firestore
+          .collection('posts')
+          .where('userId', whereIn: await _getUsersInOrganization(organizationCode))
+          .get();
+
+      // Get all reports
+      final reportsQuery = await _firestore
+          .collection('postReports')
+          .where('organizationCode', isEqualTo: organizationCode)
+          .get();
+
+      // Count report statuses
+      int validReports = 0;
+      int invalidReports = 0;
+      int pendingReports = 0;
+
+      for (final doc in reportsQuery.docs) {
+        final status = doc.data()['status'] as String;
+        switch (status) {
+          case 'valid':
+            validReports++;
+            break;
+          case 'invalid':
+            invalidReports++;
+            break;
+          case 'pending':
+            pendingReports++;
+            break;
+        }
+      }
+
+      return {
+        'totalPosts': postsQuery.docs.length,
+        'totalReports': reportsQuery.docs.length,
+        'validReports': validReports,
+        'invalidReports': invalidReports,
+        'pendingReports': pendingReports,
+      };
+    } catch (e) {
+      print('Error fetching analytics: $e');
+      return {
+        'totalPosts': 0,
+        'totalReports': 0,
+        'validReports': 0,
+        'invalidReports': 0,
+        'pendingReports': 0,
+      };
+    }
+  }
+
+// Helper method to get all users in an organization
+  Future<List<String>> _getUsersInOrganization(String organizationCode) async {
+    try {
+      final usersQuery = await _firestore
+          .collection('users')
+          .where('organizationCode', isEqualTo: organizationCode)
+          .get();
+
+      return usersQuery.docs.map((doc) => doc.id).toList();
+    } catch (e) {
+      print('Error getting users in organization: $e');
+      return [];
+    }
+  }
+
   Future<void> _notifyAdminsOfReport({
     required String organizationCode,
     required String reporterName,
@@ -1858,4 +1926,9 @@ class CommunityService {
     }
   }
 
+  // Legacy cleanup method - can be removed if not used elsewhere
+  @Deprecated('Use cleanupBrokenImagePosts instead')
+  Future<void> cleanupBrokenPosts() async {
+    await cleanupBrokenImagePosts();
+  }
 }

@@ -29,6 +29,7 @@ class _CommunityManagementPageState extends State<CommunityManagementPage> with 
 
   void _loadData() {
     context.read<CommunityBloc>().add(LoadReportedPosts(organizationCode: widget.organizationId));
+    context.read<CommunityBloc>().add(LoadAnalytics(organizationCode: widget.organizationId));
   }
 
   @override
@@ -558,23 +559,38 @@ class _CommunityManagementPageState extends State<CommunityManagementPage> with 
   }
 
   Widget _buildAnalyticsTab(CommunityState state) {
-    // Statistics about posts and engagement
-    final totalPosts = state.feedPosts.length;
-    final totalReports = state.reportedPosts.length;
-    final validReports = state.reportedPosts.where((r) => r.status == 'valid').length;
-    final invalidReports = state.reportedPosts.where((r) => r.status == 'invalid').length;
+    // Use analytics from state instead of calculating from feedPosts
+    final totalPosts = state.analytics['totalPosts'] ?? 0;
+    final totalReports = state.analytics['totalReports'] ?? 0;
+    final validReports = state.analytics['validReports'] ?? 0;
+    final invalidReports = state.analytics['invalidReports'] ?? 0;
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Community Analytics',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
+          // Add a refresh button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Community Analytics',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.refresh),
+                onPressed: () {
+                  context.read<CommunityBloc>().add(
+                    LoadAnalytics(organizationCode: widget.organizationId),
+                  );
+                },
+                tooltip: 'Refresh analytics',
+              ),
+            ],
           ),
           SizedBox(height: 24),
 
