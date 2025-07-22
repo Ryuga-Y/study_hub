@@ -28,8 +28,9 @@ dependencies:
   equatable: ^2.0.7
   share_plus: ^11.0.0
   rxdart: ^0.28.0
-  agora_rtc_engine: ^6.3.2
   permission_handler: ^11.3.1
+  flutter_webrtc: ^0.9.48  
+  uuid: ^4.1.0
 
 
 dev_dependencies:
