@@ -158,7 +158,8 @@ class ChatContactPage extends StatefulWidget {
   _ChatContactPageState createState() => _ChatContactPageState();
 }
 
-// FIXED: Only one class declaration
+
+
 class _ChatContactPageState extends State<ChatContactPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -170,6 +171,24 @@ class _ChatContactPageState extends State<ChatContactPage> {
   void initState() {
     super.initState();
     _loadFriendsAsContacts();
+    _setupRealtimeContactUpdates(); // 🆕 ADD THIS
+  }
+
+  // 🆕 ADD THIS METHOD - Real-time contact updates
+  void _setupRealtimeContactUpdates() {
+    final currentUserId = _auth.currentUser?.uid;
+    if (currentUserId == null) return;
+
+    // Listen for friend changes in real-time
+    _firestore
+        .collection('friends')
+        .where('userId', isEqualTo: currentUserId)
+        .where('status', isEqualTo: 'accepted')
+        .snapshots()
+        .listen((snapshot) {
+      print('🔄 Friends collection changed, refreshing contacts...');
+      _loadFriendsAsContacts();
+    });
   }
 
   Future<void> _loadFriendsAsContacts() async {
@@ -177,7 +196,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
       final currentUserId = _auth.currentUser?.uid;
       if (currentUserId == null) return;
 
-      // Get accepted friends
+      // Get accepted friends - ONLY accepted friends can chat
       final friendsSnapshot = await _firestore
           .collection('friends')
           .where('userId', isEqualTo: currentUserId)
@@ -191,6 +210,14 @@ class _ChatContactPageState extends State<ChatContactPage> {
 
       for (final doc in friendsSnapshot.docs) {
         final friend = Friend.fromFirestore(doc);
+
+        // VERIFY: Double-check friendship status before allowing chat
+        final isFriend = await _verifyMutualFriendship(currentUserId, friend.friendId);
+        if (!isFriend) {
+          print('⚠️ Skipping non-mutual friend: ${friend.friendName}');
+          continue;
+        }
+
         final chatId = ChatContact._generateChatId(currentUserId, friend.friendId);
 
         // Check if chat exists
@@ -202,12 +229,23 @@ class _ChatContactPageState extends State<ChatContactPage> {
         }
 
         // Get last message info
+        // Get last message info with better defaults
         final chatData = chatDoc.data();
-        final lastMessage = chatData?['lastMessage'] ?? "You became friends with ${friend.friendName}, let's start chatting!";
-        final lastMessageTime = chatData?['lastMessageTime'] != null
-            ? (chatData!['lastMessageTime'] as Timestamp).toDate()
-            : friend.acceptedAt ?? friend.createdAt;
-        final unreadCount = chatData?['unreadCount']?[currentUserId] ?? 0;
+        String lastMessage;
+        DateTime lastMessageTime;
+        int unreadCount;
+
+        if (chatData != null) {
+          lastMessage = chatData['lastMessage'] ?? "I've accepted your friend request. Now let's chat!";
+          lastMessageTime = chatData['lastMessageTime'] != null
+              ? (chatData['lastMessageTime'] as Timestamp).toDate()
+              : friend.acceptedAt ?? friend.createdAt;
+          unreadCount = chatData['unreadCount']?[currentUserId] ?? 0;
+        } else {
+          lastMessage = "You became friends with ${friend.friendName}";
+          lastMessageTime = friend.acceptedAt ?? friend.createdAt;
+          unreadCount = 0;
+        }
 
         contacts.add(ChatContact.fromFriend(
           friend,
@@ -268,6 +306,44 @@ class _ChatContactPageState extends State<ChatContactPage> {
       'isRead': true,  // Mark as read for system messages
       'isSystemMessage': true,
     });
+  }
+
+  // Add this method to _ChatContactPageState class
+  Future<bool> _verifyMutualFriendship(String userId1, String userId2) async {
+    try {
+      // Check both directions of friendship
+      final query1 = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: userId1)
+          .where('friendId', isEqualTo: userId2)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      final query2 = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: userId2)
+          .where('friendId', isEqualTo: userId1)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      return query1.docs.isNotEmpty && query2.docs.isNotEmpty;
+    } catch (e) {
+      print('Error verifying friendship: $e');
+      return false;
+    }
+  }
+
+  // 🆕 ADD THIS METHOD - Manual refresh for when returning from other screens
+  Future<void> refreshContacts() async {
+    print('🔄 Manually refreshing contacts...');
+    await _loadFriendsAsContacts();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Refresh contacts when returning to this screen
+    _loadFriendsAsContacts();
   }
 
   @override
@@ -572,10 +648,38 @@ class _ChatScreenState extends State<ChatScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   bool _showEmojiPicker = false;
+  bool _isVerifiedFriend = false;
 
   @override
   void initState() {
     super.initState();
+    _verifyFriendshipBeforeChat();  // ✅ REPLACE _markMessagesAsRead() with this
+  }
+
+
+  Future<void> _verifyFriendshipBeforeChat() async {
+    final currentUserId = _auth.currentUser?.uid;
+    if (currentUserId == null) {
+      Navigator.pop(context);
+      return;
+    }
+
+    // Verify mutual friendship before allowing chat
+    final isFriend = await _verifyMutualFriendship(currentUserId, widget.contactId);
+
+    if (!isFriend) {
+      print('❌ Cannot chat - not mutual friends');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('You can only chat with friends')),
+      );
+      Navigator.pop(context);
+      return;
+    }
+
+    setState(() {
+      _isVerifiedFriend = true;
+    });
+
     _markMessagesAsRead();
     _focusNode.addListener(() {
       if (_focusNode.hasFocus) {
@@ -584,6 +688,29 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     });
+  }
+
+  Future<bool> _verifyMutualFriendship(String userId1, String userId2) async {
+    try {
+      final query1 = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: userId1)
+          .where('friendId', isEqualTo: userId2)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      final query2 = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: userId2)
+          .where('friendId', isEqualTo: userId1)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      return query1.docs.isNotEmpty && query2.docs.isNotEmpty;
+    } catch (e) {
+      print('Error verifying friendship: $e');
+      return false;
+    }
   }
 
   Future<void> _markMessagesAsRead() async {
@@ -624,6 +751,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_isVerifiedFriend) {
+      return Scaffold(
+        appBar: AppBar(title: Text('Verifying...')),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       resizeToAvoidBottomInset: true,

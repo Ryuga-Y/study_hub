@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:study_hub/community/post_card.dart';
 import '../community/bloc.dart';
@@ -10,6 +12,7 @@ import 'media_picker.dart';
 import 'profile_screen.dart';
 import 'search_screen.dart';
 import '../chat_integrated.dart';
+import '../community/community_services.dart';
 
 class FeedScreen extends StatefulWidget {
   final String organizationCode;
@@ -26,7 +29,7 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  late int _currentIndex; // Change this line - remove = 0
+  late int _currentIndex;
   final ScrollController _scrollController = ScrollController();
   final AuthService _authService = AuthService();
   bool _isInitialized = false;
@@ -34,18 +37,44 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialTab; // Add this line
+    _currentIndex = widget.initialTab;
+    _checkAuthenticationStatus(); // ADD THIS LINE
     _initializeFeed();
     _scrollController.addListener(_onScroll);
   }
 
+  // 🆕 ADD THIS METHOD - Debug authentication state
+  void _debugAuthState() {
+    final user = FirebaseAuth.instance.currentUser;
+    print('🔐 Auth Debug:');
+    print('   User: ${user?.uid}');
+    print('   Email: ${user?.email}');
+    print('   IsAnonymous: ${user?.isAnonymous}');
+
+    // Check if user can get ID token
+    user?.getIdToken().then((token) {
+      print('   Token length: ${token?.length ?? 0}');
+      print('   Token preview: ${token?.substring(0, 50) ?? 'null'}...');
+    }).catchError((e) {
+      print('   Token error: $e');
+    });
+  }
+
   Future<void> _initializeFeed() async {
     try {
+      // 🆕 ADD THIS LINE - Call debug method
+      _debugAuthState();
+
       final user = _authService.currentUser;
       if (user == null) {
         _showError('User not authenticated');
         return;
       }
+
+      // Add auth token refresh
+      await context.read<CommunityBloc>().state.currentUserProfile != null
+          ? Future.delayed(Duration.zero)
+          : _refreshAuthentication();
 
       final bloc = context.read<CommunityBloc>();
 
@@ -66,6 +95,18 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
+  Future<void> _refreshAuthentication() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await user.getIdToken(true);
+        print('✅ Authentication token refreshed');
+      }
+    } catch (e) {
+      print('❌ Failed to refresh authentication: $e');
+    }
+  }
+
   void _loadInitialData() {
     final bloc = context.read<CommunityBloc>();
 
@@ -75,7 +116,30 @@ class _FeedScreenState extends State<FeedScreen> {
       bloc.add(LoadNotifications());
       bloc.add(LoadFriends());
       bloc.add(LoadPendingRequests());
+
+      // Schedule cleanup of broken images
+      _scheduleCleanup();
     }
+  }
+
+  void _scheduleCleanup() {
+    // Run cleanup after initial load completes
+    Future.delayed(Duration(seconds: 5), () {
+      final service = CommunityService();
+      service.cleanupBrokenImagePosts().catchError((e) {
+        print('Cleanup error: $e');
+      });
+    });
+
+    // Also run a quick check immediately for critical errors
+    Future.delayed(Duration(milliseconds: 500), () {
+      if (mounted) {
+        final service = CommunityService();
+        service.cleanupBrokenImagePosts().catchError((e) {
+          print('Quick cleanup error: $e');
+        });
+      }
+    });
   }
 
   void _showError(String message) {
@@ -87,6 +151,33 @@ class _FeedScreenState extends State<FeedScreen> {
         ),
       );
     }
+  }
+
+  // ADD THIS METHOD HERE
+  void _checkAuthenticationStatus() async {
+    final user = FirebaseAuth.instance.currentUser;
+    print('=== AUTHENTICATION DEBUG ===');
+    print('User: ${user?.uid}');
+    print('Email: ${user?.email}');
+    print('Email Verified: ${user?.emailVerified}');
+
+    if (user != null) {
+      try {
+        final token = await user.getIdToken();
+        print('Token obtained: ${token?.length ?? 0} characters');
+
+        // Test a simple Firestore read to verify authentication
+        final testDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        print('Firestore access: ${testDoc.exists ? 'SUCCESS' : 'FAILED'}');
+
+      } catch (e) {
+        print('Auth error: $e');
+      }
+    }
+    print('=== END AUTH DEBUG ===');
   }
 
   void _onScroll() {
@@ -194,7 +285,7 @@ class _FeedScreenState extends State<FeedScreen> {
               },
             ),
             Spacer(),
-            // Chat icon - ADD THIS BEFORE THE NOTIFICATION ICON
+            // Chat icon
             IconButton(
               icon: Icon(Icons.chat_bubble_outline),
               color: Colors.black87,
@@ -207,8 +298,25 @@ class _FeedScreenState extends State<FeedScreen> {
                 );
               },
             ),
-
-            // Notification icon (existing code)
+// Add cleanup button (you can make this conditional or hidden in production)
+            if (state.feedPosts.any((post) => post.mediaUrls.isNotEmpty))
+              IconButton(
+                icon: Icon(Icons.cleaning_services_outlined),
+                color: Colors.black87,
+                tooltip: 'Clean up broken images',
+                onPressed: () async {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Cleaning up broken images...')),
+                  );
+                  final service = CommunityService();
+                  await service.cleanupBrokenImagePosts();
+                  // Refresh feed
+                  context.read<CommunityBloc>().add(
+                    LoadFeed(organizationCode: widget.organizationCode, refresh: true),
+                  );
+                },
+              ),
+            // Notification icon
             Stack(
               children: [
                 IconButton(
@@ -285,7 +393,6 @@ class _FeedScreenState extends State<FeedScreen> {
               post: post,
               onLike: () => context.read<CommunityBloc>().add(ToggleLike(post.id)),
               onComment: () {
-                // Navigate to post detail screen
                 Navigator.pushNamed(
                   context,
                   '/post',

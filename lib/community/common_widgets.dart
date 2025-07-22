@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'safeNetworkImage.dart';
 
-// Avatar widget with online indicator
+// Avatar widgets with online indicator
 class UserAvatar extends StatelessWidget {
   final String? imageUrl;
   final double radius;
@@ -24,17 +25,31 @@ class UserAvatar extends StatelessWidget {
         children: [
           CircleAvatar(
             radius: radius,
-            backgroundImage: imageUrl != null
-                ? CachedNetworkImageProvider(imageUrl!)
-                : null,
             backgroundColor: Colors.grey[300],
-            child: imageUrl == null
-                ? Icon(
+            child: imageUrl != null
+                ? ClipOval(
+              child: SafeNetworkImage(
+                imageUrl: imageUrl!,
+                fit: BoxFit.cover,
+                width: radius * 2,
+                height: radius * 2,
+                placeholder: Icon(
+                  Icons.person,
+                  size: radius,
+                  color: Colors.grey[600],
+                ),
+                errorWidget: Icon(
+                  Icons.person,
+                  size: radius,
+                  color: Colors.grey[600],
+                ),
+              ),
+            )
+                : Icon(
               Icons.person,
               size: radius,
               color: Colors.grey[600],
-            )
-                : null,
+            ),
           ),
           if (isOnline)
             Positioned(
@@ -111,7 +126,7 @@ class LoadingOverlay extends StatelessWidget {
   }
 }
 
-// Empty state widget
+// Empty state widgets
 class EmptyStateWidget extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -183,7 +198,7 @@ class EmptyStateWidget extends StatelessWidget {
   }
 }
 
-// Custom badge widget
+// Custom badge widgets
 class CustomBadge extends StatelessWidget {
   final String text;
   final Color backgroundColor;
@@ -548,7 +563,7 @@ class CarouselIndicator extends StatelessWidget {
   }
 }
 
-// Privacy selector widget
+// Privacy selector widgets
 class PrivacySelector extends StatelessWidget {
   final String currentPrivacy;
   final Function(String) onChanged;

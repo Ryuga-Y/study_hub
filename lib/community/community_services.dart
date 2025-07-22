@@ -14,6 +14,19 @@ class CommunityService {
 
   String? get currentUserId => _auth.currentUser?.uid;
 
+  // Add this method to refresh authentication
+  Future<void> refreshUserAuth() async {
+    try {
+      final user = _auth.currentUser;
+      if (user != null) {
+        await user.getIdToken(true); // Force token refresh
+        print('✅ Auth token refreshed successfully');
+      }
+    } catch (e) {
+      print('❌ Failed to refresh auth token: $e');
+    }
+  }
+
   // Post Operations
   Future<String> createPost({
     required List<File> mediaFiles,
@@ -30,6 +43,7 @@ class CommunityService {
       final userData = userDoc.data()!;
 
       // Upload media files
+      // Upload media files
       List<String> mediaUrls = [];
       for (int i = 0; i < mediaFiles.length; i++) {
         final file = mediaFiles[i];
@@ -37,7 +51,16 @@ class CommunityService {
         final fileName = '${DateTime.now().millisecondsSinceEpoch}_$i';
         final ref = _storage.ref().child('posts/$userId/$fileName');
 
-        final uploadTask = await ref.putFile(file);
+        // Add metadata to ensure proper permissions
+        final metadata = SettableMetadata(
+          contentType: type == MediaType.image ? 'image/jpeg' : 'video/mp4',
+          customMetadata: {
+            'uploadedBy': userId,
+            'uploadedAt': DateTime.now().toIso8601String(),
+          },
+        );
+
+        final uploadTask = await ref.putFile(file, metadata);
         final url = await uploadTask.ref.getDownloadURL();
         mediaUrls.add(url);
       }
@@ -141,6 +164,39 @@ class CommunityService {
       });
     } catch (e) {
       throw Exception('Failed to delete post: $e');
+    }
+  }
+
+  // Add this method to CommunityService class
+  Future<bool> canUsersChat(String userId1, String userId2) async {
+    try {
+      // Check if both users are mutual friends
+      final query1 = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: userId1)
+          .where('friendId', isEqualTo: userId2)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      final query2 = await _firestore
+          .collection('friends')
+          .where('userId', isEqualTo: userId2)
+          .where('friendId', isEqualTo: userId1)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      bool areFriends = query1.docs.isNotEmpty && query2.docs.isNotEmpty;
+
+      if (areFriends) {
+        print('✅ Users are mutual friends - chat allowed');
+      } else {
+        print('❌ Users are not mutual friends - chat blocked');
+      }
+
+      return areFriends;
+    } catch (e) {
+      print('❌ Error checking chat permissions: $e');
+      return false;
     }
   }
 
@@ -756,25 +812,45 @@ class CommunityService {
       // Send the acceptance message from the acceptor (recipientId) to the requester (senderId)
       final acceptanceMessage = "I've accepted your friend request. Now let's chat!";
 
-      // Add the acceptance message
-      await _firestore
-          .collection('chats')
-          .doc(chatId)
-          .collection('messages')
-          .add({
-        'text': acceptanceMessage,
-        'senderId': recipientId,  // The person who accepted the request sends this
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-        'isSystemMessage': false,  // This is a regular message, not a system message
+// Use atomic transaction to ensure consistency
+      await _firestore.runTransaction((transaction) async {
+        final chatRef = _firestore.collection('chats').doc(chatId);
+        final messageRef = chatRef.collection('messages').doc();
+
+        // Create message data
+        final messageData = {
+          'text': acceptanceMessage,
+          'senderId': recipientId,  // The person who accepted sends this
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+          'isSystemMessage': false,
+          'messageType': 'friend_accepted',
+          'messageId': messageRef.id,
+        };
+
+        // Create chat metadata
+        final chatData = {
+          'participants': [senderId, recipientId],
+          'participantNames': {
+            senderId: senderName,
+            recipientId: recipientName,
+          },
+          'lastMessage': acceptanceMessage,
+          'lastMessageTime': FieldValue.serverTimestamp(),
+          'unreadCount': {
+            senderId: 1,     // Original requester gets notification
+            recipientId: 0,  // Acceptor sees as read (they sent it)
+          },
+          'createdAt': FieldValue.serverTimestamp(),
+          'chatType': 'friend_chat',
+        };
+
+        // Execute both operations atomically
+        transaction.set(chatRef, chatData);
+        transaction.set(messageRef, messageData);
       });
 
-      // Update chat metadata with the acceptance message
-      await _firestore.collection('chats').doc(chatId).update({
-        'lastMessage': acceptanceMessage,
-        'lastMessageTime': FieldValue.serverTimestamp(),
-        'unreadCount.${senderId}': FieldValue.increment(1),  // Increment unread count for the original requester
-      });
+      print('✅ Chat and acceptance message created consistently for both users');
 
       print('Acceptance message sent successfully');
 
@@ -1359,6 +1435,136 @@ class CommunityService {
     } catch (e) {
       print('❌ External share error: $e');
       throw Exception('Failed to share: $e');
+    }
+  }
+
+  // 🔧 SAFE METHOD - Clean up posts with missing media
+  Future<void> cleanupBrokenPosts() async {
+    try {
+      print('🧹 Cleaning up posts with broken media...');
+
+      final postsSnapshot = await _firestore
+          .collection('posts')
+          .where('mediaUrls', isNotEqualTo: [])
+          .get();
+
+      int cleanedCount = 0;
+
+      for (final doc in postsSnapshot.docs) {
+        try {
+          final postData = doc.data();
+          final mediaUrls = List<String>.from(postData['mediaUrls'] ?? []);
+
+          // If no media URLs, skip
+          if (mediaUrls.isEmpty) continue;
+
+          // Check if any URL returns 404 - if so, remove the post
+          bool hasValidMedia = false;
+          for (String url in mediaUrls) {
+            try {
+              final ref = _storage.refFromURL(url);
+              await ref.getMetadata(); // This will throw if file doesn't exist
+              hasValidMedia = true;
+              break; // At least one file exists
+            } catch (e) {
+              print('📁 File not found: $url');
+            }
+          }
+
+          // If no valid media found, delete the post
+          if (!hasValidMedia) {
+            await doc.reference.delete();
+            cleanedCount++;
+            print('🗑️ Deleted post with broken media: ${doc.id}');
+          }
+
+        } catch (e) {
+          print('⚠️ Error processing post ${doc.id}: $e');
+        }
+
+        // Add delay to avoid rate limiting
+        await Future.delayed(Duration(milliseconds: 200));
+      }
+
+      print('✅ Cleaned up $cleanedCount posts with broken media');
+
+    } catch (e) {
+      print('❌ Error during cleanup: $e');
+    }
+  }
+
+  // Add this method before the final closing brace of CommunityService class
+  Future<void> cleanupBrokenImagePosts() async {
+    try {
+      print('🧹 Starting cleanup of posts with broken images...');
+
+      final postsSnapshot = await _firestore
+          .collection('posts')
+          .where('mediaUrls', isNotEqualTo: [])
+          .get();
+
+      int cleanedCount = 0;
+      final batch = _firestore.batch();
+
+      for (final doc in postsSnapshot.docs) {
+        try {
+          final postData = doc.data();
+          final mediaUrls = List<String>.from(postData['mediaUrls'] ?? []);
+
+          if (mediaUrls.isEmpty) continue;
+
+          // Check first URL for 404
+          // Check first URL for 404
+          bool hasValidMedia = false;
+          for (String url in mediaUrls.take(1)) { // Only check first URL to avoid rate limits
+            try {
+              final ref = _storage.refFromURL(url);
+              await ref.getMetadata();
+              hasValidMedia = true;
+              break;
+            } catch (e) {
+              // More comprehensive error checking
+              final errorString = e.toString().toLowerCase();
+              if (errorString.contains('404') ||
+                  errorString.contains('not found') ||
+                  errorString.contains('object does not exist') ||
+                  errorString.contains('no object exists')) {
+                print('📁 File not found: $url');
+                hasValidMedia = false;
+              } else {
+                // For other errors, assume file might exist
+                hasValidMedia = true;
+                print('⚠️ Error checking file but assuming it exists: $e');
+              }
+            }
+          }
+
+          if (!hasValidMedia) {
+            batch.delete(doc.reference);
+            cleanedCount++;
+            print('🗑️ Scheduled deletion of post with broken media: ${doc.id}');
+
+            // Process in batches to avoid memory issues
+            if (cleanedCount % 50 == 0) {
+              await batch.commit();
+              await Future.delayed(Duration(milliseconds: 500)); // Rate limiting
+            }
+          }
+
+        } catch (e) {
+          print('⚠️ Error processing post ${doc.id}: $e');
+        }
+      }
+
+      // Commit remaining changes
+      if (cleanedCount % 50 != 0) {
+        await batch.commit();
+      }
+
+      print('✅ Cleaned up $cleanedCount posts with broken media');
+
+    } catch (e) {
+      print('❌ Error during cleanup: $e');
     }
   }
 }

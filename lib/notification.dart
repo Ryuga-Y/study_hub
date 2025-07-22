@@ -33,7 +33,7 @@ class NotificationService {
 // Getter for organization code
   String? get userOrgCode => _userOrgCode;
 
-  // FIXED: Get notification badge icon widget
+  // FIXED: Get notification badge icon widgets
   Widget getNotificationBadgeIcon({VoidCallback? onTap}) {
     return StreamBuilder<int>(
       stream: notificationCountStream,
@@ -1168,7 +1168,7 @@ class NotificationModel {
   }
 }
 
-// FIXED: Notification dialog widget
+// FIXED: Notification dialog widgets
 class NotificationDialog extends StatefulWidget {
   @override
   _NotificationDialogState createState() => _NotificationDialogState();
@@ -1739,7 +1739,7 @@ class _NotificationDialogState extends State<NotificationDialog> {
 
   // FIXED _showNavigationError method with mounted check
   void _showNavigationError(BuildContext context, String message) {
-    // Check if the widget is still mounted and context is valid
+    // Check if the widgets is still mounted and context is valid
     if (!mounted) return;
 
     try {
@@ -1949,7 +1949,7 @@ class _NotificationDialogState extends State<NotificationDialog> {
   }
 }
 
-// Notification card widget
+// Notification card widgets
 class NotificationCard extends StatelessWidget {
   final NotificationModel notification;
   final VoidCallback onTap;

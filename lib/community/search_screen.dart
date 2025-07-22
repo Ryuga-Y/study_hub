@@ -5,6 +5,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../community/bloc.dart';
 import '../community/models.dart';
 import 'profile_screen.dart';
+import '../chat_integrated.dart';
 
 enum SearchScreenTab { search, friendRequests, notifications }
 
@@ -523,9 +524,31 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                   children: [
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: () {
+                        onPressed: () async {
                           print('DEBUG: UI - Accept button pressed for request: ${request.id}');
                           context.read<CommunityBloc>().add(AcceptFriendRequest(request.id));
+
+                          // 🆕 ADD THIS - Show success message and suggest checking messages
+                          await Future.delayed(Duration(seconds: 2)); // Wait for processing
+
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Friend request accepted! You can now chat.'),
+                                backgroundColor: Colors.green,
+                                action: SnackBarAction(
+                                  label: 'Open Chat',
+                                  textColor: Colors.white,
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (context) => ChatContactPage()),
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                          }
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.purple[600],

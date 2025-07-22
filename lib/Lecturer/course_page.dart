@@ -1119,7 +1119,7 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     );
   }
 
-  // New FAB widget with speed dial
+  // New FAB widgets with speed dial
   Widget _buildFloatingActionButton() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
