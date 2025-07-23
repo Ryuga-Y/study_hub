@@ -2,6 +2,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
+import 'dart:async';
 
 class WebRTCService {
   RTCPeerConnection? _peerConnection;
@@ -16,9 +17,15 @@ class WebRTCService {
   Function()? onCallEnd;
 
   // Call state
+  // Call state
   String? currentCallId;
   bool isInitiator = false;
   bool _isDisposed = false;
+
+  // ✅ ADD THESE LINES
+  StreamSubscription? _callStatusSubscription;
+  StreamSubscription? _answerSubscription;
+  StreamSubscription? _iceCandidatesSubscription;
 
   Future<void> initializeWebRTC() async {
     try {
@@ -53,6 +60,17 @@ class WebRTCService {
         } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
             state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
           print('❌ WebRTC connection failed or disconnected');
+          endCall();
+        }
+      };
+
+      // ✅ ADD THIS NEW CALLBACK
+      _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
+        print('🔗 Peer Connection State: $state');
+        if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+          print('✅ Peer connection established successfully');
+        } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+          print('❌ Peer connection failed');
           endCall();
         }
       };
@@ -123,6 +141,9 @@ class WebRTCService {
       // Listen for call status changes
       _listenForCallStatus();
 
+      // Listen for answer BEFORE creating offer
+      _listenForAnswer();
+
       // Create offer
       RTCSessionDescription offer = await _peerConnection!.createOffer();
       await _peerConnection!.setLocalDescription(offer);
@@ -138,10 +159,6 @@ class WebRTCService {
       });
 
       print('✅ Offer saved to Firebase');
-
-      // Listen for answer
-      _listenForAnswer();
-
       return currentCallId!;
     } catch (e) {
       print('❌ Error starting call: $e');
@@ -169,6 +186,9 @@ class WebRTCService {
 
       // Listen for call status changes
       _listenForCallStatus();
+
+      // Listen for ICE candidates FIRST to catch early candidates
+      _listenForIceCandidates();
 
       // Get call data
       DocumentSnapshot callDoc = await _firestore.collection('videoCalls').doc(callId).get();
@@ -200,8 +220,6 @@ class WebRTCService {
         print('✅ Answer saved to Firebase');
       }
 
-      // Listen for ICE candidates
-      _listenForIceCandidates();
     } catch (e) {
       print('❌ Error answering call: $e');
       throw e;
@@ -209,11 +227,13 @@ class WebRTCService {
   }
 
   void _listenForCallStatus() {
-    if (currentCallId == null) return;
+    if (currentCallId == null || _isDisposed) return;
 
     print('👂 Listening for call status changes: $currentCallId');
 
-    _firestore.collection('videoCalls').doc(currentCallId).snapshots().listen((snapshot) {
+    _callStatusSubscription?.cancel(); // Cancel any existing subscription
+
+    _callStatusSubscription = _firestore.collection('videoCalls').doc(currentCallId).snapshots().listen((snapshot) {
       if (_isDisposed || !snapshot.exists) return;
 
       Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
@@ -223,23 +243,24 @@ class WebRTCService {
 
       if (status == 'ended' || status == 'declined') {
         print('📞 Call ended remotely, cleaning up...');
-        _cleanup();
-        onCallEnd?.call();
+        endCall(); // Use endCall instead of direct _cleanup
       }
     });
   }
 
   void _listenForAnswer() {
-    if (currentCallId == null) return;
+    if (currentCallId == null || _isDisposed) return;
 
     print('👂 Listening for answer: $currentCallId');
 
-    _firestore.collection('videoCalls').doc(currentCallId).snapshots().listen((snapshot) async {
+    _answerSubscription?.cancel(); // Cancel any existing subscription
+
+    _answerSubscription = _firestore.collection('videoCalls').doc(currentCallId).snapshots().listen((snapshot) async {
       if (_isDisposed || !snapshot.exists) return;
 
       Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
 
-      if (data['answer'] != null && _peerConnection != null) {
+      if (data['answer'] != null && _peerConnection != null && !_isDisposed) {
         print('📥 Answer received, setting remote description');
 
         try {
@@ -249,30 +270,32 @@ class WebRTCService {
 
           print('✅ Remote answer set');
 
-          // Update status to connected
-          await _firestore.collection('videoCalls').doc(currentCallId).update({
-            'status': 'connected'
-          });
-
-          _listenForIceCandidates();
+          if (!_isDisposed) {
+            await _firestore.collection('videoCalls').doc(currentCallId).update({
+              'status': 'connected'
+            });
+            // Start listening for ICE candidates after answer is set
+            _listenForIceCandidates();
+          }
         } catch (e) {
           print('❌ Error setting remote description: $e');
         }
       }
 
       if (data['status'] == 'ended' || data['status'] == 'declined') {
-        _cleanup();
-        onCallEnd?.call();
+        endCall();
       }
     });
   }
 
   void _listenForIceCandidates() {
-    if (currentCallId == null) return;
+    if (currentCallId == null || _isDisposed) return;
 
     print('👂 Listening for ICE candidates: $currentCallId');
 
-    _firestore.collection('videoCalls').doc(currentCallId)
+    _iceCandidatesSubscription?.cancel(); // Cancel any existing subscription
+
+    _iceCandidatesSubscription = _firestore.collection('videoCalls').doc(currentCallId)
         .collection('iceCandidates').snapshots().listen((snapshot) {
       if (_isDisposed) return;
 
@@ -280,14 +303,18 @@ class WebRTCService {
         if (change.type == DocumentChangeType.added) {
           Map<String, dynamic> data = change.doc.data() as Map<String, dynamic>;
 
-          if (_peerConnection != null) {
-            _peerConnection!.addCandidate(RTCIceCandidate(
-              data['candidate'],
-              data['sdpMid'],
-              data['sdpMLineIndex'],
-            ));
+          if (_peerConnection != null && data['candidate'] != null) {
+            try {
+              _peerConnection!.addCandidate(RTCIceCandidate(
+                data['candidate'],
+                data['sdpMid'],
+                data['sdpMLineIndex'],
+              ));
 
-            print('🧊 ICE candidate added: ${data['candidate']}');
+              print('🧊 ICE candidate added: ${data['candidate']}');
+            } catch (e) {
+              print('❌ Error adding ICE candidate: $e');
+            }
           }
         }
       }
@@ -295,7 +322,7 @@ class WebRTCService {
   }
 
   Future<void> _sendIceCandidate(RTCIceCandidate candidate) async {
-    if (currentCallId != null && !_isDisposed) {
+    if (currentCallId != null && !_isDisposed && candidate.candidate != null) {
       try {
         await _firestore.collection('videoCalls').doc(currentCallId)
             .collection('iceCandidates').add({
@@ -317,6 +344,11 @@ class WebRTCService {
 
     if (_isDisposed) return;
     _isDisposed = true;
+
+    // Cancel all subscriptions first
+    await _callStatusSubscription?.cancel();
+    await _answerSubscription?.cancel();
+    await _iceCandidatesSubscription?.cancel();
 
     // Update call status in Firebase
     if (currentCallId != null) {
@@ -365,7 +397,7 @@ class WebRTCService {
     _remoteStream = null;
     _peerConnection = null;
     currentCallId = null;
-    _isDisposed = false;
+    // ✅ Don't reset _isDisposed flag
   }
 
   void toggleMute() {

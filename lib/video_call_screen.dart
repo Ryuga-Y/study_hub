@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'webrtc_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
 
 class VideoCallScreen extends StatefulWidget {
   final String contactName;
@@ -30,6 +31,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
 
+  // ✅ ADD THIS LINE
+  StreamSubscription? _callStatusMonitor;
+
   bool _isMuted = false;
   bool _isVideoOff = false;
   bool _isConnected = false;
@@ -49,19 +53,24 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     await _localRenderer.initialize();
     await _remoteRenderer.initialize();
 
-    // Setup WebRTC callbacks
     _webRTCService.onLocalStream = (stream) {
-      setState(() {
-        _localRenderer.srcObject = stream;
-      });
+      if (mounted) {
+        setState(() {
+          _localRenderer.srcObject = stream;
+        });
+        print('✅ Local video stream connected in UI');
+      }
     };
 
     _webRTCService.onRemoteStream = (stream) {
-      setState(() {
-        _remoteRenderer.srcObject = stream;
-        _isConnected = true;
-        _isConnecting = false;
-      });
+      if (mounted) {
+        setState(() {
+          _remoteRenderer.srcObject = stream;
+          _isConnected = true;
+          _isConnecting = false;
+        });
+        print('✅ Remote video stream connected in UI');
+      }
     };
 
     _webRTCService.onCallEnd = () {
@@ -85,9 +94,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     });
   }
 
-// ADD THIS NEW METHOD:
   void _monitorCallStatus() {
-    FirebaseFirestore.instance
+    _callStatusMonitor?.cancel(); // Cancel any existing subscription
+
+    _callStatusMonitor = FirebaseFirestore.instance
         .collection('videoCalls')
         .doc(widget.callId)
         .snapshots()
@@ -101,11 +111,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         print('📞 Video call status: $status');
 
         if (status == 'ended' || status == 'declined') {
-          Navigator.pop(context);
+          if (mounted) {
+            Navigator.pop(context);
+          }
         } else if (status == 'answered') {
-          setState(() {
-            _isConnecting = false;
-          });
+          if (mounted) {
+            setState(() {
+              _isConnecting = false;
+            });
+          }
         }
       }
     });
@@ -120,9 +134,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   @override
   void dispose() {
+    _callStatusMonitor?.cancel();
     _localRenderer.dispose();
     _remoteRenderer.dispose();
-    _webRTCService.endCall();
+    _webRTCService.dispose();
     super.dispose();
   }
 
