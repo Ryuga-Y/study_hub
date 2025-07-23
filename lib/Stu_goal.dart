@@ -1656,11 +1656,14 @@ class _StuGoalState extends State<StuGoal> with TickerProviderStateMixin, Widget
                       children: [
                         Icon(Icons.local_florist, color: Colors.green[600], size: 16),
                         SizedBox(width: 4),
-                        Text(
-                          'Tap the water drop to grow your tree (5% per bucket)',
-                          style: TextStyle(
-                            color: Colors.orange[600],
-                            fontSize: 12,
+                        Flexible(
+                          child: Text(
+                            'Tap the water drop to grow your tree (5% per bucket)',
+                            style: TextStyle(
+                              color: Colors.orange[600],
+                              fontSize: 12,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       ],

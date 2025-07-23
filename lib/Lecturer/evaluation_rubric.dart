@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-
 class EvaluationRubricPage extends StatefulWidget {
   final String courseId;
   final String assignmentId;
@@ -30,6 +29,12 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
   // Template mode
   bool useTemplate = true;
   String? selectedTemplate;
+
+  // Controllers for criteria - IMPORTANT: Store controllers to prevent recreation
+  Map<String, TextEditingController> nameControllers = {};
+  Map<String, TextEditingController> descriptionControllers = {};
+  Map<String, TextEditingController> weightControllers = {};
+  Map<String, Map<String, TextEditingController>> levelControllers = {};
 
   // Predefined rubric templates
   final Map<String, List<Map<String, dynamic>>> rubricTemplates = {
@@ -253,6 +258,68 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
     _loadRubric();
   }
 
+  @override
+  void dispose() {
+    // Dispose all controllers
+    nameControllers.values.forEach((controller) => controller.dispose());
+    descriptionControllers.values.forEach((controller) => controller.dispose());
+    weightControllers.values.forEach((controller) => controller.dispose());
+    levelControllers.values.forEach((map) {
+      map.values.forEach((controller) => controller.dispose());
+    });
+    super.dispose();
+  }
+
+  // Get or create controller for criterion name
+  TextEditingController _getNameController(String criterionId, String initialValue) {
+    if (!nameControllers.containsKey(criterionId)) {
+      nameControllers[criterionId] = TextEditingController(text: initialValue);
+    }
+    return nameControllers[criterionId]!;
+  }
+
+  // Get or create controller for criterion description
+  TextEditingController _getDescriptionController(String criterionId, String initialValue) {
+    if (!descriptionControllers.containsKey(criterionId)) {
+      descriptionControllers[criterionId] = TextEditingController(text: initialValue);
+    }
+    return descriptionControllers[criterionId]!;
+  }
+
+  // Get or create controller for criterion weight
+  TextEditingController _getWeightController(String criterionId, dynamic weight) {
+    if (!weightControllers.containsKey(criterionId)) {
+      weightControllers[criterionId] = TextEditingController(text: weight.toString());
+    }
+    return weightControllers[criterionId]!;
+  }
+
+  // Get or create controller for level fields
+  TextEditingController _getLevelController(String criterionId, String levelKey, String initialValue) {
+    if (!levelControllers.containsKey(criterionId)) {
+      levelControllers[criterionId] = {};
+    }
+    if (!levelControllers[criterionId]!.containsKey(levelKey)) {
+      levelControllers[criterionId]![levelKey] = TextEditingController(text: initialValue);
+    }
+    return levelControllers[criterionId]![levelKey]!;
+  }
+
+  // Clean up controllers for removed criteria
+  void _cleanupControllers(String criterionId) {
+    nameControllers[criterionId]?.dispose();
+    nameControllers.remove(criterionId);
+
+    descriptionControllers[criterionId]?.dispose();
+    descriptionControllers.remove(criterionId);
+
+    weightControllers[criterionId]?.dispose();
+    weightControllers.remove(criterionId);
+
+    levelControllers[criterionId]?.values.forEach((controller) => controller.dispose());
+    levelControllers.remove(criterionId);
+  }
+
   Future<void> _loadRubric() async {
     try {
       final rubricDoc = await FirebaseFirestore.instance
@@ -288,12 +355,10 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
     }
   }
 
-  // In _EvaluationRubricPageState class, add this method:
-
   Future<void> _deleteRubric() async {
     final confirm = await showDialog<bool>(
       context: context,
-      barrierDismissible: false, // Prevents accidental dismissal
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -522,8 +587,10 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
   }
 
   void _removeCriterion(int index) {
+    final criterionId = criteriaList[index]['id'];
     setState(() {
       criteriaList.removeAt(index);
+      _cleanupControllers(criterionId);
       isEditing = true;
     });
   }
@@ -535,17 +602,34 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
     setState(() {
       for (var criterion in criteriaList) {
         criterion['weight'] = equalWeight.round();
+        // Update the weight controller
+        final controller = weightControllers[criterion['id']];
+        if (controller != null) {
+          controller.text = criterion['weight'].toString();
+        }
       }
       // Adjust last criterion to ensure total is 100
       final total = criteriaList.fold<int>(0, (sum, c) => sum + (c['weight'] as int));
       if (total != 100) {
         criteriaList.last['weight'] = (criteriaList.last['weight'] as int) + (100 - total);
+        final lastController = weightControllers[criteriaList.last['id']];
+        if (lastController != null) {
+          lastController.text = criteriaList.last['weight'].toString();
+        }
       }
       isEditing = true;
     });
   }
 
   Future<void> _saveRubric() async {
+    // Update all criteria from controllers
+    for (var criterion in criteriaList) {
+      final id = criterion['id'];
+      criterion['name'] = nameControllers[id]?.text ?? criterion['name'];
+      criterion['description'] = descriptionControllers[id]?.text ?? criterion['description'];
+      criterion['weight'] = double.tryParse(weightControllers[id]?.text ?? '0') ?? 0;
+    }
+
     // Validate rubric
     if (criteriaList.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -732,7 +816,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                 shrinkWrap: true,
                 physics: NeverScrollableScrollPhysics(),
                 crossAxisCount: 2,
-                childAspectRatio: 1.8, // Changed from 2.5 to give more height
+                childAspectRatio: 1.8,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 children: rubricTemplates.keys.map((templateName) {
@@ -740,7 +824,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                     onTap: () => _applyTemplate(templateName),
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: EdgeInsets.all(12), // Reduced from 16
+                      padding: EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
@@ -760,30 +844,30 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                       ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min, // Add this
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Flexible( // Wrap in Flexible
+                          Flexible(
                             child: Icon(
                               _getTemplateIcon(templateName),
                               color: selectedTemplate == templateName
                                   ? Colors.purple[600]
                                   : Colors.grey[600],
-                              size: 24, // Reduced from 28
+                              size: 24,
                             ),
                           ),
-                          SizedBox(height: 4), // Reduced from 8
-                          Flexible( // Wrap in Flexible
+                          SizedBox(height: 4),
+                          Flexible(
                             child: Text(
                               templateName,
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 14, // Add explicit font size
+                                fontSize: 14,
                                 color: selectedTemplate == templateName
                                     ? Colors.purple[600]
                                     : Colors.grey[800],
                               ),
-                              overflow: TextOverflow.ellipsis, // Add this
-                              textAlign: TextAlign.center, // Add this
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
                             ),
                           ),
                         ],
@@ -826,7 +910,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                   ),
                   SizedBox(height: 12),
                   // Action buttons in a separate row
-                  Wrap( // Using Wrap for responsive layout
+                  Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
@@ -843,7 +927,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                       ElevatedButton.icon(
                         onPressed: _addCriterion,
                         icon: Icon(Icons.add, size: 18),
-                        label: Text('Add Custom',),
+                        label: Text('Add Custom'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.purple[400],
                         ),
@@ -1030,6 +1114,8 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
   }
 
   Widget _buildCriterionCard(Map<String, dynamic> criterion, int index) {
+    final criterionId = criterion['id'] ?? '';
+
     return Container(
       margin: EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -1066,6 +1152,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
             SizedBox(width: 12),
             Expanded(
               child: TextField(
+                controller: _getNameController(criterionId, criterion['name'] ?? ''),
                 decoration: InputDecoration(
                   hintText: 'Criterion name',
                   border: InputBorder.none,
@@ -1080,12 +1167,12 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                     isEditing = true;
                   });
                 },
-                controller: TextEditingController(text: criterion['name']),
               ),
             ),
             SizedBox(
               width: 80,
               child: TextField(
+                controller: _getWeightController(criterionId, criterion['weight'] ?? 0),
                 decoration: InputDecoration(
                   hintText: 'Weight',
                   suffix: Text('%'),
@@ -1101,9 +1188,6 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                     isEditing = true;
                   });
                 },
-                controller: TextEditingController(
-                  text: criterion['weight'].toString(),
-                ),
               ),
             ),
             PopupMenuButton<String>(
@@ -1150,6 +1234,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
               children: [
                 // Description
                 TextField(
+                  controller: _getDescriptionController(criterionId, criterion['description'] ?? ''),
                   decoration: InputDecoration(
                     labelText: 'Description',
                     hintText: 'Describe what this criterion evaluates',
@@ -1164,9 +1249,6 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                       isEditing = true;
                     });
                   },
-                  controller: TextEditingController(
-                    text: criterion['description'],
-                  ),
                 ),
                 SizedBox(height: 16),
 
@@ -1195,6 +1277,10 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                 ...(criterion['levels'] as List).asMap().entries.map((levelEntry) {
                   final levelIndex = levelEntry.key;
                   final level = levelEntry.value;
+                  final levelNameKey = '${criterionId}_level_${levelIndex}_name';
+                  final levelPointsKey = '${criterionId}_level_${levelIndex}_points';
+                  final levelDescKey = '${criterionId}_level_${levelIndex}_desc';
+
                   return Container(
                     margin: EdgeInsets.only(bottom: 12),
                     padding: EdgeInsets.all(12),
@@ -1210,6 +1296,7 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                           children: [
                             Expanded(
                               child: TextField(
+                                controller: _getLevelController(criterionId, levelNameKey, level['name'] ?? ''),
                                 decoration: InputDecoration(
                                   labelText: 'Level Name',
                                   hintText: 'e.g., Excellent',
@@ -1223,15 +1310,17 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                                     isEditing = true;
                                   });
                                 },
-                                controller: TextEditingController(
-                                  text: level['name'],
-                                ),
                               ),
                             ),
                             SizedBox(width: 12),
                             SizedBox(
                               width: 100,
                               child: TextField(
+                                controller: _getLevelController(
+                                    criterionId,
+                                    levelPointsKey,
+                                    (level['points'] ?? 0).toString()
+                                ),
                                 decoration: InputDecoration(
                                   labelText: 'Points',
                                   border: OutlineInputBorder(
@@ -1246,15 +1335,13 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                                     isEditing = true;
                                   });
                                 },
-                                controller: TextEditingController(
-                                  text: level['points'].toString(),
-                                ),
                               ),
                             ),
                           ],
                         ),
                         SizedBox(height: 8),
                         TextField(
+                          controller: _getLevelController(criterionId, levelDescKey, level['description'] ?? ''),
                           decoration: InputDecoration(
                             labelText: 'Description (Optional)',
                             hintText: 'Describe performance at this level',
@@ -1269,9 +1356,6 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                               isEditing = true;
                             });
                           },
-                          controller: TextEditingController(
-                            text: level['description'],
-                          ),
                         ),
                       ],
                     ),
@@ -1363,7 +1447,6 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
 
   IconData _getTemplateIcon(String templateName) {
     switch (templateName) {
-
       case 'Essay':
         return Icons.article;
       case 'Programming':

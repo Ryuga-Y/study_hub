@@ -141,7 +141,7 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                     children: [
                       Text('Requests'),
                       if (state.pendingRequests.isNotEmpty) ...[
-                        SizedBox(width: 4),
+                        SizedBox(width: 2), // Reduced from 4
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
@@ -165,9 +165,9 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('Notifications'),
+                      Text('Messages'),
                       if (state.unreadNotificationCount > 0) ...[
-                        SizedBox(width: 4),
+                        SizedBox(width: 2), // Reduced from 4
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
