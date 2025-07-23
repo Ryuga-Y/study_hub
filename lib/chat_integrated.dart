@@ -979,6 +979,19 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     });
+
+    // ✅ ADD THIS: Auto-scroll to bottom when entering chat
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(Duration(milliseconds: 500), () {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    });
   }
 
   Future<void> _ensureChatExists(String currentUserId) async {
@@ -1447,12 +1460,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
         // ✅ Auto-scroll to bottom for new messages
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients) {
-            _scrollController.animateTo(
-              _scrollController.position.maxScrollExtent,
-              duration: Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-            );
+          if (mounted && _scrollController.hasClients) {
+            // Add a small delay to ensure messages are fully rendered
+            Future.delayed(Duration(milliseconds: 100), () {
+              if (mounted && _scrollController.hasClients) {
+                _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+              }
+            });
           }
         });
 
