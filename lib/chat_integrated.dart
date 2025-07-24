@@ -7,15 +7,18 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:timeago/timeago.dart' as timeago;
-import '../community/bloc.dart';
 import '../community/models.dart';
 import '../community/search_screen.dart';
 import '../community/feed_screen.dart';
-import '../community/community_services.dart';
 import 'dart:async';
 import 'video_call_screen.dart';
-import 'chat.dart';
+import 'chat.dart' show TextOverlay, CameraScreen, PhotoEditScreen;
 import 'incoming_call_screen.dart';
+import 'video_call_screen.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show File;
 
 // Chat Models
 class ChatContact {
@@ -75,6 +78,7 @@ class ChatMessage {
   final String? attachmentUrl;
   final String? attachmentType;
   final List<TextOverlay>? textOverlays;
+  final int? videoDuration;
 
   ChatMessage({
     required this.id,
@@ -85,6 +89,7 @@ class ChatMessage {
     this.attachmentUrl,
     this.attachmentType,
     this.textOverlays,
+    this.videoDuration,
   });
 
   factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -102,19 +107,23 @@ class ChatMessage {
       textOverlays: data['textOverlays'] != null
           ? (data['textOverlays'] as List).map((overlay) => TextOverlay.fromMap(overlay)).toList()
           : null,
+      videoDuration: data['videoDuration'],
     );
   }
 
   Map<String, dynamic> toMap() {
-    return {
+    Map<String, dynamic> map = {
       'text': text,
       'senderId': senderId,
       'timestamp': FieldValue.serverTimestamp(),
-      'isRead': isRead,
-      'attachmentUrl': attachmentUrl,
-      'attachmentType': attachmentType,
-      'textOverlays': textOverlays?.map((overlay) => overlay.toMap()).toList(),
     };
+
+    if (attachmentUrl != null) map['attachmentUrl'] = attachmentUrl;
+    if (attachmentType != null) map['attachmentType'] = attachmentType;
+    if (textOverlays != null) map['textOverlays'] = textOverlays!.map((overlay) => overlay.toMap()).toList();
+    if (videoDuration != null) map['videoDuration'] = videoDuration;
+
+    return map;
   }
 }
 
@@ -268,7 +277,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
       final existingChat = await _firestore.collection('chats').doc(chatId).get();
       if (existingChat.exists) {
         print('💬 Chat already exists: $chatId');
-        return;
+        return; // Don't create system message again
       }
 
       final currentUserDoc = await _firestore.collection('users').doc(currentUserId).get();
@@ -730,7 +739,102 @@ class _ChatContactPageState extends State<ChatContactPage> {
   }
 
   Future<void> _deleteChat(String chatId) async {
-    // Implement delete chat functionality
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Chat'),
+        content: Text('Are you sure you want to delete this chat? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _performChatDeletion(chatId);
+            },
+            child: Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _performChatDeletion(String chatId) async {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: Container(
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Deleting chat...'),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // Delete all messages in batches
+      const int batchSize = 500;
+      bool hasMore = true;
+
+      while (hasMore) {
+        final messagesSnapshot = await _firestore
+            .collection('chats')
+            .doc(chatId)
+            .collection('messages')
+            .limit(batchSize)
+            .get();
+
+        if (messagesSnapshot.docs.isEmpty) {
+          hasMore = false;
+          continue;
+        }
+
+        final batch = _firestore.batch();
+        for (final doc in messagesSnapshot.docs) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+
+        hasMore = messagesSnapshot.docs.length == batchSize;
+      }
+
+      // Delete the chat document itself
+      await _firestore.collection('chats').doc(chatId).delete();
+
+      Navigator.pop(context); // Close loading dialog
+      _loadFriendsAsContacts(); // Refresh the contact list
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Chat deleted successfully'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog
+      print('Error deleting chat: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete chat: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   // ✅ INCOMING CALL METHODS - INSIDE THE CLASS
@@ -856,6 +960,17 @@ class _ChatScreenState extends State<ChatScreen> {
       _isVerifiedFriend = true;
     });
 
+    // Ensure chat document exists before marking messages as read
+    try {
+      final chatDoc = await _firestore.collection('chats').doc(widget.chatId).get();
+      if (!chatDoc.exists) {
+        print('⚠️ Chat document does not exist, creating it first');
+        await _ensureChatExists(currentUserId);
+      }
+    } catch (e) {
+      print('Error checking chat existence: $e');
+    }
+
     _markMessagesAsRead();
     _focusNode.addListener(() {
       if (_focusNode.hasFocus) {
@@ -864,6 +979,43 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     });
+
+    // ✅ ADD THIS: Auto-scroll to bottom when entering chat
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(Duration(milliseconds: 500), () {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    });
+  }
+
+  Future<void> _ensureChatExists(String currentUserId) async {
+    try {
+      await _firestore.collection('chats').doc(widget.chatId).set({
+        'participants': [currentUserId, widget.contactId],
+        'participantNames': {
+          currentUserId: 'You',
+          widget.contactId: widget.contactName,
+        },
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastMessage': '',
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'unreadCount': {
+          currentUserId: 0,
+          widget.contactId: 0,
+        },
+        'chatType': 'friend_chat',
+      }, SetOptions(merge: true));
+
+      print('✅ Chat document created/updated: ${widget.chatId}');
+    } catch (e) {
+      print('Error ensuring chat exists: $e');
+    }
   }
 
   Future<bool> _verifyMutualFriendship(String userId1, String userId2) async {
@@ -1212,29 +1364,47 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
-      final messagesSnapshot = await _firestore
-          .collection('chats')
-          .doc(widget.chatId)
-          .collection('messages')
-          .get();
+      // Delete all messages in batches (Firestore batch limit is 500)
+      const int batchSize = 500;
+      bool hasMore = true;
 
-      final batch = _firestore.batch();
+      while (hasMore) {
+        final messagesSnapshot = await _firestore
+            .collection('chats')
+            .doc(widget.chatId)
+            .collection('messages')
+            .limit(batchSize)
+            .get();
 
-      for (final doc in messagesSnapshot.docs) {
-        batch.delete(doc.reference);
+        if (messagesSnapshot.docs.isEmpty) {
+          hasMore = false;
+          continue;
+        }
+
+        final batch = _firestore.batch();
+
+        for (final doc in messagesSnapshot.docs) {
+          batch.delete(doc.reference);
+        }
+
+        await batch.commit();
+
+        // Check if there are more messages
+        hasMore = messagesSnapshot.docs.length == batchSize;
       }
 
-      batch.update(
-        _firestore.collection('chats').doc(widget.chatId),
-        {
-          'lastMessage': 'Chat cleared',
-          'lastMessageTime': FieldValue.serverTimestamp(),
-          'unreadCount.${_auth.currentUser?.uid}': 0,
-          'unreadCount.${widget.contactId}': 0,
-        },
-      );
+      // Update the chat document with system message
+      final currentUserId = _auth.currentUser?.uid;
+      final currentUserDoc = await _firestore.collection('users').doc(currentUserId).get();
+      final currentUserName = currentUserDoc.data()?['fullName'] ?? 'Someone';
 
-      await batch.commit();
+      await _firestore.collection('chats').doc(widget.chatId).update({
+        'lastMessage': '$currentUserName cleared the chat',
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'unreadCount.$currentUserId': 0,
+        'unreadCount.${widget.contactId}': 0,
+      });
+
       Navigator.pop(context);
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1288,15 +1458,22 @@ class _ChatScreenState extends State<ChatScreen> {
           );
         }
 
+        // ✅ Auto-scroll to bottom for new messages
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients) {
-            _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+          if (mounted && _scrollController.hasClients) {
+            // Add a small delay to ensure messages are fully rendered
+            Future.delayed(Duration(milliseconds: 100), () {
+              if (mounted && _scrollController.hasClients) {
+                _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+              }
+            });
           }
         });
 
         return ListView.builder(
           controller: _scrollController,
           padding: EdgeInsets.all(16),
+          reverse: false,  // ✅ Show messages in normal order
           itemCount: messages.length,
           itemBuilder: (context, index) {
             final message = messages[index];
@@ -1364,10 +1541,13 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               if (message.attachmentType == 'image')
                 _buildImageMessage(message),
+              if (message.attachmentType == 'video')
+                _buildVideoMessage(message, isMe),
               if (message.attachmentType == 'file')
                 _buildFileMessage(message, isMe),
               if (message.text.isNotEmpty &&
                   message.text != "📷 Photo" &&
+                  message.text != "🎥 Video" &&
                   message.attachmentType != 'image')
                 Text(
                   message.text,
@@ -1496,14 +1676,47 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () async {
               Navigator.pop(context);
               try {
+                // Delete the message document
                 await _firestore
                     .collection('chats')
                     .doc(widget.chatId)
                     .collection('messages')
                     .doc(message.id)
                     .delete();
+
+                // Update last message in chat if this was the last message
+                final messagesSnapshot = await _firestore
+                    .collection('chats')
+                    .doc(widget.chatId)
+                    .collection('messages')
+                    .orderBy('timestamp', descending: true)
+                    .limit(1)
+                    .get();
+
+                if (messagesSnapshot.docs.isNotEmpty) {
+                  final lastMessage = ChatMessage.fromFirestore(messagesSnapshot.docs.first);
+                  await _firestore.collection('chats').doc(widget.chatId).update({
+                    'lastMessage': lastMessage.text.isNotEmpty ? lastMessage.text :
+                    (lastMessage.attachmentType == 'image' ? '📷 Photo' :
+                    lastMessage.attachmentType == 'video' ? '🎥 Video' : '📎 File'),
+                    'lastMessageTime': lastMessage.timestamp,
+                  });
+                } else {
+                  // No messages left
+                  await _firestore.collection('chats').doc(widget.chatId).update({
+                    'lastMessage': 'No messages',
+                    'lastMessageTime': FieldValue.serverTimestamp(),
+                  });
+                }
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Message deleted'), backgroundColor: Colors.green),
+                );
               } catch (e) {
                 print('Error deleting message: $e');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to delete message'), backgroundColor: Colors.red),
+                );
               }
             },
             child: Text('Delete', style: TextStyle(color: Colors.red)),
@@ -1523,23 +1736,226 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildImageMessage(ChatMessage message) {
     return Column(
       children: [
-        Container(
-          height: 150,
-          width: double.infinity,
-          margin: EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            color: Colors.grey[300],
-          ),
-          child: Center(
-            child: Icon(
-              Icons.image,
-              size: 50,
-              color: Colors.grey[600],
+        GestureDetector(
+          onTap: () => _viewFullImage(message),
+          child: Container(
+            height: 150,
+            width: double.infinity,
+            margin: EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.grey[300],
+            ),
+            child: Stack(
+              children: [
+                // Show real image if URL exists, otherwise show placeholder
+                if (message.attachmentUrl != null && message.attachmentUrl!.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: CachedNetworkImage(
+                      imageUrl: message.attachmentUrl!,
+                      width: double.infinity,
+                      height: 150,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Center(
+                        child: CircularProgressIndicator(),
+                      ),
+                      errorWidget: (context, url, error) => Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.image,
+                              size: 50,
+                              color: Colors.grey[600],
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Photo',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.image,
+                          size: 50,
+                          color: Colors.grey[600],
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Photo',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Text overlays
+                if (message.textOverlays != null)
+                  ...message.textOverlays!.map((overlay) {
+                    double scale = 0.3;
+                    return Positioned(
+                      left: overlay.position.dx * scale,
+                      top: overlay.position.dy * scale,
+                      child: Text(
+                        overlay.text,
+                        style: TextStyle(
+                          fontSize: overlay.fontSize * scale,
+                          color: overlay.color,
+                          fontWeight: FontWeight.bold,
+                          shadows: [
+                            Shadow(
+                              offset: Offset(1, 1),
+                              blurRadius: 1,
+                              color: Colors.black.withOpacity(0.7),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+
+                // View icon overlay
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.6),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.fullscreen,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildVideoMessage(ChatMessage message, bool isMe) {
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: () => _playVideo(message),
+          child: Container(
+            height: 150,
+            width: double.infinity,
+            margin: EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.grey[300],
+            ),
+            child: Stack(
+              children: [
+                if (message.attachmentUrl != null && message.attachmentUrl!.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      width: double.infinity,
+                      height: 150,
+                      color: Colors.black87,
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.play_circle_filled,
+                              size: 50,
+                              color: Colors.white,
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Video${message.videoDuration != null ? ' (${message.videoDuration}s)' : ''}',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.videocam,
+                          size: 50,
+                          color: Colors.grey[600],
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Video${message.videoDuration != null ? ' (${message.videoDuration}s)' : ''}',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _playVideo(ChatMessage message) {
+    // Implement video player functionality
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Video Player'),
+        content: Text('Video playback functionality will be implemented here.\nVideo URL: ${message.attachmentUrl ?? 'No URL'}\nDuration: ${message.videoDuration ?? 'Unknown'} seconds'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Add this new method
+  void _viewFullImage(ChatMessage message) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FullImageViewer(
+          imageUrl: message.attachmentUrl,
+          caption: message.text != '📷 Photo' && message.text.isNotEmpty ? message.text : null,
+          senderName: message.senderId == _auth.currentUser?.uid ? 'You' : widget.contactName,
+          timestamp: message.timestamp,
+          textOverlays: message.textOverlays,
+        ),
+      ),
     );
   }
 
@@ -1549,14 +1965,14 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         children: [
           Icon(
-            Icons.attach_file,
+            _getFileIcon(message.text),
             size: 16,
             color: isMe ? Colors.white : Colors.black,
           ),
           SizedBox(width: 4),
           Expanded(
             child: Text(
-              "document.pdf",
+              message.text.isNotEmpty ? message.text : "document.pdf",
               style: TextStyle(
                 color: isMe ? Colors.white : Colors.black,
                 decoration: TextDecoration.underline,
@@ -1566,6 +1982,28 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  // Helper method to get file icon
+  IconData _getFileIcon(String fileName) {
+    String ext = fileName.toLowerCase().split('.').last;
+    switch (ext) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'doc':
+      case 'docx':
+        return Icons.description;
+      case 'ppt':
+      case 'pptx':
+        return Icons.slideshow;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart;
+      case 'txt':
+        return Icons.text_snippet;
+      default:
+        return Icons.attach_file;
+    }
   }
 
   Widget _buildMessageInput() {
@@ -1761,11 +2199,27 @@ class _ChatScreenState extends State<ChatScreen> {
                   icon: Icon(Icons.backspace, color: Colors.grey[600]),
                   onPressed: () {
                     if (_messageController.text.isNotEmpty) {
-                      _messageController.text = _messageController.text
-                          .substring(0, _messageController.text.length - 1);
-                      _messageController.selection = TextSelection.fromPosition(
-                        TextPosition(offset: _messageController.text.length),
+                      String currentText = _messageController.text;
+
+                      // Use Flutter's built-in method to handle complex Unicode characters
+                      final textSelection = _messageController.selection;
+                      final newSelection = textSelection.copyWith(
+                        baseOffset: textSelection.start,
+                        extentOffset: textSelection.end,
                       );
+
+                      if (newSelection.start > 0) {
+                        final newText = currentText.replaceRange(
+                          newSelection.start - 1,
+                          newSelection.end,
+                          '',
+                        );
+
+                        _messageController.value = _messageController.value.copyWith(
+                          text: newText,
+                          selection: TextSelection.collapsed(offset: newSelection.start - 1),
+                        );
+                      }
                     }
                   },
                 ),
@@ -1811,21 +2265,56 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Future<void> _sendMessage({required String text, String? attachmentType, List<TextOverlay>? textOverlays}) async {
+  Future<void> _sendMessage({required String text, String? attachmentType, String? attachmentUrl, List<TextOverlay>? textOverlays, int? videoDuration}) async {
     if (text.trim().isEmpty && attachmentType == null) return;
 
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
 
     try {
+      // Base message data - always include these fields
       Map<String, dynamic> messageData = {
         'text': text.trim(),
         'senderId': currentUserId,
         'timestamp': FieldValue.serverTimestamp(),
         'isRead': false,
-        'attachmentType': attachmentType,
-        'textOverlays': textOverlays?.map((overlay) => overlay.toMap()).toList(),
       };
+
+      // Add optional fields based on message type
+      if (attachmentType != null) {
+        messageData['attachmentType'] = attachmentType;
+
+        // Add type-specific fields with null safety
+        switch (attachmentType) {
+          case 'image':
+            if (attachmentUrl != null && attachmentUrl.isNotEmpty) {
+              messageData['attachmentUrl'] = attachmentUrl;
+            }
+            if (textOverlays != null && textOverlays.isNotEmpty) {
+              try {
+                messageData['textOverlays'] = textOverlays.map((overlay) => overlay.toMap()).toList();
+              } catch (e) {
+                print('Error serializing textOverlays: $e');
+              }
+            }
+            break;
+          case 'video':
+            if (attachmentUrl != null && attachmentUrl.isNotEmpty) {
+              messageData['attachmentUrl'] = attachmentUrl;
+            }
+            if (videoDuration != null && videoDuration > 0) {
+              messageData['videoDuration'] = videoDuration;
+            }
+            break;
+          case 'file':
+            if (attachmentUrl != null && attachmentUrl.isNotEmpty) {
+              messageData['attachmentUrl'] = attachmentUrl;
+            }
+            // Add file metadata
+            messageData['fileName'] = 'document.pdf'; // You can make this dynamic
+            break;
+        }
+      }
 
       if (_isReplying && _replyingToMessage != null) {
         messageData['replyTo'] = {
@@ -1836,14 +2325,32 @@ class _ChatScreenState extends State<ChatScreen> {
         };
       }
 
-      await _firestore
+      final docRef = await _firestore
           .collection('chats')
           .doc(widget.chatId)
           .collection('messages')
           .add(messageData);
 
+      await _markMessageAsReadAfterCreation(docRef.id);
+
+      String displayText = text.trim();
+      if (attachmentType != null) {
+        switch (attachmentType) {
+          case 'image':
+            displayText = text.trim().isNotEmpty ? '📷 ${text.trim()}' : '📷 Photo';
+            break;
+          case 'video':
+            displayText = text.trim().isNotEmpty ? '🎥 ${text.trim()}' : '🎥 Video';
+            break;
+          case 'file':
+            displayText = text.trim().isNotEmpty ? '📎 ${text.trim()}' : '📎 File';
+            break;
+        }
+      }
+
+      // ✅ ADD THIS: Update the chat document with last message info
       await _firestore.collection('chats').doc(widget.chatId).update({
-        'lastMessage': attachmentType != null ? '${attachmentType == 'image' ? '📷' : '📎'} ${text.trim()}' : text.trim(),
+        'lastMessage': displayText,
         'lastMessageTime': FieldValue.serverTimestamp(),
         'unreadCount.${widget.contactId}': FieldValue.increment(1),
       });
@@ -1860,11 +2367,21 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _markMessageAsReadAfterCreation(String messageId) async {
+    try {
+      // Don't update isRead to false for messages we just sent
+      // The message should remain unread for the recipient
+      print('Message created with ID: $messageId');
+    } catch (e) {
+      print('Error in message creation callback: $e');
+    }
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
+          _scrollController.position.maxScrollExtent,  // ✅ Correct direction
           duration: Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
@@ -1878,18 +2395,37 @@ class _ChatScreenState extends State<ChatScreen> {
       MaterialPageRoute(
         builder: (context) => CameraScreen(
           onImageCaptured: (text, textOverlays) {
-            _sendMessage(
-              text: text.isNotEmpty ? text : '📷 Photo',
-              attachmentType: 'image',
-              textOverlays: textOverlays,
-            );
+            // Check if it's a video or image based on content
+            if (text.contains('🎥') || text.toLowerCase().contains('video')) {
+              // Extract duration if it's in the text
+              int? duration;
+              RegExp durationRegex = RegExp(r'\((\d+)s\)');
+              Match? match = durationRegex.firstMatch(text);
+              if (match != null) {
+                duration = int.tryParse(match.group(1) ?? '');
+              }
+
+              _sendMessage(
+                text: text.isNotEmpty ? text : '🎥 Video',
+                attachmentType: 'video',
+                // Remove attachmentUrl to avoid network errors
+                videoDuration: duration,
+              );
+            } else {
+              _sendMessage(
+                text: text.isNotEmpty ? text : '📷 Photo',
+                attachmentType: 'image',
+                // Remove attachmentUrl to avoid network errors
+                textOverlays: textOverlays,
+              );
+            }
           },
         ),
       ),
     );
   }
 
-  void _initiateVideoCall() async {
+  Future<void> _initiateVideoCall() async {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1975,7 +2511,7 @@ class _ChatScreenState extends State<ChatScreen> {
               title: Text('Document'),
               onTap: () {
                 Navigator.pop(context);
-                _sendFileMessage('document', 'document.pdf');
+                _pickDocument();
               },
             ),
             ListTile(
@@ -1983,15 +2519,7 @@ class _ChatScreenState extends State<ChatScreen> {
               title: Text('Gallery'),
               onTap: () {
                 Navigator.pop(context);
-                _sendFileMessage('image', 'photo.jpg');
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.audiotrack, color: Colors.orange),
-              title: Text('Audio'),
-              onTap: () {
-                Navigator.pop(context);
-                _sendFileMessage('audio', 'audio.mp3');
+                _pickGalleryImage();
               },
             ),
           ],
@@ -2000,10 +2528,431 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _sendFileMessage(String type, String fileName) {
+  void _sendFileMessage(String type, String fileName, [String? fileUrl]) {
+    String displayText;
+    switch (type) {
+      case 'image':
+        displayText = '📷 Photo';
+        break;
+      case 'video':
+        displayText = '🎥 Video';
+        break;
+      case 'audio':
+        displayText = '🎵 Audio';
+        break;
+      default:
+        displayText = '📎 $fileName';
+    }
+
     _sendMessage(
-      text: fileName,
+      text: displayText,
       attachmentType: type,
+      // Remove fileUrl to avoid network errors
+    );
+  }
+
+  // Real file picker for documents
+  Future<void> _pickDocument() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'xls', 'xlsx'],
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+
+        // Check file size (max 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('File size exceeds 10MB limit'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        // Show loading
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => Center(
+            child: Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Uploading ${file.name}...'),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Upload file
+        final downloadUrl = await _uploadFileToStorage(file, 'documents');
+        Navigator.pop(context); // Close loading dialog
+
+        if (downloadUrl != null) {
+          // Send message with file
+          await _sendMessage(
+            text: file.name,
+            attachmentType: 'file',
+            attachmentUrl: downloadUrl,
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Document sent successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog if open
+      print('Error picking document: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error selecting document: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Real file picker for gallery images
+  Future<void> _pickGalleryImage() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+
+        // Check file size (max 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Image size exceeds 10MB limit'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        // Show loading
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => Center(
+            child: Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Uploading image...'),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Upload image
+        final downloadUrl = await _uploadFileToStorage(file, 'images');
+        Navigator.pop(context); // Close loading dialog
+
+        if (downloadUrl != null) {
+          // Send message with image
+          await _sendMessage(
+            text: '📷 Photo',
+            attachmentType: 'image',
+            attachmentUrl: downloadUrl,
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Image sent successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog if open
+      print('Error picking image: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error selecting image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Upload file to Firebase Storage
+  Future<String?> _uploadFileToStorage(PlatformFile file, String folder) async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        throw Exception('User must be authenticated to upload files');
+      }
+
+      // Create unique file name
+      String fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+      String storagePath = 'chat_files/$folder/${widget.chatId}/$fileName';
+
+      // Create file reference
+      final ref = FirebaseStorage.instance.ref().child(storagePath);
+
+      // Set metadata
+      final metadata = SettableMetadata(
+        contentType: _getContentType(file.extension ?? ''),
+        customMetadata: {
+          'uploadedBy': currentUser.uid,
+          'originalName': file.name,
+          'chatId': widget.chatId,
+          'type': 'chat_attachment',
+        },
+      );
+
+      // Upload file
+      final uploadTask = ref.putData(file.bytes!, metadata);
+      final snapshot = await uploadTask;
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+
+      return downloadUrl;
+    } catch (e) {
+      print('Error uploading file: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to upload file: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return null;
+    }
+  }
+
+  // Get content type for file
+  String _getContentType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'ppt':
+        return 'application/vnd.ms-powerpoint';
+      case 'pptx':
+        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'txt':
+        return 'text/plain';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      default:
+        return 'application/octet-stream';
+    }
+  }
+}
+
+// ✅ PROPERLY PLACED OUTSIDE ALL OTHER CLASSES
+class FullImageViewer extends StatelessWidget {
+  final String? imageUrl;
+  final String? caption;
+  final String senderName;
+  final DateTime timestamp;
+  final List<TextOverlay>? textOverlays;
+
+  const FullImageViewer({
+    Key? key,
+    this.imageUrl,
+    this.caption,
+    required this.senderName,
+    required this.timestamp,
+    this.textOverlays,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          senderName,
+          style: TextStyle(color: Colors.white),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.more_vert, color: Colors.white),
+            onPressed: () {
+              // Show options like save, share, etc.
+            },
+          ),
+        ],
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: MediaQuery.of(context).size.width,
+              height: MediaQuery.of(context).size.height * 0.6,
+              margin: EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Stack(
+                children: [
+                  if (imageUrl != null && imageUrl!.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: CachedNetworkImage(
+                        imageUrl: imageUrl!,
+                        width: double.infinity,
+                        height: double.infinity,
+                        fit: BoxFit.contain,
+                        placeholder: (context, url) => Center(
+                          child: CircularProgressIndicator(color: Colors.white),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          color: Colors.grey[400],
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.image,
+                                  size: 100,
+                                  color: Colors.grey[600],
+                                ),
+                                SizedBox(height: 10),
+                                Text(
+                                  "Photo",
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      color: Colors.grey[400],
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.image,
+                              size: 100,
+                              color: Colors.grey[600],
+                            ),
+                            SizedBox(height: 10),
+                            Text(
+                              "Photo",
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  // Text overlays
+                  if (textOverlays != null)
+                    ...textOverlays!.map((overlay) {
+                      return Positioned(
+                        left: overlay.position.dx,
+                        top: overlay.position.dy,
+                        child: Container(
+                          padding: EdgeInsets.all(4),
+                          child: Text(
+                            overlay.text,
+                            style: TextStyle(
+                              fontSize: overlay.fontSize,
+                              color: overlay.color,
+                              fontWeight: FontWeight.bold,
+                              shadows: [
+                                Shadow(
+                                  offset: Offset(1, 1),
+                                  blurRadius: 2,
+                                  color: Colors.black.withOpacity(0.7),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                ],
+              ),
+            ),
+            SizedBox(height: 20),
+            if (caption != null && caption!.isNotEmpty)
+              Container(
+                margin: EdgeInsets.symmetric(horizontal: 20),
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[900],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  caption!,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            SizedBox(height: 20),
+            Text(
+              "${timestamp.day}/${timestamp.month}/${timestamp.year} at ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}",
+              style: TextStyle(
+                color: Colors.grey[400],
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

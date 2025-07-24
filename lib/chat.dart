@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';  // ADD THIS
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 
 void main() {
   runApp(MyApp());
@@ -56,19 +58,41 @@ class TextOverlay {
 }
 
 class ChatMessage {
+  final String id;           // ADD THIS
   final String text;
   final bool isMe;
   final DateTime timestamp;
   final String? attachmentType;
   final List<TextOverlay>? textOverlays;
+  final int? videoDuration;
 
   ChatMessage({
+    required this.id,        // ADD THIS
     required this.text,
     required this.isMe,
     required this.timestamp,
     this.attachmentType,
     this.textOverlays,
+    this.videoDuration,
   });
+
+  // ADD THIS METHOD
+  factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return ChatMessage(
+      id: doc.id,
+      text: data['text'] ?? '',
+      isMe: false, // Will be determined later
+      timestamp: data['timestamp'] != null
+          ? (data['timestamp'] as Timestamp).toDate()
+          : DateTime.now(),
+      attachmentType: data['attachmentType'],
+      textOverlays: data['textOverlays'] != null
+          ? (data['textOverlays'] as List).map((overlay) => TextOverlay.fromMap(overlay)).toList()
+          : null,
+      videoDuration: data['videoDuration'],
+    );
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -297,11 +321,13 @@ class ChatScreen extends StatefulWidget {
   final String contactName;
   final bool isOnline;
   final String lastSeen;
+  final String? chatId;      // ADD THIS
 
   ChatScreen({
     required this.contactName,
     required this.isOnline,
     required this.lastSeen,
+    this.chatId,             // ADD THIS
   });
 
   @override
@@ -313,6 +339,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
+
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   List<ChatMessage> messages = [];
 
@@ -525,6 +554,7 @@ class _ChatScreenState extends State<ChatScreen> {
         return _buildMessageBubble(_filteredMessages[index]);
       },
     );
+
   }
 
   Widget _buildMessageBubble(ChatMessage message) {
@@ -547,30 +577,36 @@ class _ChatScreenState extends State<ChatScreen> {
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.7,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (message.attachmentType == 'image') _buildImageMessage(message),
-            if (message.attachmentType == 'file') _buildFileMessage(message),
-            if (message.text.isNotEmpty &&
-                message.text != "📷 Photo" &&
-                message.attachmentType != 'image')
+        child: GestureDetector(
+          onLongPress: () => _showMessageOptions(message, message.isMe),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (message.attachmentType == 'image') _buildImageMessage(message),
+              if (message.attachmentType == 'video') _buildVideoMessage(message),
+              if (message.attachmentType == 'file') _buildFileMessage(message),
+              if (message.text.isNotEmpty &&
+                  message.text != "📷 Photo" &&
+                  message.text != "🎥 Video" &&
+                  message.attachmentType != 'image' &&
+                  message.attachmentType != 'video')
+                Text(
+                  message.text,
+                  style: TextStyle(
+                    color: message.isMe ? Colors.white : Colors.black,
+                    fontSize: 16,
+                  ),
+                ),
+              SizedBox(height: 4),
               Text(
-                message.text,
+                "${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}",
                 style: TextStyle(
-                  color: message.isMe ? Colors.white : Colors.black,
-                  fontSize: 16,
+                  color: message.isMe ? Colors.white70 : Colors.grey[600],
+                  fontSize: 12,
                 ),
               ),
-            SizedBox(height: 4),
-            Text(
-              "${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}",
-              style: TextStyle(
-                color: message.isMe ? Colors.white70 : Colors.grey[600],
-                fontSize: 12,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -661,6 +697,85 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildVideoMessage(ChatMessage message) {
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: () => _playVideo(message),
+          child: Container(
+            height: 150,
+            width: double.infinity,
+            margin: EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.black87,
+            ),
+            child: Stack(
+              children: [
+                Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.play_circle_filled,
+                        size: 50,
+                        color: Colors.white,
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Video${message.videoDuration != null ? ' (${message.videoDuration}s)' : ''}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (message.text.isNotEmpty && message.text != "🎥 Video")
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(8),
+            margin: EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: message.isMe
+                  ? Colors.blue.withOpacity(0.1)
+                  : Colors.grey.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              message.text,
+              style: TextStyle(
+                color: message.isMe ? Colors.white : Colors.black,
+                fontSize: 14,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _playVideo(ChatMessage message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Video Player'),
+        content: Text('Video playback functionality will be implemented here.\nDuration: ${message.videoDuration ?? 'Unknown'} seconds'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -827,11 +942,27 @@ class _ChatScreenState extends State<ChatScreen> {
             icon: Icon(Icons.backspace, color: Colors.grey[600]),
             onPressed: () {
               if (_messageController.text.isNotEmpty) {
-                _messageController.text = _messageController.text
-                    .substring(0, _messageController.text.length - 1);
-                _messageController.selection = TextSelection.fromPosition(
-                  TextPosition(offset: _messageController.text.length),
+                String currentText = _messageController.text;
+
+                // Use Flutter's built-in method to handle complex Unicode characters
+                final textSelection = _messageController.selection;
+                final newSelection = textSelection.copyWith(
+                  baseOffset: textSelection.start,
+                  extentOffset: textSelection.end,
                 );
+
+                if (newSelection.start > 0) {
+                  final newText = currentText.replaceRange(
+                    newSelection.start - 1,
+                    newSelection.end,
+                    '',
+                  );
+
+                  _messageController.value = _messageController.value.copyWith(
+                    text: newText,
+                    selection: TextSelection.collapsed(offset: newSelection.start - 1),
+                  );
+                }
               }
             },
           ),
@@ -875,15 +1006,17 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _sendMessage({String? text, String? attachmentType, List<TextOverlay>? textOverlays}) {
+  void _sendMessage({String? text, String? attachmentType, List<TextOverlay>? textOverlays, int? videoDuration}) {
     if (text != null && text.trim().isNotEmpty) {
       setState(() {
         messages.add(ChatMessage(
+          id: DateTime.now().millisecondsSinceEpoch.toString(), // ADD THIS
           text: text,
           isMe: true,
           timestamp: DateTime.now(),
           attachmentType: attachmentType,
           textOverlays: textOverlays,
+          videoDuration: videoDuration,
         ));
         _filteredMessages = messages;
       });
@@ -893,11 +1026,14 @@ class _ChatScreenState extends State<ChatScreen> {
     } else if (attachmentType != null) {
       setState(() {
         messages.add(ChatMessage(
-          text: attachmentType == 'image' ? "📷 Photo" : "📎 File sent",
+          id: DateTime.now().millisecondsSinceEpoch.toString(), // ADD THIS
+          text: attachmentType == 'image' ? "📷 Photo" :
+          attachmentType == 'video' ? "🎥 Video" : "📎 File sent",
           isMe: true,
           timestamp: DateTime.now(),
           attachmentType: attachmentType,
           textOverlays: textOverlays,
+          videoDuration: videoDuration,
         ));
         _filteredMessages = messages;
       });
@@ -1000,14 +1136,31 @@ class _ChatScreenState extends State<ChatScreen> {
                           MaterialPageRoute(
                             builder: (context) => CameraScreen(
                               onImageCaptured: (caption, textOverlays) {
-                                if (caption.isNotEmpty) {
-                                  _sendMessage(text: caption, attachmentType: 'image', textOverlays: textOverlays);
+                                // Check if it's a video or image based on the caption content
+                                if (caption.contains('🎥') || caption.toLowerCase().contains('video')) {
+                                  // Extract duration if it's in the text
+                                  int? duration;
+                                  RegExp durationRegex = RegExp(r'\((\d+)s\)');
+                                  Match? match = durationRegex.firstMatch(caption);
+                                  if (match != null) {
+                                    duration = int.tryParse(match.group(1) ?? '');
+                                  }
+
+                                  _sendMessage(text: caption, attachmentType: 'video', videoDuration: duration);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Video sent!')),
+                                  );
                                 } else {
-                                  _sendMessage(attachmentType: 'image', textOverlays: textOverlays);
+                                  // Handle image
+                                  if (caption.isNotEmpty) {
+                                    _sendMessage(text: caption, attachmentType: 'image', textOverlays: textOverlays);
+                                  } else {
+                                    _sendMessage(attachmentType: 'image', textOverlays: textOverlays);
+                                  }
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Photo sent!')),
+                                  );
                                 }
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Photo sent!')),
-                                );
                               },
                             ),
                           ),
@@ -1189,6 +1342,84 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         );
       },
+    );
+  }
+
+  void _showMessageOptions(ChatMessage message, bool isMe) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            SizedBox(height: 20),
+            if (isMe)
+              ListTile(
+                leading: Icon(Icons.delete, color: Colors.red),
+                title: Text('Delete Message'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _deleteMessage(message);
+                },
+              ),
+            ListTile(
+              leading: Icon(Icons.info, color: Colors.blue),
+              title: Text('Message Info'),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Sent at ${message.timestamp}')),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _deleteMessage(ChatMessage message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Message'),
+        content: Text('Are you sure you want to delete this message?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Message deleted'), backgroundColor: Colors.green),
+                );
+              } catch (e) {
+                print('Error deleting message: $e');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to delete message'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            child: Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1466,9 +1697,32 @@ class CameraScreen extends StatefulWidget {
   _CameraScreenState createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> {
+class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMixin {
   bool _isFlashOn = false;
   bool _isFrontCamera = false;
+
+  // Video recording variables
+  late AnimationController _progressController;
+  Timer? _recordingTimer;
+  int _recordingDuration = 0;
+  static const int _maxRecordingDuration = 30; // 30 seconds max
+  bool _isRecording = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _progressController = AnimationController(
+      vsync: this,
+      duration: Duration(seconds: _maxRecordingDuration),
+    );
+  }
+
+  @override
+  void dispose() {
+    _progressController.dispose();
+    _recordingTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1480,8 +1734,98 @@ class _CameraScreenState extends State<CameraScreen> {
           _buildTopControls(),
           _buildBottomControls(),
           _buildFocusFrame(),
+
+          // Recording timer display
+          if (_isRecording)
+            Positioned(
+              top: 120,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(25),
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        _formatDuration(_recordingDuration),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // Recording progress bar
+          if (_isRecording)
+            Positioned(
+              top: 100,
+              left: 20,
+              right: 20,
+              child: AnimatedBuilder(
+                animation: _progressController,
+                builder: (context, child) {
+                  return Container(
+                    height: 6,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(3),
+                      color: Colors.white.withOpacity(0.3),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: LinearProgressIndicator(
+                        value: _progressController.value,
+                        backgroundColor: Colors.transparent,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                        minHeight: 6,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+          // Instruction text
+          if (!_isRecording)
+            Positioned(
+              bottom: 150,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 20),
+                child: Text(
+                  'Tap to take photo and hold to record video',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
         ],
-      ),
+      )
     );
   }
 
@@ -1570,6 +1914,61 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
+  void _startVideoRecording() {
+    if (_isRecording) return;
+
+    setState(() {
+      _isRecording = true;
+      _recordingDuration = 0;
+    });
+
+    // Start progress animation
+    _progressController.reset();
+    _progressController.forward();
+
+    // Start timer
+    _recordingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      setState(() {
+        _recordingDuration++;
+      });
+
+      if (_recordingDuration >= _maxRecordingDuration) {
+        _stopVideoRecording();
+      }
+    });
+
+    HapticFeedback.heavyImpact();
+    print('🎥 Started video recording');
+  }
+
+  void _stopVideoRecording() {
+    if (!_isRecording) return;
+
+    setState(() {
+      _isRecording = false;
+    });
+
+    _progressController.stop();
+    _recordingTimer?.cancel();
+
+    HapticFeedback.lightImpact();
+    print('🎥 Stopped video recording after $_recordingDuration seconds');
+
+    // Navigate to video editing screen
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => VideoEditScreen(
+          videoPath: "recorded_video_path",
+          recordingDuration: _recordingDuration,
+          onVideoSent: (caption) {
+            widget.onImageCaptured(caption, null);
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildGalleryButton() {
     return Container(
       width: 50,
@@ -1590,21 +1989,42 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildCaptureButton() {
     return GestureDetector(
       onTap: () {
-        _capturePhoto();
+        if (!_isRecording) {
+          _capturePhoto();
+        }
+      },
+      onLongPressStart: (details) {
+        _startVideoRecording();
+      },
+      onLongPressEnd: (details) {
+        _stopVideoRecording();
       },
       child: Container(
         width: 80,
         height: 80,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 4),
+          border: Border.all(
+              color: _isRecording ? Colors.red : Colors.white,
+              width: 4
+          ),
         ),
         child: Container(
           margin: EdgeInsets.all(6),
           decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
+            color: _isRecording ? Colors.red : Colors.white,
+            shape: _isRecording ? BoxShape.rectangle : BoxShape.circle,
+            borderRadius: _isRecording ? BorderRadius.circular(8) : null,
           ),
+          child: _isRecording
+              ? Center(
+            child: Icon(
+              Icons.stop,
+              color: Colors.white,
+              size: 30,
+            ),
+          )
+              : null,
         ),
       ),
     );
@@ -1633,6 +2053,12 @@ class _CameraScreenState extends State<CameraScreen> {
         ),
       ),
     );
+  }
+
+  String _formatDuration(int seconds) {
+    int minutes = seconds ~/ 60;
+    int remainingSeconds = seconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
   Widget _buildFocusFrame() {
@@ -2165,5 +2591,121 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
     setState(() {
       _textOverlays[index] = _textOverlays[index].copyWith(position: newPosition);
     });
+  }
+}
+
+// ✅ PhotoEditScreen class ends above, VideoEditScreen starts below
+class VideoEditScreen extends StatefulWidget {
+  final String videoPath;
+  final int recordingDuration;
+  final Function(String) onVideoSent;
+
+  VideoEditScreen({
+    required this.videoPath,
+    required this.recordingDuration,
+    required this.onVideoSent,
+  });
+
+  @override
+  _VideoEditScreenState createState() => _VideoEditScreenState();
+}
+
+class _VideoEditScreenState extends State<VideoEditScreen> {
+  final TextEditingController _captionController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        leading: IconButton(
+          icon: Icon(Icons.close, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text('Video', style: TextStyle(color: Colors.white)),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Container(
+              color: Colors.grey[800],
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.play_circle_filled,
+                      size: 100,
+                      color: Colors.white,
+                    ),
+                    SizedBox(height: 20),
+                    Text(
+                      'Recorded Video (${widget.recordingDuration}s)',
+                      style: TextStyle(color: Colors.white, fontSize: 18),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Container(
+            padding: EdgeInsets.all(16),
+            color: Colors.black,
+            child: SafeArea(
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _captionController,
+                    style: TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: "Add a caption (optional)...",
+                      hintStyle: TextStyle(color: Colors.grey[400]),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide(color: Colors.grey[600]!),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide(color: Colors.grey[600]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide(color: Colors.blue),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[800],
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        String caption = _captionController.text.trim();
+                        Navigator.pop(context);
+                        widget.onVideoSent(caption.isNotEmpty ? caption : '🎥 Video');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(25),
+                        ),
+                      ),
+                      child: Text(
+                        'Send Video',
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

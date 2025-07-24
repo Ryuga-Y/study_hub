@@ -57,10 +57,12 @@ class WebRTCService {
         print('🔗 ICE Connection State: $state');
         if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
           print('✅ WebRTC connection established');
-        } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
-            state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
-          print('❌ WebRTC connection failed or disconnected');
+        } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+          print('❌ WebRTC connection failed');
           endCall();
+        } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+          print('⚠️ WebRTC connection disconnected - attempting to reconnect');
+          // Don't immediately end call on disconnect, it might reconnect
         }
       };
 
@@ -166,6 +168,7 @@ class WebRTCService {
     }
   }
 
+
   Future<void> answerCall(String callId) async {
     try {
       print('📞 Answering call: $callId');
@@ -187,11 +190,12 @@ class WebRTCService {
       // Listen for call status changes
       _listenForCallStatus();
 
-      // Listen for ICE candidates FIRST to catch early candidates
-      _listenForIceCandidates();
 
-      // Get call data
+      // Get call data FIRST
       DocumentSnapshot callDoc = await _firestore.collection('videoCalls').doc(callId).get();
+
+// Listen for ICE candidates BEFORE setting remote description
+      _listenForIceCandidates();
       Map<String, dynamic> callData = callDoc.data() as Map<String, dynamic>;
 
       if (callData['offer'] != null) {
