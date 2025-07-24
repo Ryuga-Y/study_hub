@@ -120,6 +120,184 @@ class CommunityService {
     }
   }
 
+  // Poll Operations
+  Future<String> createPoll({
+    required String postId,
+    required String question,
+    required List<String> options,
+    bool allowMultipleVotes = false,
+    DateTime? endsAt,
+    bool isAnonymous = false,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Validate inputs
+      if (question.trim().isEmpty) {
+        throw Exception('Poll question cannot be empty');
+      }
+      if (options.length < 2) {
+        throw Exception('Poll must have at least 2 options');
+      }
+      if (options.length > 6) {
+        throw Exception('Poll cannot have more than 6 options');
+      }
+
+      // Create poll document
+      final pollRef = _firestore.collection('polls').doc();
+
+      // Create poll options
+      final pollOptions = options.map((text) => PollOption(
+        id: DateTime.now().millisecondsSinceEpoch.toString() + text.hashCode.toString(),
+        text: text,
+        voteCount: 0,
+      )).toList();
+
+      final poll = Poll(
+        id: pollRef.id,
+        postId: postId,
+        question: question,
+        options: pollOptions,
+        allowMultipleVotes: allowMultipleVotes,
+        endsAt: endsAt,
+        isAnonymous: isAnonymous,
+        createdAt: DateTime.now(),
+      );
+
+      await pollRef.set(poll.toMap());
+
+      // Update post to reference the poll
+      await _firestore.collection('posts').doc(postId).update({
+        'pollId': pollRef.id,
+        'hasPoll': true,
+      });
+
+      return pollRef.id;
+    } catch (e) {
+      throw Exception('Failed to create poll: $e');
+    }
+  }
+
+  Stream<Poll?> getPoll(String pollId) {
+    return _firestore
+        .collection('polls')
+        .doc(pollId)
+        .snapshots()
+        .map((doc) => doc.exists ? Poll.fromFirestore(doc) : null);
+  }
+
+  Future<void> voteOnPoll(String pollId, String optionId) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      await _firestore.runTransaction((transaction) async {
+        final pollDoc = await transaction.get(
+            _firestore.collection('polls').doc(pollId)
+        );
+
+        if (!pollDoc.exists) throw Exception('Poll not found');
+
+        final poll = Poll.fromFirestore(pollDoc);
+
+        // Check if poll is active
+        if (!poll.isActive) throw Exception('Poll has ended');
+
+        // Check if user already voted
+        if (poll.hasVoted(userId) && !poll.allowMultipleVotes) {
+          throw Exception('You have already voted');
+        }
+
+        // Get current votes
+        final votes = Map<String, String>.from(poll.votes);
+        final oldVote = votes[userId];
+
+        // Update votes
+        votes[userId] = optionId;
+
+        // Update option counts
+        final updatedOptions = poll.options.map((option) {
+          int newCount = option.voteCount;
+
+          if (oldVote == option.id) {
+            newCount--; // Remove old vote
+          }
+          if (option.id == optionId) {
+            newCount++; // Add new vote
+          }
+
+          return option.copyWith(voteCount: newCount);
+        }).toList();
+
+        // Update poll document
+        transaction.update(pollDoc.reference, {
+          'votes': votes,
+          'options': updatedOptions.map((opt) => opt.toMap()).toList(),
+        });
+      });
+    } catch (e) {
+      throw Exception('Failed to vote: $e');
+    }
+  }
+
+  Future<void> updatePoll({
+    required String pollId,
+    String? question,
+    List<PollOption>? options,
+    DateTime? endsAt,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Verify ownership through post
+      final pollDoc = await _firestore.collection('polls').doc(pollId).get();
+      if (!pollDoc.exists) throw Exception('Poll not found');
+
+      final poll = Poll.fromFirestore(pollDoc);
+      final postDoc = await _firestore.collection('posts').doc(poll.postId).get();
+
+      if (postDoc.data()?['userId'] != userId) {
+        throw Exception('Unauthorized');
+      }
+
+      Map<String, dynamic> updates = {};
+      if (question != null) updates['question'] = question;
+      if (options != null) updates['options'] = options.map((opt) => opt.toMap()).toList();
+      if (endsAt != null) updates['endsAt'] = Timestamp.fromDate(endsAt);
+
+      await _firestore.collection('polls').doc(pollId).update(updates);
+    } catch (e) {
+      throw Exception('Failed to update poll: $e');
+    }
+  }
+
+  Future<void> deletePoll(String pollId, String postId) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Verify ownership
+      final postDoc = await _firestore.collection('posts').doc(postId).get();
+      if (postDoc.data()?['userId'] != userId) {
+        throw Exception('Unauthorized');
+      }
+
+      // Delete poll
+      await _firestore.collection('polls').doc(pollId).delete();
+
+      // Update post
+      await _firestore.collection('posts').doc(postId).update({
+        'pollId': FieldValue.delete(),
+        'hasPoll': false,
+      });
+    } catch (e) {
+      throw Exception('Failed to delete poll: $e');
+    }
+  }
+
+
   Future<void> updatePost({
     required String postId,
     required String caption,

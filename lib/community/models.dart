@@ -111,6 +111,8 @@ class Post {
   final Post? originalPost;
   final String? repostComment;
   final int shareCount;
+  final String? pollId;
+  final bool hasPoll;
 
   Post({
     required this.id,
@@ -134,6 +136,8 @@ class Post {
     this.originalPost,
     this.repostComment,
     this.shareCount = 0,
+    this.pollId,
+    this.hasPoll = false,
   });
 
   factory Post.fromFirestore(DocumentSnapshot doc) {
@@ -183,6 +187,8 @@ class Post {
           : null,
       repostComment: data['repostComment'],
       shareCount: data['shareCount'] ?? 0,
+      pollId: data['pollId'],
+      hasPoll: data['hasPoll'] ?? false,
     );
   }
 
@@ -263,6 +269,8 @@ class Post {
       'originalPost': originalPost?.toMap(),
       'repostComment': repostComment,
       'shareCount': shareCount,
+      'pollId': pollId,
+      'hasPoll': hasPoll,
     };
   }
 
@@ -276,6 +284,8 @@ class Post {
     bool? isEdited,
     DateTime? editedAt,
     PostPrivacy? privacy,
+    String? pollId,
+    bool? hasPoll,
   }) {
     return Post(
       id: id,
@@ -294,6 +304,122 @@ class Post {
       userReactions: userReactions ?? this.userReactions,
       isEdited: isEdited ?? this.isEdited,
       editedAt: editedAt ?? this.editedAt,
+    );
+  }
+}
+
+// Poll model
+class Poll {
+  final String id;
+  final String postId;
+  final String question;
+  final List<PollOption> options;
+  final Map<String, String> votes; // userId -> optionId
+  final bool allowMultipleVotes;
+  final DateTime? endsAt;
+  final bool isAnonymous;
+  final DateTime createdAt;
+
+  Poll({
+    required this.id,
+    required this.postId,
+    required this.question,
+    required this.options,
+    this.votes = const {},
+    this.allowMultipleVotes = false,
+    this.endsAt,
+    this.isAnonymous = false,
+    required this.createdAt,
+  });
+
+  int get totalVotes => votes.length;
+
+  bool hasVoted(String userId) => votes.containsKey(userId);
+
+  String? getUserVote(String userId) => votes[userId];
+
+  bool get isActive => endsAt == null || endsAt!.isAfter(DateTime.now());
+
+  factory Poll.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return Poll(
+      id: doc.id,
+      postId: data['postId'] ?? '',
+      question: data['question'] ?? '',
+      options: (data['options'] as List?)
+          ?.map((opt) => PollOption.fromMap(opt))
+          .toList() ?? [],
+      votes: Map<String, String>.from(data['votes'] ?? {}),
+      allowMultipleVotes: data['allowMultipleVotes'] ?? false,
+      endsAt: (data['endsAt'] as Timestamp?)?.toDate(),
+      isAnonymous: data['isAnonymous'] ?? false,
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'postId': postId,
+      'question': question,
+      'options': options.map((opt) => opt.toMap()).toList(),
+      'votes': votes,
+      'allowMultipleVotes': allowMultipleVotes,
+      'endsAt': endsAt != null ? Timestamp.fromDate(endsAt!) : null,
+      'isAnonymous': isAnonymous,
+      'createdAt': Timestamp.fromDate(createdAt),
+    };
+  }
+
+  Poll copyWith({
+    Map<String, String>? votes,
+    List<PollOption>? options,
+  }) {
+    return Poll(
+      id: id,
+      postId: postId,
+      question: question,
+      options: options ?? this.options,
+      votes: votes ?? this.votes,
+      allowMultipleVotes: allowMultipleVotes,
+      endsAt: endsAt,
+      isAnonymous: isAnonymous,
+      createdAt: createdAt,
+    );
+  }
+}
+
+class PollOption {
+  final String id;
+  final String text;
+  final int voteCount;
+
+  PollOption({
+    required this.id,
+    required this.text,
+    this.voteCount = 0,
+  });
+
+  factory PollOption.fromMap(Map<String, dynamic> map) {
+    return PollOption(
+      id: map['id'] ?? '',
+      text: map['text'] ?? '',
+      voteCount: map['voteCount'] ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'text': text,
+      'voteCount': voteCount,
+    };
+  }
+
+  PollOption copyWith({int? voteCount}) {
+    return PollOption(
+      id: id,
+      text: text,
+      voteCount: voteCount ?? this.voteCount,
     );
   }
 }

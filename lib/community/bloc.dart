@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 import 'community_services.dart';
 import 'models.dart';
@@ -39,6 +40,143 @@ class CreatePost extends CommunityEvent {
 
   @override
   List<Object> get props => [mediaFiles, mediaTypes, caption, privacy];
+}
+
+// New combined event for creating post with poll
+class CreatePostWithPoll extends CommunityEvent {
+  final String caption;
+  final PostPrivacy privacy;
+  final String pollQuestion;
+  final List<String> pollOptions;
+  final bool allowMultipleVotes;
+  final DateTime? endsAt;
+  final bool isAnonymous;
+
+  CreatePostWithPoll({
+    required this.caption,
+    required this.privacy,
+    required this.pollQuestion,
+    required this.pollOptions,
+    this.allowMultipleVotes = false,
+    this.endsAt,
+    this.isAnonymous = false,
+  });
+
+  @override
+  List<Object?> get props => [
+    caption,
+    privacy,
+    pollQuestion,
+    pollOptions,
+    allowMultipleVotes,
+    endsAt,
+    isAnonymous,
+  ];
+}
+
+class CreatePostWithMediaAndPoll extends CommunityEvent {
+  final List<File> mediaFiles;
+  final List<MediaType> mediaTypes;
+  final String caption;
+  final PostPrivacy privacy;
+  final String? pollQuestion;
+  final List<String>? pollOptions;
+  final bool? allowMultipleVotes;
+  final DateTime? pollEndsAt;
+  final bool? pollIsAnonymous;
+
+  CreatePostWithMediaAndPoll({
+    required this.mediaFiles,
+    required this.mediaTypes,
+    required this.caption,
+    required this.privacy,
+    this.pollQuestion,
+    this.pollOptions,
+    this.allowMultipleVotes,
+    this.pollEndsAt,
+    this.pollIsAnonymous,
+  });
+
+  @override
+  List<Object?> get props => [
+    mediaFiles,
+    mediaTypes,
+    caption,
+    privacy,
+    pollQuestion,
+    pollOptions,
+    allowMultipleVotes,
+    pollEndsAt,
+    pollIsAnonymous,
+  ];
+}
+
+// Poll Events - Add to your CommunityEvent classes
+class CreatePoll extends CommunityEvent {
+  final String postId;
+  final String question;
+  final List<String> options;
+  final bool allowMultipleVotes;
+  final DateTime? endsAt;
+  final bool isAnonymous;
+
+  CreatePoll({
+    required this.postId,
+    required this.question,
+    required this.options,
+    this.allowMultipleVotes = false,
+    this.endsAt,
+    this.isAnonymous = false,
+  });
+
+  @override
+  List<Object?> get props => [postId, question, options, allowMultipleVotes, endsAt, isAnonymous];
+}
+
+class VoteOnPoll extends CommunityEvent {
+  final String pollId;
+  final String optionId;
+
+  VoteOnPoll({required this.pollId, required this.optionId});
+
+  @override
+  List<Object> get props => [pollId, optionId];
+}
+
+class UpdatePoll extends CommunityEvent {
+  final String pollId;
+  final String? question;
+  final List<PollOption>? options;
+  final DateTime? endsAt;
+
+  UpdatePoll({
+    required this.pollId,
+    this.question,
+    this.options,
+    this.endsAt,
+  });
+
+  @override
+  List<Object?> get props => [pollId, question, options, endsAt];
+}
+
+class DeletePoll extends CommunityEvent {
+  final String pollId;
+  final String postId;
+
+  DeletePoll({required this.pollId, required this.postId});
+
+  @override
+  List<Object> get props => [pollId, postId];
+}
+
+class LoadPoll extends CommunityEvent {
+  final String pollId;
+
+  LoadPoll(this.pollId);
+
+  @override
+  List<Object> get props => [pollId];
 }
 
 class UpdatePost extends CommunityEvent {
@@ -311,6 +449,8 @@ class LoadAnalytics extends CommunityEvent {
   List<Object> get props => [organizationCode];
 }
 
+
+
 // State
 class CommunityState extends Equatable {
   final List<Post> feedPosts;
@@ -331,6 +471,7 @@ class CommunityState extends Equatable {
   final int unreadNotificationCount;
   final List<PostReport> reportedPosts;
   final Map<String, int> analytics;
+  final Map<String, Poll> polls;
 
   const CommunityState({
     this.feedPosts = const [],
@@ -357,6 +498,7 @@ class CommunityState extends Equatable {
       'invalidReports': 0,
       'pendingReports': 0,
     },
+    this.polls = const {},
   });
 
   CommunityState copyWith({
@@ -378,6 +520,7 @@ class CommunityState extends Equatable {
     int? unreadNotificationCount,
     List<PostReport>? reportedPosts,
     Map<String, int>? analytics,
+    Map<String, Poll>? polls,
   }) {
     return CommunityState(
       feedPosts: feedPosts ?? this.feedPosts,
@@ -398,6 +541,7 @@ class CommunityState extends Equatable {
       unreadNotificationCount: unreadNotificationCount ?? this.unreadNotificationCount,
       reportedPosts: reportedPosts ?? this.reportedPosts,
       analytics: analytics ?? this.analytics,
+      polls: polls ?? this.polls,
     );
   }
 
@@ -421,6 +565,7 @@ class CommunityState extends Equatable {
     unreadNotificationCount,
     reportedPosts,
     analytics,
+    polls,
   ];
 }
 
@@ -435,12 +580,14 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<LoadFeed>(_onLoadFeed);
     on<LoadMoreFeed>(_onLoadMoreFeed);
     on<CreatePost>(_onCreatePost);
+    on<CreatePostWithPoll>(_onCreatePostWithPoll); // New handler
     on<UpdatePost>(_onUpdatePost);
     on<DeletePost>(_onDeletePost);
     on<ToggleLike>(_onToggleLike);
     on<AddReaction>(_onAddReaction);
     on<SharePost>(_onSharePost);
     on<ExternalSharePost>(_onExternalSharePost);
+    on<CreatePostWithMediaAndPoll>(_onCreatePostWithMediaAndPoll);
 
     on<ReportPost>(_onReportPost);
     on<LoadReportedPosts>(_onLoadReportedPosts);
@@ -448,6 +595,13 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<AdminDeletePost>(_onAdminDeletePost);
 
     on<LoadAnalytics>(_onLoadAnalytics);
+
+    // Poll Events
+    on<CreatePoll>(_onCreatePoll);
+    on<VoteOnPoll>(_onVoteOnPoll);
+    on<UpdatePoll>(_onUpdatePoll);
+    on<DeletePoll>(_onDeletePoll);
+    on<LoadPoll>(_onLoadPoll);
 
     // Comment Events
     on<LoadComments>(_onLoadComments);
@@ -480,6 +634,225 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       emit(state.copyWith(analytics: analytics));
     } catch (e) {
       print('Error loading analytics: $e');
+    }
+  }
+
+  // New handler for creating post with poll
+  Future<void> _onCreatePostWithPoll(CreatePostWithPoll event, Emitter<CommunityState> emit) async {
+    try {
+      emit(state.copyWith(isCreatingPost: true, error: null));
+
+      print('🔄 Creating post with poll...');
+      print('   Question: ${event.pollQuestion}');
+      print('   Options: ${event.pollOptions}');
+
+      // Create post with poll using the service
+      final postId = await _service.createPost(
+        mediaFiles: [], // No media for poll posts
+        mediaTypes: [],
+        caption: event.caption,
+        privacy: event.privacy,
+      );
+
+      print('✅ Post created with ID: $postId');
+
+      // Create the poll
+      final pollId = await _service.createPoll(
+        postId: postId,
+        question: event.pollQuestion,
+        options: event.pollOptions,
+        allowMultipleVotes: event.allowMultipleVotes,
+        endsAt: event.endsAt,
+        isAnonymous: event.isAnonymous,
+      );
+
+      print('✅ Poll created with ID: $pollId');
+
+      // Update current user's post count in local state
+      final updatedCurrentUser = state.currentUserProfile?.copyWith(
+        postCount: state.currentUserProfile!.postCount + 1,
+      );
+
+      emit(state.copyWith(
+        isCreatingPost: false,
+        currentUserProfile: updatedCurrentUser,
+        successMessage: 'Poll created successfully!',
+      ));
+
+      // Reload feed to show new post
+      add(LoadFeed(
+        organizationCode: state.currentUserProfile?.organizationCode ?? '',
+        refresh: true,
+      ));
+
+    } catch (e) {
+      print('❌ Error creating post with poll: $e');
+      emit(state.copyWith(
+        isCreatingPost: false,
+        error: 'Failed to create poll: ${e.toString()}',
+      ));
+    }
+  }
+
+  Future<void> _onCreatePostWithMediaAndPoll(
+      CreatePostWithMediaAndPoll event,
+      Emitter<CommunityState> emit
+      ) async {
+    try {
+      emit(state.copyWith(isCreatingPost: true, error: null));
+
+      print('🔄 Creating post with media and poll...');
+      print('   Media files: ${event.mediaFiles.length}');
+      print('   Poll question: ${event.pollQuestion}');
+      print('   Poll options: ${event.pollOptions}');
+
+      // Create post with media
+      final postId = await _service.createPost(
+        mediaFiles: event.mediaFiles,
+        mediaTypes: event.mediaTypes,
+        caption: event.caption,
+        privacy: event.privacy,
+      );
+
+      print('✅ Post created with ID: $postId');
+
+      // If poll data is provided, create the poll
+      if (event.pollQuestion != null &&
+          event.pollOptions != null &&
+          event.pollOptions!.isNotEmpty) {
+
+        final pollId = await _service.createPoll(
+          postId: postId,
+          question: event.pollQuestion!,
+          options: event.pollOptions!,
+          allowMultipleVotes: event.allowMultipleVotes ?? false,
+          endsAt: event.pollEndsAt,
+          isAnonymous: event.pollIsAnonymous ?? false,
+        );
+
+        print('✅ Poll created with ID: $pollId');
+      }
+
+      // Update current user's post count in local state
+      final updatedCurrentUser = state.currentUserProfile?.copyWith(
+        postCount: state.currentUserProfile!.postCount + 1,
+      );
+
+      emit(state.copyWith(
+        isCreatingPost: false,
+        currentUserProfile: updatedCurrentUser,
+        successMessage: 'Post created successfully!',
+      ));
+
+      // Reload feed to show new post
+      add(LoadFeed(
+        organizationCode: state.currentUserProfile?.organizationCode ?? '',
+        refresh: true,
+      ));
+
+    } catch (e) {
+      print('❌ Error creating post with media and poll: $e');
+      emit(state.copyWith(
+        isCreatingPost: false,
+        error: 'Failed to create post: ${e.toString()}',
+      ));
+    }
+  }
+
+  Future<void> _onCreatePoll(CreatePoll event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.createPoll(
+        postId: event.postId,
+        question: event.question,
+        options: event.options,
+        allowMultipleVotes: event.allowMultipleVotes,
+        endsAt: event.endsAt,
+        isAnonymous: event.isAnonymous,
+      );
+
+      emit(state.copyWith(successMessage: 'Poll created successfully!'));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  Future<void> _onVoteOnPoll(VoteOnPoll event, Emitter<CommunityState> emit) async {
+    try {
+      print('🗳️ Voting on poll: ${event.pollId}, option: ${event.optionId}');
+
+      await _service.voteOnPoll(event.pollId, event.optionId);
+
+      print('✅ Vote submitted successfully');
+
+      // Reload poll to get updated data
+      add(LoadPoll(event.pollId));
+
+      // Show success message
+      emit(state.copyWith(successMessage: 'Vote recorded!'));
+
+    } catch (e) {
+      print('❌ Error voting on poll: $e');
+      emit(state.copyWith(error: 'Failed to vote: ${e.toString()}'));
+    }
+  }
+
+  Future<void> _onUpdatePoll(UpdatePoll event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.updatePoll(
+        pollId: event.pollId,
+        question: event.question,
+        options: event.options,
+        endsAt: event.endsAt,
+      );
+
+      emit(state.copyWith(successMessage: 'Poll updated successfully!'));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  Future<void> _onDeletePoll(DeletePoll event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.deletePoll(event.pollId, event.postId);
+
+      // Remove from local state
+      final updatedPolls = Map<String, Poll>.from(state.polls);
+      updatedPolls.remove(event.pollId);
+
+      emit(state.copyWith(
+        polls: updatedPolls,
+        successMessage: 'Poll deleted successfully!',
+      ));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  Future<void> _onLoadPoll(LoadPoll event, Emitter<CommunityState> emit) async {
+    try {
+      print('📊 Loading poll: ${event.pollId}');
+
+      await emit.forEach(
+        _service.getPoll(event.pollId),
+        onData: (poll) {
+          if (poll != null) {
+            print('✅ Poll loaded: ${poll.question} (${poll.totalVotes} votes)');
+            final updatedPolls = Map<String, Poll>.from(state.polls);
+            updatedPolls[poll.id] = poll;
+            return state.copyWith(polls: updatedPolls);
+          } else {
+            print('⚠️ Poll not found: ${event.pollId}');
+          }
+          return state;
+        },
+        onError: (error, stackTrace) {
+          print('❌ Error loading poll: $error');
+          return state.copyWith(error: 'Failed to load poll: $error');
+        },
+      );
+    } catch (e) {
+      print('❌ Exception loading poll: $e');
+      emit(state.copyWith(error: 'Failed to load poll: ${e.toString()}'));
     }
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:study_hub/community/poll_widget.dart';
 import 'package:study_hub/community/post_card.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../community/bloc.dart';
@@ -106,7 +107,12 @@ class _PostScreenState extends State<PostScreen> {
                         onShare: () {
                           // Implement share
                         },
-                      ),
+                      ),if (widget.post.hasPoll && widget.post.pollId != null)
+                        PollWidget(
+                          pollId: widget.post.pollId!,
+                          postId: widget.post.id,
+                          isPostOwner: widget.post.userId == currentUserId,
+                        ),
 
                       Divider(height: 1),
 

@@ -16,12 +16,12 @@ import '../community/community_services.dart';
 
 class FeedScreen extends StatefulWidget {
   final String organizationCode;
-  final int initialTab; // Add this line
+  final int initialTab;
 
   const FeedScreen({
     Key? key,
     required this.organizationCode,
-    this.initialTab = 0, // Add this line with default value
+    this.initialTab = 0,
   }) : super(key: key);
 
   @override
@@ -40,12 +40,11 @@ class _FeedScreenState extends State<FeedScreen> {
   void initState() {
     super.initState();
     _currentIndex = widget.initialTab;
-    _checkAuthenticationStatus(); // ADD THIS LINE
+    _checkAuthenticationStatus();
     _initializeFeed();
     _scrollController.addListener(_onScroll);
   }
 
-  // 🆕 ADD THIS METHOD - Debug authentication state
   void _debugAuthState() {
     final user = FirebaseAuth.instance.currentUser;
     print('🔐 Auth Debug:');
@@ -53,7 +52,6 @@ class _FeedScreenState extends State<FeedScreen> {
     print('   Email: ${user?.email}');
     print('   IsAnonymous: ${user?.isAnonymous}');
 
-    // Check if user can get ID token
     user?.getIdToken().then((token) {
       print('   Token length: ${token?.length ?? 0}');
       print('   Token preview: ${token?.substring(0, 50) ?? 'null'}...');
@@ -64,7 +62,6 @@ class _FeedScreenState extends State<FeedScreen> {
 
   Future<void> _initializeFeed() async {
     try {
-      // 🆕 ADD THIS LINE - Call debug method
       _debugAuthState();
 
       final user = _authService.currentUser;
@@ -73,19 +70,14 @@ class _FeedScreenState extends State<FeedScreen> {
         return;
       }
 
-      // Add auth token refresh
       await context.read<CommunityBloc>().state.currentUserProfile != null
           ? Future.delayed(Duration.zero)
           : _refreshAuthentication();
 
       final bloc = context.read<CommunityBloc>();
-
-      // Load user profile first
       bloc.add(LoadUserProfile(user.uid));
 
-      // Wait a bit for user profile to load, then load other data
       await Future.delayed(Duration(milliseconds: 500));
-
       _loadInitialData();
 
       setState(() {
@@ -112,24 +104,19 @@ class _FeedScreenState extends State<FeedScreen> {
   void _loadInitialData() {
     final bloc = context.read<CommunityBloc>();
 
-    // Only load if we have an organization code
     if (widget.organizationCode.isNotEmpty) {
       bloc.add(LoadFeed(organizationCode: widget.organizationCode));
       bloc.add(LoadNotifications());
       bloc.add(LoadFriends());
       bloc.add(LoadPendingRequests());
-
-      // Schedule cleanup of broken images
       _scheduleCleanup();
     }
   }
 
   void _scheduleCleanup() {
-    // Only run cleanup once per session to avoid excessive API calls
     if (_hasRunCleanup) return;
     _hasRunCleanup = true;
 
-    // Run cleanup after a longer delay to let everything load first
     Future.delayed(Duration(seconds: 10), () {
       if (mounted) {
         final service = CommunityService();
@@ -138,7 +125,6 @@ class _FeedScreenState extends State<FeedScreen> {
         });
       }
     });
-
   }
 
   void _showError(String message) {
@@ -152,7 +138,6 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  // ADD THIS METHOD HERE
   void _checkAuthenticationStatus() async {
     final user = FirebaseAuth.instance.currentUser;
     print('=== AUTHENTICATION DEBUG ===');
@@ -165,13 +150,11 @@ class _FeedScreenState extends State<FeedScreen> {
         final token = await user.getIdToken();
         print('Token obtained: ${token?.length ?? 0} characters');
 
-        // Test a simple Firestore read to verify authentication
         final testDoc = await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
             .get();
         print('Firestore access: ${testDoc.exists ? 'SUCCESS' : 'FAILED'}');
-
       } catch (e) {
         print('Auth error: $e');
       }
@@ -247,9 +230,9 @@ class _FeedScreenState extends State<FeedScreen> {
           body: IndexedStack(
             index: _currentIndex,
             children: [
-              _buildFeedTab(state),                    // Index 0 - Home
-              SearchScreen(organizationCode: widget.organizationCode), // Index 1 - Search
-              ProfileScreen(                          // Index 2 - Profile (moved from index 3)
+              _buildFeedTab(state),
+              SearchScreen(organizationCode: widget.organizationCode),
+              ProfileScreen(
                 userId: state.currentUserProfile?.uid ?? _authService.currentUser?.uid ?? '',
                 isCurrentUser: true,
               ),
@@ -284,7 +267,6 @@ class _FeedScreenState extends State<FeedScreen> {
               ),
             ),
             Spacer(),
-            // Chat icon
             IconButton(
               icon: Icon(Icons.chat_bubble_outline),
               color: Colors.black87,
@@ -297,7 +279,6 @@ class _FeedScreenState extends State<FeedScreen> {
                 );
               },
             ),
-            // Notification icon
             Stack(
               children: [
                 IconButton(
@@ -380,9 +361,7 @@ class _FeedScreenState extends State<FeedScreen> {
                   arguments: post,
                 );
               },
-              onShare: () {
-                // Implement share functionality
-              },
+              onShare: () {},
               onDelete: post.userId == state.currentUserProfile?.uid
                   ? () => _showDeletePostDialog(context, post.id)
                   : null,
@@ -503,7 +482,6 @@ class _FeedScreenState extends State<FeedScreen> {
   void _showCreatePostModal() {
     final state = context.read<CommunityBloc>().state;
 
-    // Check if user profile is loaded
     if (state.currentUserProfile == null) {
       _showError('User profile not loaded. Please try again.');
       return;
@@ -621,7 +599,7 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 }
 
-// Create Post Modal
+// Enhanced Create Post Modal with merged functionality
 class CreatePostModal extends StatefulWidget {
   @override
   _CreatePostModalState createState() => _CreatePostModalState();
@@ -629,9 +607,158 @@ class CreatePostModal extends StatefulWidget {
 
 class _CreatePostModalState extends State<CreatePostModal> {
   final TextEditingController _captionController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   List<File> _selectedMedia = [];
   List<MediaType> _mediaTypes = [];
   PostPrivacy _privacy = PostPrivacy.public;
+  bool _hasPoll = false;
+
+  // Poll data
+  final TextEditingController _pollQuestionController = TextEditingController();
+  final List<TextEditingController> _pollOptionControllers = [
+    TextEditingController(),
+    TextEditingController(),
+  ];
+  DateTime? _pollEndsAt;
+  bool _pollIsAnonymous = false;
+
+  @override
+  void dispose() {
+    _captionController.dispose();
+    _pollQuestionController.dispose();
+    _scrollController.dispose();
+    for (final controller in _pollOptionControllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _addPollOption() {
+    if (_pollOptionControllers.length < 6) {
+      setState(() {
+        _pollOptionControllers.add(TextEditingController());
+      });
+      // Scroll to bottom when adding new option
+      Future.delayed(Duration(milliseconds: 100), () {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      });
+    }
+  }
+
+  void _removePollOption(int index) {
+    if (_pollOptionControllers.length > 2) {
+      setState(() {
+        _pollOptionControllers[index].dispose();
+        _pollOptionControllers.removeAt(index);
+      });
+    }
+  }
+
+  bool _canCreate() {
+    // Check if we have media or poll with valid data
+    bool hasMedia = _selectedMedia.isNotEmpty;
+    bool hasValidPoll = false;
+
+    if (_hasPoll) {
+      final validOptions = _pollOptionControllers
+          .where((controller) => controller.text.trim().isNotEmpty)
+          .length;
+      hasValidPoll = _pollQuestionController.text.trim().isNotEmpty && validOptions >= 2;
+    }
+
+    // Allow creation if we have media, valid poll, or both
+    return hasMedia || hasValidPoll;
+  }
+
+  void _createPost(CommunityState state) {
+    // Determine if we have a valid poll
+    bool hasValidPoll = false;
+    List<String>? validOptions;
+
+    if (_hasPoll) {
+      validOptions = _pollOptionControllers
+          .map((controller) => controller.text.trim())
+          .where((text) => text.isNotEmpty)
+          .toList();
+
+      hasValidPoll = _pollQuestionController.text.trim().isNotEmpty && validOptions.length >= 2;
+    }
+
+    // Create post with appropriate event based on content
+    if (_selectedMedia.isNotEmpty && hasValidPoll) {
+      // Post with both media and poll
+      context.read<CommunityBloc>().add(CreatePostWithMediaAndPoll(
+        mediaFiles: _selectedMedia,
+        mediaTypes: _mediaTypes,
+        caption: _captionController.text,
+        privacy: _privacy,
+        pollQuestion: _pollQuestionController.text,
+        pollOptions: validOptions,
+        allowMultipleVotes: false,
+        pollEndsAt: _pollEndsAt,
+        pollIsAnonymous: _pollIsAnonymous,
+      ));
+    } else if (_selectedMedia.isNotEmpty) {
+      // Regular post with media only
+      context.read<CommunityBloc>().add(CreatePost(
+        mediaFiles: _selectedMedia,
+        mediaTypes: _mediaTypes,
+        caption: _captionController.text,
+        privacy: _privacy,
+      ));
+    } else if (hasValidPoll) {
+      // Post with poll only
+      context.read<CommunityBloc>().add(CreatePostWithPoll(
+        caption: _captionController.text.isEmpty
+            ? _pollQuestionController.text
+            : _captionController.text,
+        privacy: _privacy,
+        pollQuestion: _pollQuestionController.text,
+        pollOptions: validOptions!,
+        allowMultipleVotes: false,
+        endsAt: _pollEndsAt,
+        isAnonymous: _pollIsAnonymous,
+      ));
+    }
+
+    Navigator.pop(context);
+  }
+
+  Future<void> _selectPollEndTime() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(Duration(days: 7)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(Duration(days: 365)),
+    );
+
+    if (date != null) {
+      final time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.now(),
+      );
+
+      if (time != null) {
+        setState(() {
+          _pollEndsAt = DateTime(
+            date.year,
+            date.month,
+            date.day,
+            time.hour,
+            time.minute,
+          );
+        });
+      }
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -674,17 +801,9 @@ class _CreatePostModalState extends State<CreatePostModal> {
                       ),
                     ),
                     TextButton(
-                      onPressed: state.isCreatingPost || _selectedMedia.isEmpty
+                      onPressed: state.isCreatingPost || !_canCreate()
                           ? null
-                          : () {
-                        context.read<CommunityBloc>().add(CreatePost(
-                          mediaFiles: _selectedMedia,
-                          mediaTypes: _mediaTypes,
-                          caption: _captionController.text,
-                          privacy: _privacy,
-                        ));
-                        Navigator.pop(context);
-                      },
+                          : () => _createPost(state),
                       child: state.isCreatingPost
                           ? SizedBox(
                         width: 20,
@@ -707,7 +826,14 @@ class _CreatePostModalState extends State<CreatePostModal> {
               // Content
               Expanded(
                 child: SingleChildScrollView(
-                  padding: EdgeInsets.all(16),
+                  controller: _scrollController,
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    // Add extra padding at bottom for keyboard
+                    bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                  ),
                   child: Column(
                     children: [
                       // User info
@@ -744,47 +870,7 @@ class _CreatePostModalState extends State<CreatePostModal> {
                                   color: Colors.grey[100],
                                   borderRadius: BorderRadius.circular(16),
                                 ),
-                                child: DropdownButton<PostPrivacy>(
-                                  value: _privacy,
-                                  isDense: true,
-                                  underline: SizedBox(),
-                                  icon: Icon(Icons.arrow_drop_down, size: 18),
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.black87,
-                                  ),
-                                  items: PostPrivacy.values.map((privacy) {
-                                    return DropdownMenuItem(
-                                      value: privacy,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            privacy == PostPrivacy.public
-                                                ? Icons.public
-                                                : privacy == PostPrivacy.friendsOnly
-                                                ? Icons.people
-                                                : Icons.lock,
-                                            size: 16,
-                                          ),
-                                          SizedBox(width: 4),
-                                          Text(
-                                            privacy == PostPrivacy.public
-                                                ? 'Public'
-                                                : privacy == PostPrivacy.friendsOnly
-                                                ? 'Friends'
-                                                : 'Private',
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  }).toList(),
-                                  onChanged: (value) {
-                                    if (value != null) {
-                                      setState(() => _privacy = value);
-                                    }
-                                  },
-                                ),
+                                child: _buildPrivacyDropdown(),
                               ),
                             ],
                           ),
@@ -805,7 +891,7 @@ class _CreatePostModalState extends State<CreatePostModal> {
 
                       SizedBox(height: 16),
 
-                      // Media picker
+                      // Always show media picker first
                       MediaPicker(
                         selectedMedia: _selectedMedia,
                         mediaTypes: _mediaTypes,
@@ -817,6 +903,39 @@ class _CreatePostModalState extends State<CreatePostModal> {
                         },
                         maxMedia: 10,
                       ),
+
+                      SizedBox(height: 16),
+
+                      // Poll toggle
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey[300]!),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: CheckboxListTile(
+                                title: Text('Add Poll'),
+                                secondary: Icon(Icons.poll, color: Colors.purple[600]),
+                                value: _hasPoll,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _hasPoll = value ?? false;
+                                  });
+                                },
+                                controlAffinity: ListTileControlAffinity.leading,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Show poll creation if enabled
+                      if (_hasPoll) ...[
+                        SizedBox(height: 16),
+                        _buildPollCreation(),
+                      ],
                     ],
                   ),
                 ),
@@ -828,9 +947,164 @@ class _CreatePostModalState extends State<CreatePostModal> {
     );
   }
 
-  @override
-  void dispose() {
-    _captionController.dispose();
-    super.dispose();
+  Widget _buildPrivacyDropdown() {
+    return DropdownButton<PostPrivacy>(
+      value: _privacy,
+      isDense: true,
+      underline: SizedBox(),
+      icon: Icon(Icons.arrow_drop_down, size: 18),
+      style: TextStyle(
+        fontSize: 14,
+        color: Colors.black87,
+      ),
+      items: PostPrivacy.values.map((privacy) {
+        return DropdownMenuItem(
+          value: privacy,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                privacy == PostPrivacy.public
+                    ? Icons.public
+                    : privacy == PostPrivacy.friendsOnly
+                    ? Icons.people
+                    : Icons.lock,
+                size: 16,
+              ),
+              SizedBox(width: 4),
+              Text(
+                privacy == PostPrivacy.public
+                    ? 'Public'
+                    : privacy == PostPrivacy.friendsOnly
+                    ? 'Friends'
+                    : 'Private',
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+      onChanged: (value) {
+        if (value != null) {
+          setState(() => _privacy = value);
+        }
+      },
+    );
+  }
+
+  Widget _buildPollCreation() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Poll question
+        TextField(
+          controller: _pollQuestionController,
+          decoration: InputDecoration(
+            hintText: 'Ask a question...',
+            border: OutlineInputBorder(),
+            labelText: 'Poll Question',
+          ),
+          maxLines: 2,
+        ),
+
+        SizedBox(height: 16),
+
+        Text(
+          'Options',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        SizedBox(height: 8),
+
+        // Poll options
+        ListView.builder(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          itemCount: _pollOptionControllers.length,
+          itemBuilder: (context, index) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _pollOptionControllers[index],
+                      decoration: InputDecoration(
+                        hintText: 'Option ${index + 1}',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_pollOptionControllers.length > 2)
+                    IconButton(
+                      icon: Icon(Icons.remove_circle, color: Colors.red),
+                      onPressed: () => _removePollOption(index),
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+
+        if (_pollOptionControllers.length < 6)
+          TextButton.icon(
+            onPressed: _addPollOption,
+            icon: Icon(Icons.add),
+            label: Text('Add Option'),
+          ),
+
+        SizedBox(height: 16),
+
+        // Poll settings
+        Column(
+          children: [
+            InkWell(
+              onTap: () => _selectPollEndTime(),
+              child: Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.timer, size: 20, color: Colors.grey[600]),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _pollEndsAt != null
+                            ? 'Ends ${_formatDate(_pollEndsAt!)}'
+                            : 'Set End Time (Optional)',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey[300]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: CheckboxListTile(
+                title: Text('Anonymous voting', style: TextStyle(fontSize: 14)),
+                value: _pollIsAnonymous,
+                onChanged: (value) {
+                  setState(() => _pollIsAnonymous = value ?? false);
+                },
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }

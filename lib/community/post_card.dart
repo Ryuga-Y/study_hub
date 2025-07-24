@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:study_hub/community/poll_widget.dart';
 import 'package:study_hub/community/profile_screen.dart';
 import 'package:study_hub/community/share_modal.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../community/models.dart';
 import '../community/bloc.dart';
+
 
 class PostCard extends StatefulWidget {
   final Post post;
@@ -141,6 +143,16 @@ class _PostCardState extends State<PostCard> {
     return state.friends.any((friend) => friend.friendId == postUserId);
   }
 
+  bool _shouldRoundBottom() {
+    final hasMedia = _getMediaUrls().isNotEmpty;
+    final hasOriginalPostPoll = widget.post.originalPost != null &&
+        widget.post.originalPost!.hasPoll &&
+        widget.post.originalPost!.pollId != null;
+
+    // If there's a poll after media, don't round the bottom of media
+    return !hasOriginalPostPoll;
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<CommunityBloc, CommunityState>(
@@ -175,7 +187,26 @@ class _PostCardState extends State<PostCard> {
                 // Media
                 if (_getMediaUrls().isNotEmpty)
                   _buildMediaSection(),
+
+                // Poll Widget for regular posts
+                if (widget.post.hasPoll && widget.post.pollId != null)
+                  PollWidget(
+                    pollId: widget.post.pollId!,
+                    postId: widget.post.id,
+                    isPostOwner: widget.post.userId == currentUserId,
+                  ),
               ],
+
+              // Poll Widget for reposts (check original post)
+              if (widget.post.isRepost &&
+                  widget.post.originalPost != null &&
+                  widget.post.originalPost!.hasPoll &&
+                  widget.post.originalPost!.pollId != null)
+                PollWidget(
+                  pollId: widget.post.originalPost!.pollId!,
+                  postId: widget.post.originalPost!.id,
+                  isPostOwner: widget.post.originalPost!.userId == currentUserId,
+                ),
 
               // Stats
               _buildStats(),
@@ -442,12 +473,25 @@ class _PostCardState extends State<PostCard> {
           if (_getMediaUrls().isNotEmpty)
             ClipRRect(
               borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(12),
-                bottomRight: Radius.circular(12),
+                bottomLeft: _shouldRoundBottom() ? Radius.circular(12) : Radius.zero,
+                bottomRight: _shouldRoundBottom() ? Radius.circular(12) : Radius.zero,
                 topLeft: _getPostCaption().isEmpty ? Radius.circular(12) : Radius.zero,
                 topRight: _getPostCaption().isEmpty ? Radius.circular(12) : Radius.zero,
               ),
               child: _buildMediaSection(),
+            ),
+
+          // 🆕 NEW: Poll Widget for original post in repost
+          if (widget.post.originalPost != null &&
+              widget.post.originalPost!.hasPoll &&
+              widget.post.originalPost!.pollId != null)
+            Padding(
+              padding: EdgeInsets.all(8),
+              child: PollWidget(
+                pollId: widget.post.originalPost!.pollId!,
+                postId: widget.post.originalPost!.id,
+                isPostOwner: false, // User can't be owner of original post in repost context
+              ),
             ),
         ],
       ),
