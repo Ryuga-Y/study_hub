@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:async';
+import 'package:permission_handler/permission_handler.dart';
 
 class WebRTCService {
   RTCPeerConnection? _peerConnection;
@@ -17,7 +18,6 @@ class WebRTCService {
   Function()? onCallEnd;
 
   // Call state
-  // Call state
   String? currentCallId;
   bool isInitiator = false;
   bool _isDisposed = false;
@@ -31,14 +31,32 @@ class WebRTCService {
     try {
       print('🔧 Initializing WebRTC...');
 
-      // Create peer connection with STUN servers
+      // Ensure previous connection is closed
+      if (_peerConnection != null) {
+        await _peerConnection!.close();
+        _peerConnection = null;
+      }
+
+      // Create peer connection with STUN and TURN servers
       _peerConnection = await createPeerConnection({
         'iceServers': [
           {'urls': 'stun:stun.l.google.com:19302'},
           {'urls': 'stun:stun1.l.google.com:19302'},
           {'urls': 'stun:stun2.l.google.com:19302'},
-          {'urls': 'stun:stun3.l.google.com:19302'},
-        ]
+          // Multiple TURN servers for better mobile connectivity
+          {
+            'urls': 'turn:numb.viagenie.ca',
+            'username': 'webrtc@live.com',
+            'credential': 'muazkh'
+          },
+          {
+            'urls': 'turn:turn.bistri.com:80',
+            'username': 'homeo',
+            'credential': 'homeo'
+          }
+        ],
+        'sdpSemantics': 'unified-plan',  // Better for mobile
+        'iceCandidatePoolSize': 10,
       });
 
       // Setup event handlers
@@ -47,10 +65,12 @@ class WebRTCService {
         _sendIceCandidate(candidate);
       };
 
-      _peerConnection!.onAddStream = (MediaStream stream) {
-        print('📺 Remote stream received');
-        _remoteStream = stream;
-        onRemoteStream?.call(stream);
+      _peerConnection!.onTrack = (RTCTrackEvent event) {
+        print('📺 Remote track received');
+        if (event.streams.isNotEmpty) {
+          _remoteStream = event.streams.first;
+          onRemoteStream?.call(_remoteStream!);
+        }
       };
 
       _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
@@ -59,10 +79,15 @@ class WebRTCService {
           print('✅ WebRTC connection established');
         } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
           print('❌ WebRTC connection failed');
-          endCall();
+          // Add delay before ending call to allow reconnection attempts
+          Future.delayed(Duration(seconds: 3), () {
+            if (!_isDisposed) {
+              endCall();
+            }
+          });
         } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
-          print('⚠️ WebRTC connection disconnected - attempting to reconnect');
-          // Don't immediately end call on disconnect, it might reconnect
+          print('⚠️ WebRTC connection disconnected - will wait for reconnection');
+          // Don't end call immediately - wait for potential reconnection
         }
       };
 
@@ -88,6 +113,12 @@ class WebRTCService {
     try {
       print('🎥 Getting user media...');
 
+      // Check if already have stream
+      if (_localStream != null) {
+        print('✅ Already have local stream');
+        return;
+      }
+
       final constraints = {
         'audio': {
           'echoCancellation': true,
@@ -102,14 +133,23 @@ class WebRTCService {
         }
       };
 
-      _localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      try {
+        _localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+        print('⚠️ Failed to get video, trying audio only: $e');
+        // Fallback to audio only if video fails
+        _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+      }
       print('✅ Local stream obtained');
 
       onLocalStream?.call(_localStream!);
 
-      if (_peerConnection != null) {
-        _peerConnection!.addStream(_localStream!);
-        print('✅ Local stream added to peer connection');
+      if (_peerConnection != null && _localStream != null) {
+        // Use addTrack for unified-plan
+        _localStream!.getTracks().forEach((track) {
+          _peerConnection!.addTrack(track, _localStream!);
+        });
+        print('✅ Local tracks added to peer connection');
       }
     } catch (e) {
       print('❌ Error getting user media: $e');
@@ -176,8 +216,28 @@ class WebRTCService {
       isInitiator = false;
       currentCallId = callId;
 
+      // Get call data first to check if call is still valid
+      DocumentSnapshot callDoc = await _firestore.collection('videoCalls').doc(callId).get();
+
+      if (!callDoc.exists) {
+        print('❌ Call document does not exist');
+        throw Exception('Call no longer exists');
+      }
+
+      Map<String, dynamic> callData = callDoc.data() as Map<String, dynamic>;
+
+      if (callData['status'] != 'calling') {
+        print('❌ Call is not in calling state: ${callData['status']}');
+        throw Exception('Call is not available');
+      }
+
+      // Initialize WebRTC and get media
       await initializeWebRTC();
       await getUserMedia();
+
+      // Start listening for everything BEFORE updating status
+      _listenForCallStatus();
+      _listenForIceCandidates();
 
       // Update call status to answered
       await _firestore.collection('videoCalls').doc(callId).update({
@@ -187,17 +247,7 @@ class WebRTCService {
 
       print('✅ Call status updated to answered');
 
-      // Listen for call status changes
-      _listenForCallStatus();
-
-
-      // Get call data FIRST
-      DocumentSnapshot callDoc = await _firestore.collection('videoCalls').doc(callId).get();
-
-// Listen for ICE candidates BEFORE setting remote description
-      _listenForIceCandidates();
-      Map<String, dynamic> callData = callDoc.data() as Map<String, dynamic>;
-
+      // Now set the remote description with the offer
       if (callData['offer'] != null) {
         // Set remote description (offer)
         await _peerConnection!.setRemoteDescription(
@@ -347,12 +397,13 @@ class WebRTCService {
     print('📞 Ending call: $currentCallId');
 
     if (_isDisposed) return;
-    _isDisposed = true;
 
     // Cancel all subscriptions first
     await _callStatusSubscription?.cancel();
     await _answerSubscription?.cancel();
     await _iceCandidatesSubscription?.cancel();
+
+    _isDisposed = true;
 
     // Update call status in Firebase
     if (currentCallId != null) {
@@ -377,31 +428,44 @@ class WebRTCService {
     print('🧹 Cleaning up WebRTC resources...');
 
     try {
-      // Dispose streams
-      _localStream?.getTracks().forEach((track) {
-        track.stop();
-      });
-      _localStream?.dispose();
+      // Stop and dispose local stream tracks
+      if (_localStream != null) {
+        _localStream!.getTracks().forEach((track) {
+          try {
+            track.stop();
+          } catch (e) {
+            print('Error stopping track: $e');
+          }
+        });
+        _localStream!.dispose();
+        _localStream = null;
+      }
 
-      _remoteStream?.getTracks().forEach((track) {
-        track.stop();
-      });
-      _remoteStream?.dispose();
+      // Stop and dispose remote stream tracks
+      if (_remoteStream != null) {
+        _remoteStream!.getTracks().forEach((track) {
+          try {
+            track.stop();
+          } catch (e) {
+            print('Error stopping remote track: $e');
+          }
+        });
+        _remoteStream!.dispose();
+        _remoteStream = null;
+      }
 
       // Close peer connection
-      _peerConnection?.close();
+      if (_peerConnection != null) {
+        _peerConnection!.close();
+        _peerConnection = null;
+      }
 
       print('✅ WebRTC cleanup completed');
     } catch (e) {
       print('❌ Error during cleanup: $e');
     }
 
-    // Reset state
-    _localStream = null;
-    _remoteStream = null;
-    _peerConnection = null;
     currentCallId = null;
-    // ✅ Don't reset _isDisposed flag
   }
 
   void toggleMute() {
@@ -424,6 +488,15 @@ class WebRTCService {
     if (_localStream != null && _localStream!.getVideoTracks().isNotEmpty) {
       _localStream!.getVideoTracks()[0].switchCamera();
       print('🔄 Camera switched');
+    }
+  }
+
+  // Add connection recovery mechanism
+  void _handleConnectionRecovery() {
+    if (_peerConnection != null && !_isDisposed) {
+      // Restart ICE if connection fails
+      _peerConnection!.restartIce();
+      print('🔄 Attempting ICE restart for connection recovery');
     }
   }
 

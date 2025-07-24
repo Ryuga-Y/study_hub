@@ -8,11 +8,13 @@ import 'Authentication/sign_in.dart';
 import 'Authentication/admin_sign_up.dart';
 import 'Lecturer/lecturer_home.dart';
 import 'Student/student_home.dart';
-import 'admin/admin_dashboard.dart';  
+import 'admin/admin_dashboard.dart';
 import 'community/feed_screen.dart';
 import 'community/models.dart';
 import 'community/post_screen.dart';
 import 'community/bloc.dart';
+import 'call_listener_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,12 +22,44 @@ void main() async {
   runApp(MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
+  @override
+  _MyAppState createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  final CallListenerService _callListener = CallListenerService();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _requestPermissions(); // Add this line
+    _callListener.initialize();  // Initialize call listener
+  }
+
+// Add this method in _MyAppState class
+  Future<void> _requestPermissions() async {
+    await [
+      Permission.camera,
+      Permission.microphone,
+      Permission.storage,
+    ].request();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _callListener.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (context) => CommunityBloc(),
       child: MaterialApp(
+        navigatorKey: navigatorKey,  // ADD THIS LINE
         debugShowCheckedModeBanner: false,
         title: 'Study Hub',
         theme: ThemeData(

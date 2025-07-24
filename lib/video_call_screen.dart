@@ -46,52 +46,74 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   Future<void> _initializeCall() async {
-    // Request permissions
-    await _requestPermissions();
-
-    // Initialize renderers
-    await _localRenderer.initialize();
-    await _remoteRenderer.initialize();
-
-    _webRTCService.onLocalStream = (stream) {
-      if (mounted) {
-        setState(() {
-          _localRenderer.srcObject = stream;
-        });
-        print('✅ Local video stream connected in UI');
+    try {
+      // Request permissions first and check if granted
+      final permissionsGranted = await _requestPermissions();
+      if (!permissionsGranted) {
+        print('❌ Permissions not granted');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(
+                'Camera and microphone permissions are required')),
+          );
+          Navigator.pop(context);
+        }
+        return;
       }
-    };
 
-    _webRTCService.onRemoteStream = (stream) {
-      if (mounted) {
-        setState(() {
-          _remoteRenderer.srcObject = stream;
-          _isConnected = true;
-          _isConnecting = false;
-        });
-        print('✅ Remote video stream connected in UI');
+      // Initialize renderers
+      await _localRenderer.initialize();
+      await _remoteRenderer.initialize();
+
+      _webRTCService.onLocalStream = (stream) {
+        if (mounted && stream != null) {
+          setState(() {
+            _localRenderer.srcObject = stream;
+          });
+          print('✅ Local video stream connected in UI');
+        }
+      };
+
+      _webRTCService.onRemoteStream = (stream) {
+        if (mounted) {
+          setState(() {
+            _remoteRenderer.srcObject = stream;
+            _isConnected = true;
+            _isConnecting = false;
+          });
+          print('✅ Remote video stream connected in UI');
+        }
+      };
+
+      _webRTCService.onCallEnd = () {
+        Navigator.pop(context);
+      };
+
+      // ADD THIS: Monitor call status in Firebase
+      if (widget.callId != null) {
+        _monitorCallStatus();
       }
-    };
 
-    _webRTCService.onCallEnd = () {
-      Navigator.pop(context);
-    };
+      // Start or answer call
+      if (widget.isIncoming && widget.callId != null) {
+        await _webRTCService.answerCall(widget.callId!);
+      } else if (widget.targetUserId != null) {
+        await _webRTCService.startCall(
+            widget.targetUserId!, widget.contactName);
+      }
 
-    // ADD THIS: Monitor call status in Firebase
-    if (widget.callId != null) {
-      _monitorCallStatus();
+      setState(() {
+        _isConnecting = false;
+      });
+    } catch (e) {
+      print('❌ Error initializing call: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to initialize call: $e')),
+        );
+        Navigator.pop(context);
+      }
     }
-
-    // Start or answer call
-    if (widget.isIncoming && widget.callId != null) {
-      await _webRTCService.answerCall(widget.callId!);
-    } else if (widget.targetUserId != null) {
-      await _webRTCService.startCall(widget.targetUserId!, widget.contactName);
-    }
-
-    setState(() {
-      _isConnecting = false;
-    });
   }
 
   void _monitorCallStatus() {
@@ -125,21 +147,39 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     });
   }
 
-  Future<void> _requestPermissions() async {
-    await [
-      Permission.camera,
-      Permission.microphone,
-    ].request();
-  }
+    Future<bool> _requestPermissions() async {
+      final cameraStatus = await Permission.camera.request();
+      final micStatus = await Permission.microphone.request();
 
-  @override
-  void dispose() {
-    _callStatusMonitor?.cancel();
-    _localRenderer.dispose();
-    _remoteRenderer.dispose();
-    _webRTCService.dispose();
-    super.dispose();
-  }
+      if (cameraStatus.isPermanentlyDenied || micStatus.isPermanentlyDenied) {
+        // Open app settings if permanently denied
+        openAppSettings();
+        return false;
+      }
+
+      return cameraStatus.isGranted && micStatus.isGranted;
+    }
+
+    @override
+    void dispose() {
+      // Cancel monitoring first
+      _callStatusMonitor?.cancel();
+
+      // Dispose service before renderers
+      _webRTCService.dispose();
+
+      // Dispose renderers synchronously
+      try {
+        _localRenderer.srcObject = null;
+        _remoteRenderer.srcObject = null;
+        _localRenderer.dispose();
+        _remoteRenderer.dispose();
+      } catch (e) {
+        print('Error disposing renderers: $e');
+      }
+
+      super.dispose();
+    }
 
   @override
   Widget build(BuildContext context) {

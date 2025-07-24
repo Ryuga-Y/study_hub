@@ -4,6 +4,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';  // ADD THIS
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
+import 'video_call_screen.dart';
+import 'incoming_call_screen.dart';
 
 void main() {
   runApp(MyApp());
@@ -116,6 +118,117 @@ class ChatContactPage extends StatefulWidget {
 
 class _ChatContactPageState extends State<ChatContactPage> {
   List<Map<String, dynamic>> contacts = [];
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  // ADD THE INITSTATE METHOD HERE
+  @override
+  void initState() {
+    super.initState();
+    _listenForIncomingCalls();  // This listens for incoming video calls
+    _loadContacts();
+  }
+
+  // ADD THIS METHOD RIGHT AFTER initState
+  void _listenForIncomingCalls() {
+    final currentUserId = _auth.currentUser?.uid;
+    if (currentUserId == null) return;
+
+    _firestore
+        .collection('videoCalls')
+        .where('targetId', isEqualTo: currentUserId)
+        .where('status', isEqualTo: 'calling')
+        .snapshots()
+        .listen((snapshot) {
+      for (var change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final callData = change.doc.data() as Map<String, dynamic>;
+          _showIncomingCallDialog(
+            callData['callId'],
+            callData['callerId'],
+            callData['callerName'] ?? 'Unknown',
+          );
+        }
+      }
+    });
+  }
+
+  // ADD THIS METHOD - Loads contacts from Firebase users collection
+  Future<void> _loadContacts() async {
+    try {
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null) return;
+
+      // Get all users except current user
+      final QuerySnapshot usersSnapshot = await _firestore
+          .collection('users')
+          .where('uid', isNotEqualTo: currentUserId)
+          .get();
+
+      setState(() {
+        contacts = usersSnapshot.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return {
+            'userId': doc.id,
+            'name': data['fullName'] ?? 'Unknown User',
+            'isOnline': false,  // You can implement online status later
+            'lastSeen': 'Offline',
+            'message': 'Start a conversation',
+            'unread': 0,
+          };
+        }).toList();
+      });
+    } catch (e) {
+      print('Error loading contacts: $e');
+    }
+  }
+
+  String _generateChatId(String? contactUserId) {
+    final currentUserId = _auth.currentUser?.uid ?? '';
+    if (contactUserId == null) return '';
+
+    // Sort user IDs to ensure consistent chat ID regardless of who initiates
+    final userIds = [currentUserId, contactUserId];
+    userIds.sort();
+    return '${userIds[0]}_${userIds[1]}';
+  }
+
+  // ADD THIS METHOD AFTER _listenForIncomingCalls
+  void _showIncomingCallDialog(String callId, String callerId, String callerName) {
+    print('📞 Showing incoming call from: $callerName (ID: $callerId)');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            IncomingCallScreen(
+              callId: callId,
+              callerId: callerId,
+              callerName: callerName,
+              onAccept: () {
+                print('✅ Call accepted');
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        VideoCallScreen(
+                          contactName: callerName,
+                          callId: callId,
+                          isIncoming: true,
+                        ),
+                  ),
+                );
+              },
+              onDecline: () {
+                print('❌ Call declined');
+                _firestore.collection('videoCalls').doc(callId).update({
+                  'status': 'declined',
+                });
+                Navigator.pop(context);
+              },
+            ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -202,6 +315,8 @@ class _ChatContactPageState extends State<ChatContactPage> {
                     contactName: contacts[index]['name'],
                     isOnline: contacts[index]['isOnline'],
                     lastSeen: contacts[index]['lastSeen'],
+                    chatId: _generateChatId(contacts[index]['userId']),  // ADD THIS
+                    contactId: contacts[index]['userId'] ?? '',          // ADD THIS
                   ),
                 ),
               );
@@ -321,13 +436,15 @@ class ChatScreen extends StatefulWidget {
   final String contactName;
   final bool isOnline;
   final String lastSeen;
-  final String? chatId;      // ADD THIS
+  final String? chatId;
+  final String contactId;
 
   ChatScreen({
     required this.contactName,
     required this.isOnline,
     required this.lastSeen,
-    this.chatId,             // ADD THIS
+    this.chatId,
+    required this.contactId,
   });
 
   @override
@@ -426,9 +543,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         IconButton(
           icon: Icon(Icons.videocam, color: Colors.blue),
-          onPressed: () {
-            _showVideoCallDialog();
-          },
+          onPressed: () => _initiateVideoCall(),  // CHANGE THIS
         ),
         IconButton(
           icon: Icon(Icons.more_vert, color: Colors.black),
@@ -1314,35 +1429,76 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _showVideoCallDialog() {
+  Future<void> _initiateVideoCall() async {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.videocam, color: Colors.blue),
-              SizedBox(width: 8),
-              Text("Video Call"),
-            ],
-          ),
-          content: Text("Start a video call with ${widget.contactName}?"),
-          actions: [
-            TextButton(
-              child: Text("Cancel"),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            ElevatedButton(
-              child: Text("Call"),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _showVideoCallScreen();
-              },
-            ),
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.videocam, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('Video Call'),
           ],
-        );
-      },
+        ),
+        content: Text('Start a video call with ${widget.contactName}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+
+              // Create call document in Firebase first
+              final callId = await _createOutgoingCall();
+              if (callId != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => VideoCallScreen(
+                      contactName: widget.contactName,
+                      targetUserId: widget.contactId,
+                      callId: callId,
+                      isIncoming: false,
+                    ),
+                  ),
+                );
+              }
+            },
+            child: Text('Call'),
+          ),
+        ],
+      ),
     );
+  }
+
+  Future<String?> _createOutgoingCall() async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        print('❌ No current user for video call');
+        return null;
+      }
+
+      final callId = _firestore.collection('videoCalls').doc().id;
+      print('🔧 Creating video call: $callId from ${currentUser.uid} to ${widget.contactId}');
+
+      await _firestore.collection('videoCalls').doc(callId).set({
+        'callId': callId,
+        'callerId': currentUser.uid,
+        'callerName': currentUser.displayName ?? 'Unknown',
+        'targetId': widget.contactId,
+        'targetName': widget.contactName,
+        'status': 'calling',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      return callId;
+    } catch (e) {
+      print('Error creating call: $e');
+      return null;
+    }
   }
 
   void _showMessageOptions(ChatMessage message, bool isMe) {
@@ -1420,29 +1576,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  void _showVideoCallScreen() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return Dialog(
-          insetPadding: EdgeInsets.zero,
-          backgroundColor: Colors.black,
-          child: Container(
-            width: MediaQuery.of(context).size.width,
-            height: MediaQuery.of(context).size.height,
-            child: Stack(
-              children: [
-                _buildVideoCallContent(),
-                _buildVideoCallControls(),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
