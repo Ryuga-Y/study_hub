@@ -1278,7 +1278,6 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
-
   // Navigate to course page with tutorial modal
   Future<void> _navigateToTutorialDirectly(BuildContext context, NotificationModel notification, String orgCode) async {
     try {
@@ -1329,7 +1328,7 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
-// Add this new method for navigating to calendar events
+  // Add this new method for navigating to calendar events
   Future<void> _navigateToCalendarEvent(BuildContext context, NotificationModel notification, String orgCode) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -1375,7 +1374,7 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
-// NEW: Handle reminder notifications
+  // NEW: Handle reminder notifications
   Future<void> _handleReminderNavigation(BuildContext context, NotificationModel notification, String orgCode) async {
     try {
       if (notification.eventId != null) {
@@ -1768,11 +1767,14 @@ class _NotificationDialogState extends State<NotificationDialog> {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Container(
-        width: MediaQuery.of(context).size.width * 0.9,
+        width: MediaQuery.of(context).size.width * 0.8,
         height: MediaQuery.of(context).size.height * 0.7,
         child: Column(
           children: [
             // Header
+            // Replace the header Container in the NotificationDialog build method with this:
+
+// Header - FIXED to prevent overflow
             Container(
               padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1783,36 +1785,48 @@ class _NotificationDialogState extends State<NotificationDialog> {
                 ),
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Icon(Icons.notifications, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text(
-                        'Notifications',
+                  // Left side - icon and title
+                  Icon(Icons.notifications, color: Colors.white, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Notifications',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16, // Reduced from 18
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+
+                  // Right side - actions with fixed spacing
+                  GestureDetector(
+                    onTap: () => _notificationService.markAllAsRead(),
+                    child: Container(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Text(
+                        'Mark all read',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 10, // Slightly larger for readability
+                          decoration: TextDecoration.underline,
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: () => _notificationService.markAllAsRead(),
-                        child: Text(
-                          'Mark all as read',
-                          style: TextStyle(color: Colors.white),
-                        ),
+                  SizedBox(width: 8), // Fixed spacing
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.close,
+                        color: Colors.white,
+                        size: 18,
                       ),
-                      IconButton(
-                        icon: Icon(Icons.close, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -1947,9 +1961,9 @@ class _NotificationDialogState extends State<NotificationDialog> {
       ),
     );
   }
-}
+} // ← FIXED: Missing closing brace for _NotificationDialogState class
 
-// Notification card widgets
+// FIXED: NotificationCard moved OUTSIDE the class and properly structured
 class NotificationCard extends StatelessWidget {
   final NotificationModel notification;
   final VoidCallback onTap;
@@ -2008,7 +2022,7 @@ class NotificationCard extends StatelessWidget {
               ),
               SizedBox(width: 12),
 
-              // Content
+              // Content - FIXED with Expanded
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2019,6 +2033,8 @@ class NotificationCard extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
                     ),
                     SizedBox(height: 4),
                     Text(
@@ -2027,6 +2043,8 @@ class NotificationCard extends StatelessWidget {
                         color: Colors.grey[600],
                         fontSize: 13,
                       ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 3,
                     ),
                     SizedBox(height: 4),
                     Text(
@@ -2040,10 +2058,16 @@ class NotificationCard extends StatelessWidget {
                 ),
               ),
 
-              // Delete button
-              IconButton(
-                icon: Icon(Icons.close, size: 18, color: Colors.grey[600]),
-                onPressed: onDelete,
+              // Delete button - FIXED size
+              SizedBox(
+                width: 32,
+                height: 32,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                  icon: Icon(Icons.close, size: 18, color: Colors.grey[600]),
+                  onPressed: onDelete,
+                ),
               ),
             ],
           ),

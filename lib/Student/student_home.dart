@@ -954,11 +954,6 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
               title: const Text('Organization Code'),
               subtitle: Text(_organizationData?['code'] ?? ''),
             ),
-            ListTile(
-              leading: const Icon(Icons.badge),
-              title: const Text('Student ID'),
-              subtitle: Text(_userData?['studentId'] ?? 'N/A'),
-            ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
