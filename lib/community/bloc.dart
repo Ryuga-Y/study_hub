@@ -449,7 +449,53 @@ class LoadAnalytics extends CommunityEvent {
   List<Object> get props => [organizationCode];
 }
 
+class UpdatePostWithMedia extends CommunityEvent {
+  final String postId;
+  final String caption;
+  final PostPrivacy privacy;
+  final List<File>? newMediaFiles;
+  final List<MediaType>? newMediaTypes;
+  final List<String>? keepExistingMediaUrls; // URLs of existing media to keep
 
+  UpdatePostWithMedia({
+    required this.postId,
+    required this.caption,
+    required this.privacy,
+    this.newMediaFiles,
+    this.newMediaTypes,
+    this.keepExistingMediaUrls,
+  });
+
+  @override
+  List<Object?> get props => [
+    postId,
+    caption,
+    privacy,
+    newMediaFiles,
+    newMediaTypes,
+    keepExistingMediaUrls
+  ];
+}
+
+// Enhanced UpdatePoll event to include options
+class UpdatePollWithOptions extends CommunityEvent {
+  final String pollId;
+  final String? question;
+  final List<String>? optionTexts; // New option texts
+  final DateTime? endsAt;
+  final bool? isAnonymous;
+
+  UpdatePollWithOptions({
+    required this.pollId,
+    this.question,
+    this.optionTexts,
+    this.endsAt,
+    this.isAnonymous,
+  });
+
+  @override
+  List<Object?> get props => [pollId, question, optionTexts, endsAt, isAnonymous];
+}
 
 // State
 class CommunityState extends Equatable {
@@ -588,6 +634,8 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<SharePost>(_onSharePost);
     on<ExternalSharePost>(_onExternalSharePost);
     on<CreatePostWithMediaAndPoll>(_onCreatePostWithMediaAndPoll);
+    on<UpdatePostWithMedia>(_onUpdatePostWithMedia);
+    on<UpdatePollWithOptions>(_onUpdatePollWithOptions);
 
     on<ReportPost>(_onReportPost);
     on<LoadReportedPosts>(_onLoadReportedPosts);
@@ -634,6 +682,73 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       emit(state.copyWith(analytics: analytics));
     } catch (e) {
       print('Error loading analytics: $e');
+    }
+  }
+
+  Future<void> _onUpdatePostWithMedia(UpdatePostWithMedia event, Emitter<CommunityState> emit) async {
+    try {
+      emit(state.copyWith(isCreatingPost: true, error: null));
+
+      await _service.updatePostWithMedia(
+        postId: event.postId,
+        caption: event.caption,
+        privacy: event.privacy,
+        newMediaFiles: event.newMediaFiles,
+        newMediaTypes: event.newMediaTypes,
+        keepExistingMediaUrls: event.keepExistingMediaUrls,
+      );
+
+      // Update post in local state
+      final updatedPosts = state.feedPosts.map((post) {
+        if (post.id == event.postId) {
+          return post.copyWith(
+            caption: event.caption,
+            privacy: event.privacy,
+            isEdited: true,
+            editedAt: DateTime.now(),
+          );
+        }
+        return post;
+      }).toList();
+
+      emit(state.copyWith(
+        feedPosts: updatedPosts,
+        isCreatingPost: false,
+        successMessage: 'Post updated successfully!',
+      ));
+
+      // Reload feed to get updated media URLs
+      add(LoadFeed(
+        organizationCode: state.currentUserProfile?.organizationCode ?? '',
+        refresh: true,
+      ));
+
+    } catch (e) {
+      emit(state.copyWith(
+        isCreatingPost: false,
+        error: 'Failed to update post: ${e.toString()}',
+      ));
+    }
+  }
+
+// Enhanced poll update handler
+  Future<void> _onUpdatePollWithOptions(UpdatePollWithOptions event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.updatePollWithOptions(
+        pollId: event.pollId,
+        question: event.question,
+        optionTexts: event.optionTexts,
+        endsAt: event.endsAt,
+        isAnonymous: event.isAnonymous,
+      );
+
+      emit(state.copyWith(successMessage: 'Poll updated successfully!'));
+
+      // Reload the poll to get updated data
+      add(LoadPoll(event.pollId));
+
+    } catch (e) {
+      emit(state.copyWith(error: 'Failed to update poll: ${e.toString()}'));
     }
   }
 

@@ -612,7 +612,9 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
                     children: [
                       Container(
                         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -636,8 +638,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                           ],
                         ),
                       ),
-                      if (isOverdue) ...[
-                        SizedBox(width: 8),
+                      if (isOverdue)
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
@@ -653,9 +654,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                             ),
                           ),
                         ),
-                      ],
-                      if (hasRubric) ...[
-                        SizedBox(width: 8),
+                      if (hasRubric)
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
@@ -678,7 +677,6 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                             ],
                           ),
                         ),
-                      ],
                     ],
                   ),
                   SizedBox(height: 12),
@@ -1137,7 +1135,13 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     );
   }
 
+  // Update _buildSubmissionsTab to add batch return button
   Widget _buildSubmissionsTab() {
+    // Count draft evaluations
+    final draftCount = submissions.where((s) =>
+    s['evaluationIsDraft'] == true && s['hasEvaluation'] == true
+    ).length;
+
     if (submissions.isEmpty) {
       return Center(
         child: Column(
@@ -1184,14 +1188,72 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     return RefreshIndicator(
       onRefresh: _refreshData,
       color: Colors.purple[400],
-      child: ListView.builder(
-        physics: AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(16),
-        itemCount: submissions.length,
-        itemBuilder: (context, index) {
-          final submission = submissions[index];
-          return _buildSubmissionCard(submission);
-        },
+      child: Column(
+        children: [
+          // Add batch return button if there are drafts
+          if (draftCount > 0)
+            Container(
+              padding: EdgeInsets.all(16),
+              child: Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.orange[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.drafts, color: Colors.orange[700], size: 24),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$draftCount draft evaluation${draftCount > 1 ? 's' : ''} pending',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange[800],
+                              fontSize: 16,
+                            ),
+                          ),
+                          Text(
+                            'Return evaluations to make them visible to students',
+                            style: TextStyle(
+                              color: Colors.orange[700],
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: _returnAllDrafts,
+                      icon: Icon(Icons.send, color: Colors.white, size: 16),
+                      label: Text('Return All', style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green[600],
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: ListView.builder(
+              physics: AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.all(16),
+              itemCount: submissions.length,
+              itemBuilder: (context, index) {
+                final submission = submissions[index];
+                return _buildSubmissionCard(submission);
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1202,6 +1264,8 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     final hasDetailedEvaluation = submission['hasEvaluation'] == true;
     final letterGrade = submission['letterGrade'];
     final percentage = submission['percentage'];
+    final isDraft = submission['evaluationIsDraft'] == true;
+    final isReleased = submission['isReleased'] == true;
 
     return Container(
       margin: EdgeInsets.only(bottom: 12),
@@ -1272,8 +1336,46 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                         color: Colors.purple[600],
                       ),
                     ),
-                  if (isGraded) ...[
-                    // Show letter grade if available
+                  // Show evaluation status
+                  if (hasDetailedEvaluation && isDraft) ...[
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.orange[300]!),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.drafts, size: 14, color: Colors.orange[700]),
+                          SizedBox(width: 4),
+                          Text(
+                            'Draft',
+                            style: TextStyle(
+                              color: Colors.orange[700],
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () => _returnSingleEvaluation(submission),
+                      icon: Icon(Icons.send, size: 16, color: Colors.white),
+                      label: Text('Return', style: TextStyle(color: Colors.white, fontSize: 14)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green[600],
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ] else if (isGraded && isReleased) ...[
+                    // Show letter grade if available and released
                     if (letterGrade != null)
                       Container(
                         margin: EdgeInsets.only(right: 8),
@@ -1362,6 +1464,23 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                         ),
                       ),
                     ),
+                  ] else if (submission['status'] == 'evaluated_draft') ...[
+                    SizedBox(width: 12),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[100],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Evaluated (Draft)',
+                        style: TextStyle(
+                          color: Colors.orange[700],
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -1400,7 +1519,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                       Icon(Icons.feedback, size: 14, color: Colors.grey[600]),
                       SizedBox(width: 4),
                       Text(
-                        'Evaluated with rubric',
+                        isDraft ? 'Evaluated with rubric (Draft)' : 'Evaluated with rubric',
                         style: TextStyle(
                           color: Colors.grey[600],
                           fontSize: 12,
@@ -1432,6 +1551,235 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
         ),
       ),
     );
+  }
+
+  // Add batch return functionality:
+  Future<void> _returnAllDrafts() async {
+    // Get all draft evaluations
+    final draftSubmissions = submissions.where((s) =>
+    s['evaluationIsDraft'] == true && s['hasEvaluation'] == true
+    ).toList();
+
+    if (draftSubmissions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No draft evaluations to return'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.send, color: Colors.green[600], size: 24),
+            SizedBox(width: 8),
+            Text('Return All Evaluations'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to return all ${draftSubmissions.length} draft evaluations to students?',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Students to receive evaluations:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[700],
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  ...draftSubmissions.take(5).map((s) =>
+                      Text('• ${s['studentName']}',
+                          style: TextStyle(fontSize: 13, color: Colors.blue[700]))
+                  ),
+                  if (draftSubmissions.length > 5)
+                    Text('... and ${draftSubmissions.length - 5} more',
+                        style: TextStyle(fontSize: 13, color: Colors.blue[700], fontStyle: FontStyle.italic)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green[600],
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.send, size: 16, color: Colors.white),
+                SizedBox(width: 4),
+                Text('Return All', style: TextStyle(color: Colors.white)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      int successCount = 0;
+
+      for (final submission in draftSubmissions) {
+        try {
+          await _releaseSubmissionEvaluation(submission['id']);
+          successCount++;
+        } catch (e) {
+          print('Error releasing evaluation for ${submission['studentName']}: $e');
+        }
+      }
+
+      await _loadSubmissions();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Successfully returned $successCount evaluations to students'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error returning evaluations: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+
+// Add helper method to release individual submission
+  Future<void> _releaseSubmissionEvaluation(String submissionId) async {
+    // Get evaluation data
+    final evalDoc = await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(organizationCode)
+        .collection('courses')
+        .doc(widget.courseId)
+        .collection('assignments')
+        .doc(assignmentData['id'])
+        .collection('submissions')
+        .doc(submissionId)
+        .collection('evaluations')
+        .doc('current')
+        .get();
+
+    if (!evalDoc.exists) {
+      throw Exception('Evaluation not found');
+    }
+
+    final evalData = evalDoc.data()!;
+
+    // Update evaluation to released
+    await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(organizationCode)
+        .collection('courses')
+        .doc(widget.courseId)
+        .collection('assignments')
+        .doc(assignmentData['id'])
+        .collection('submissions')
+        .doc(submissionId)
+        .collection('evaluations')
+        .doc('current')
+        .update({
+      'isDraft': false,
+      'isReleased': true,
+      'releasedAt': FieldValue.serverTimestamp(),
+    });
+
+    // Update submission with grade data
+    await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(organizationCode)
+        .collection('courses')
+        .doc(widget.courseId)
+        .collection('assignments')
+        .doc(assignmentData['id'])
+        .collection('submissions')
+        .doc(submissionId)
+        .update({
+      'grade': evalData['grade'],
+      'letterGrade': evalData['letterGrade'],
+      'percentage': evalData['percentage'],
+      'feedback': evalData['feedback'],
+      'status': 'completed',
+      'isReleased': true,
+      'evaluationIsDraft': false,
+      'releasedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+// Add method to return single evaluation
+  Future<void> _returnSingleEvaluation(Map<String, dynamic> submission) async {
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      await _releaseSubmissionEvaluation(submission['id']);
+      await _loadSubmissions();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Evaluation returned to ${submission['studentName']}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error returning evaluation: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
+    }
   }
 
   Widget _buildInfoItem({

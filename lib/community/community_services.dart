@@ -241,6 +241,192 @@ class CommunityService {
     }
   }
 
+  // Enhanced post update with media support
+  Future<void> updatePostWithMedia({
+    required String postId,
+    required String caption,
+    required PostPrivacy privacy,
+    List<File>? newMediaFiles,
+    List<MediaType>? newMediaTypes,
+    List<String>? keepExistingMediaUrls,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Get current post data
+      final postDoc = await _firestore.collection('posts').doc(postId).get();
+      if (!postDoc.exists) throw Exception('Post not found');
+
+      final postData = postDoc.data()!;
+      if (postData['userId'] != userId) throw Exception('Unauthorized');
+
+      final currentMediaUrls = List<String>.from(postData['mediaUrls'] ?? []);
+      final currentMediaTypes = (postData['mediaTypes'] as List?)
+          ?.map((type) => MediaType.values.firstWhere(
+            (e) => e.toString() == 'MediaType.$type',
+        orElse: () => MediaType.image,
+      ))
+          .toList() ?? [];
+
+      // Determine which media to delete
+      final mediaToDelete = currentMediaUrls.where((url) =>
+      keepExistingMediaUrls == null || !keepExistingMediaUrls.contains(url)
+      ).toList();
+
+      // Delete removed media from storage
+      for (final url in mediaToDelete) {
+        try {
+          await _storage.refFromURL(url).delete();
+          print('✅ Deleted media: ${url.substring(0, 50)}...');
+        } catch (e) {
+          print('⚠️ Failed to delete media: $e');
+        }
+      }
+
+      // Prepare final media lists
+      List<String> finalMediaUrls = [];
+      List<MediaType> finalMediaTypes = [];
+
+      // Add kept existing media
+      if (keepExistingMediaUrls != null) {
+        for (int i = 0; i < currentMediaUrls.length; i++) {
+          if (keepExistingMediaUrls.contains(currentMediaUrls[i])) {
+            finalMediaUrls.add(currentMediaUrls[i]);
+            if (i < currentMediaTypes.length) {
+              finalMediaTypes.add(currentMediaTypes[i]);
+            }
+          }
+        }
+      }
+
+      // Upload new media files
+      if (newMediaFiles != null && newMediaTypes != null) {
+        for (int i = 0; i < newMediaFiles.length; i++) {
+          final file = newMediaFiles[i];
+          final type = newMediaTypes[i];
+          final fileName = '${DateTime.now().millisecondsSinceEpoch}_new_$i';
+          final ref = _storage.ref().child('posts/$userId/$fileName');
+
+          final metadata = SettableMetadata(
+            contentType: type == MediaType.image ? 'image/jpeg' : 'video/mp4',
+            customMetadata: {
+              'uploadedBy': userId,
+              'uploadedAt': DateTime.now().toIso8601String(),
+              'isEdit': 'true',
+            },
+          );
+
+          final uploadTask = await ref.putFile(file, metadata);
+          final url = await uploadTask.ref.getDownloadURL();
+          finalMediaUrls.add(url);
+          finalMediaTypes.add(type);
+          print('✅ Uploaded new media: ${url.substring(0, 50)}...');
+        }
+      }
+
+      // Update post document
+      await _firestore.collection('posts').doc(postId).update({
+        'caption': caption,
+        'privacy': privacy.toString().split('.').last,
+        'mediaUrls': finalMediaUrls,
+        'mediaTypes': finalMediaTypes.map((type) => type.toString().split('.').last).toList(),
+        'isEdited': true,
+        'editedAt': Timestamp.now(),
+      });
+
+      print('✅ Post updated successfully with ${finalMediaUrls.length} media files');
+
+    } catch (e) {
+      print('❌ Error updating post with media: $e');
+      throw Exception('Failed to update post: $e');
+    }
+  }
+
+// Enhanced poll update with options support
+  Future<void> updatePollWithOptions({
+    required String pollId,
+    String? question,
+    List<String>? optionTexts,
+    DateTime? endsAt,
+    bool? isAnonymous,
+  }) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Get poll document
+      final pollDoc = await _firestore.collection('polls').doc(pollId).get();
+      if (!pollDoc.exists) throw Exception('Poll not found');
+
+      final poll = Poll.fromFirestore(pollDoc);
+
+      // Verify ownership through post
+      final postDoc = await _firestore.collection('posts').doc(poll.postId).get();
+      if (postDoc.data()?['userId'] != userId) {
+        throw Exception('Unauthorized');
+      }
+
+      // Prepare update data
+      Map<String, dynamic> updates = {};
+
+      if (question != null) {
+        updates['question'] = question;
+      }
+
+      if (endsAt != null) {
+        updates['endsAt'] = Timestamp.fromDate(endsAt);
+      }
+
+      if (isAnonymous != null) {
+        updates['isAnonymous'] = isAnonymous;
+      }
+
+      // Handle option updates
+      if (optionTexts != null && optionTexts.isNotEmpty) {
+        // Create new poll options
+        final newOptions = optionTexts.map((text) => PollOption(
+          id: DateTime.now().millisecondsSinceEpoch.toString() + text.hashCode.toString(),
+          text: text,
+          voteCount: 0,
+        )).toList();
+
+        // If we're changing options, we need to reset votes
+        // This is a design decision - you might want to handle this differently
+        updates['options'] = newOptions.map((opt) => opt.toMap()).toList();
+        updates['votes'] = <String, String>{}; // Reset votes when options change
+
+        print('⚠️ Poll options updated - all votes have been reset');
+      }
+
+      // Update poll document
+      await _firestore.collection('polls').doc(pollId).update(updates);
+
+      print('✅ Poll updated successfully');
+
+    } catch (e) {
+      print('❌ Error updating poll: $e');
+      throw Exception('Failed to update poll: $e');
+    }
+  }
+
+// Helper method to validate media files
+  bool _isValidMediaFile(File file, MediaType type) {
+    try {
+      final extension = file.path.toLowerCase().split('.').last;
+
+      if (type == MediaType.image) {
+        return ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(extension);
+      } else if (type == MediaType.video) {
+        return ['mp4', 'mov', 'avi', 'mkv', 'webm'].contains(extension);
+      }
+
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
   Future<void> updatePoll({
     required String pollId,
     String? question,
