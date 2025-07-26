@@ -143,6 +143,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
 
+  // Add these new variables
+  Timer? _refreshTimer;
+  StreamSubscription? _friendsSubscription;
+  StreamSubscription? _chatsSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -156,23 +161,31 @@ class _ChatContactPageState extends State<ChatContactPage> {
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
 
-    _firestore
+    // Cancel existing subscriptions
+    _friendsSubscription?.cancel();
+    _chatsSubscription?.cancel();
+
+    _friendsSubscription = _firestore
         .collection('friends')
         .where('userId', isEqualTo: currentUserId)
         .where('status', isEqualTo: 'accepted')
         .snapshots()
         .listen((snapshot) {
       print('🔄 Friends collection changed, refreshing contacts...');
-      _loadFriendsAsContacts();
+      if (mounted) {
+        _loadFriendsAsContacts();
+      }
     });
 
-    _firestore
+    _chatsSubscription = _firestore
         .collection('chats')
         .where('participants', arrayContains: currentUserId)
         .snapshots()
         .listen((snapshot) {
       print('🔄 Chat documents changed, refreshing contacts...');
-      _loadFriendsAsContacts();
+      if (mounted) {
+        _loadFriendsAsContacts();
+      }
     });
   }
 
@@ -241,13 +254,16 @@ class _ChatContactPageState extends State<ChatContactPage> {
 
       contacts.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
 
-      setState(() {
-        _contacts = contacts;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _contacts = contacts;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      print('Error loading friends as contacts: $e');
-      setState(() => _isLoading = false);
+      print('Error loading friends as contacts: $e');if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -259,15 +275,16 @@ class _ChatContactPageState extends State<ChatContactPage> {
     await _loadFriendsAsContacts();
   }
 
-  void _startPeriodicRefresh() {
-    Timer.periodic(Duration(seconds: 30), (timer) {
-      if (mounted) {
-        _loadFriendsAsContacts();
-      } else {
-        timer.cancel();
-      }
-    });
-  }
+void _startPeriodicRefresh() {
+  _refreshTimer?.cancel(); // Cancel any existing timer
+  _refreshTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+    if (mounted) {
+      _loadFriendsAsContacts();
+    } else {
+      timer.cancel();
+    }
+  });
+}
 
   Future<void> _createChat(String currentUserId, Friend friend) async {
     final chatId = ChatContact._generateChatId(currentUserId, friend.friendId);
@@ -359,15 +376,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
     await _loadFriendsAsContacts();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    Future.delayed(Duration(milliseconds: 500), () {
-      if (mounted) {
-        _loadFriendsAsContacts();
-      }
-    });
-  }
+    @override
+    void didChangeDependencies() {
+      super.didChangeDependencies();
+
+    }
 
   @override
   Widget build(BuildContext context) {
@@ -1075,13 +1088,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-    _messageController.dispose();
-    _scrollController.dispose();
-    _focusNode.dispose();
-    _searchController.dispose();
-    super.dispose();
+  _messageController.dispose();
+  _scrollController.dispose();
+  _focusNode.dispose();
+  _searchController.dispose();
+  super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
     if (!_isVerifiedFriend) {
@@ -1560,11 +1572,13 @@ class _ChatScreenState extends State<ChatScreen> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    "${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}",
-                    style: TextStyle(
-                      color: isMe ? Colors.white70 : Colors.grey[600],
-                      fontSize: 12,
+                  Flexible(
+                    child: Text(
+                      "${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}",
+                      style: TextStyle(
+                        color: isMe ? Colors.white70 : Colors.grey[600],
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                   if (isMe) ...[
@@ -1980,6 +1994,56 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSimpleVideoPreview() {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.videocam,
+              color: Colors.white,
+              size: 80,
+            ),
+            SizedBox(height: 20),
+            Text(
+              'Video Ready to Send',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Duration: 0 seconds', // FIXED: Removed widget.recordingDuration
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 16,
+              ),
+            ),
+            SizedBox(height: 20),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                'Preview not available',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2515,17 +2579,188 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
             ListTile(
-              leading: Icon(Icons.image, color: Colors.green),
-              title: Text('Gallery'),
+              leading: Icon(Icons.photo, color: Colors.green),
+              title: Text('Photo'),
+              subtitle: Text('From Gallery'),
               onTap: () {
                 Navigator.pop(context);
-                _pickGalleryImage();
+                _pickImageFromGallery();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.videocam, color: Colors.purple),
+              title: Text('Video'),
+              subtitle: Text('From Drive'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideoFromDrive();
               },
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _pickVideoFromDrive() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.video,
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+
+        // Check file size (max 50MB for videos)
+        if (file.size > 50 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Video size exceeds 50MB limit'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        // Show loading
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => Center(
+            child: Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Uploading video...'),
+                  SizedBox(height: 8),
+                  Text(
+                    'Max duration: 1 minute',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Upload video
+        final downloadUrl = await _uploadFileToStorage(file, 'videos');
+        Navigator.pop(context); // Close loading dialog
+
+        if (downloadUrl != null) {
+          // Send message with video
+          await _sendMessage(
+            text: '🎥 Video from drive',
+            attachmentType: 'video',
+            attachmentUrl: downloadUrl,
+            videoDuration: 0, // Duration unknown from drive picker
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Video sent successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog if open
+      print('Error picking video from drive: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error selecting video: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Add this method inside the _ChatScreenState class, after the _pickVideoFromDrive() method
+
+  Future<void> _pickImageFromGallery() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+
+        // Check file size (max 10MB for images)
+        if (file.size > 10 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Image size exceeds 10MB limit'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        // Show loading
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => Center(
+            child: Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Uploading image...'),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Upload image
+        final downloadUrl = await _uploadFileToStorage(file, 'images');
+        Navigator.pop(context); // Close loading dialog
+
+        if (downloadUrl != null) {
+          // Send message with image
+          await _sendMessage(
+            text: '📷 Photo from gallery',
+            attachmentType: 'image',
+            attachmentUrl: downloadUrl,
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Image sent successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog if open
+      print('Error picking image from gallery: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error selecting image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _sendFileMessage(String type, String fileName, [String? fileUrl]) {
@@ -2629,21 +2864,42 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _pickGalleryImage() async {
+  Future<void> _pickFromGallery() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.image,
+        type: FileType.media,
+        allowMultiple: false,
         withData: true,
       );
 
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
+        final fileName = file.name.toLowerCase();
 
-        // Check file size (max 10MB)
-        if (file.size > 10 * 1024 * 1024) {
+        // Determine if it's image or video
+        bool isImage = fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') ||
+            fileName.endsWith('.png') || fileName.endsWith('.gif') ||
+            fileName.endsWith('.bmp') || fileName.endsWith('.webp');
+        bool isVideo = fileName.endsWith('.mp4') || fileName.endsWith('.mov') ||
+            fileName.endsWith('.avi') || fileName.endsWith('.mkv') ||
+            fileName.endsWith('.3gp') || fileName.endsWith('.webm');
+
+        if (!isImage && !isVideo) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Image size exceeds 10MB limit'),
+              content: Text('Please select an image or video file'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        // Check file size
+        int maxSize = isVideo ? 50 * 1024 * 1024 : 10 * 1024 * 1024; // 50MB for video, 10MB for image
+        if (file.size > maxSize) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${isVideo ? "Video" : "Image"} size exceeds ${isVideo ? "50MB" : "10MB"} limit'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -2666,28 +2922,45 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
-                  Text('Uploading image...'),
+                  Text('Uploading ${isVideo ? "video" : "image"}...'),
+                  if (isVideo) ...[
+                    SizedBox(height: 8),
+                    Text(
+                      'Videos longer than 1 minute may not play properly',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
         );
 
-        // Upload image
-        final downloadUrl = await _uploadFileToStorage(file, 'images');
+        // Upload file
+        final downloadUrl = await _uploadFileToStorage(file, isVideo ? 'videos' : 'images');
         Navigator.pop(context); // Close loading dialog
 
         if (downloadUrl != null) {
-          // Send message with image
-          await _sendMessage(
-            text: '📷 Photo from gallery',
-            attachmentType: 'image',
-            attachmentUrl: downloadUrl, // ✅ ADD THIS BACK
-          );
+          if (isVideo) {
+            // Send message with video
+            await _sendMessage(
+              text: '🎥 Video from gallery',
+              attachmentType: 'video',
+              attachmentUrl: downloadUrl,
+              videoDuration: 0, // Duration unknown from gallery picker
+            );
+          } else {
+            // Send message with image
+            await _sendMessage(
+              text: '📷 Photo from gallery',
+              attachmentType: 'image',
+              attachmentUrl: downloadUrl,
+            );
+          }
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Image sent successfully!'),
+              content: Text('${isVideo ? "Video" : "Image"} sent successfully!'),
               backgroundColor: Colors.green,
             ),
           );
@@ -2695,10 +2968,95 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (e) {
       Navigator.pop(context); // Close loading dialog if open
-      print('Error picking image: $e');
+      print('Error picking media: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error selecting image: $e'),
+          content: Text('Error selecting media: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _pickGalleryVideo() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.video,
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+
+        // Check file size (max 50MB for videos)
+        if (file.size > 50 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Video size exceeds 50MB limit'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        // Check video duration (max 1 minute = 60 seconds)
+        // Note: FilePicker doesn't provide duration info, so we'll upload and let user know if it's too long
+
+        // Show loading
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => Center(
+            child: Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Processing video...'),
+                  SizedBox(height: 8),
+                  Text(
+                    'Videos longer than 1 minute will be rejected',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Upload video
+        final downloadUrl = await _uploadFileToStorage(file, 'videos');
+        Navigator.pop(context); // Close loading dialog
+
+        if (downloadUrl != null) {
+          // Send message with video
+          await _sendMessage(
+            text: '🎥 Video from gallery',
+            attachmentType: 'video',
+            attachmentUrl: downloadUrl,
+            videoDuration: 0, // Duration unknown from picker
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Video sent successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog if open
+      print('Error picking video: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error selecting video: $e'),
           backgroundColor: Colors.red,
         ),
       );

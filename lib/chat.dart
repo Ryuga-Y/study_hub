@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 import 'video_call_screen.dart';
+import 'package:video_player/video_player.dart';
 import 'incoming_call_screen.dart';
 import 'dart:io';
+
 
 
 void main() async {
@@ -1114,7 +1118,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _sendMessage({String? text, String? attachmentType, List<TextOverlay>? textOverlays, int? videoDuration}) {
+  void _sendMessage({String? text, String? attachmentType, String? attachmentUrl, List<TextOverlay>? textOverlays, int? videoDuration}) {
+    // ... existing code (keep the same, just add the attachmentUrl parameter)
     if (text != null && text.trim().isNotEmpty) {
       setState(() {
         messages.add(ChatMessage(
@@ -1244,7 +1249,24 @@ class _ChatScreenState extends State<ChatScreen> {
                           MaterialPageRoute(
                             builder: (context) => CameraScreen(
                               onImageCaptured: (caption, textOverlays, imageUrl) {
-                                if (caption.contains('🎥') || caption.toLowerCase().contains('video')) {
+                                if (caption.contains('|')) {
+                                  // This is a video with URL
+                                  final parts = caption.split('|');
+                                  final videoCaption = parts[0];
+                                  final videoUrl = parts[1];
+                                  final duration = int.tryParse(parts[2] ?? '0');
+
+                                  _sendMessage(
+                                      text: videoCaption.isNotEmpty ? videoCaption : '🎥 Video',
+                                      attachmentType: 'video',
+                                      attachmentUrl: videoUrl,
+                                      videoDuration: duration
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Video sent!')),
+                                  );
+                                } else if (caption.contains('🎥') || caption.toLowerCase().contains('video')) {
+                                  // Old video format (for backwards compatibility)
                                   int? duration;
                                   RegExp durationRegex = RegExp(r'\((\d+)s\)');
                                   Match? match = durationRegex.firstMatch(caption);
@@ -1257,10 +1279,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                     SnackBar(content: Text('Video sent!')),
                                   );
                                 } else {
+                                  // Image handling
                                   if (caption.isNotEmpty) {
-                                    _sendMessage(text: caption, attachmentType: 'image', textOverlays: textOverlays);
+                                    _sendMessage(text: caption, attachmentType: 'image', textOverlays: textOverlays, attachmentUrl: imageUrl);
                                   } else {
-                                    _sendMessage(attachmentType: 'image', textOverlays: textOverlays);
+                                    _sendMessage(attachmentType: 'image', textOverlays: textOverlays, attachmentUrl: imageUrl);
                                   }
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(content: Text('Photo sent!')),
@@ -1724,30 +1747,18 @@ class CameraScreen extends StatefulWidget {
   _CameraScreenState createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMixin {
+class _CameraScreenState extends State<CameraScreen> {
   CameraController? _controller;
   Future<void>? _initializeControllerFuture;
   bool _isFlashOn = false;
   bool _isFrontCamera = false;
   List<CameraDescription>? _cameras;
 
-  // Video recording variables
-  late AnimationController _progressController;
-  Timer? _recordingTimer;
-  int _recordingDuration = 0;
-  static const int _maxRecordingDuration = 30; // 30 seconds max
-  bool _isRecording = false;
-
   @override
   void initState() {
     super.initState();
-    _progressController = AnimationController(
-      vsync: this,
-      duration: Duration(seconds: _maxRecordingDuration),
-    );
     _initializeCamera();
   }
-
   Future<void> _initializeCamera() async {
     try {
       // Request camera permission first
@@ -1859,8 +1870,6 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
 
   @override
   void dispose() {
-    _recordingTimer?.cancel();
-    _progressController.dispose();
     _disposeCamera();
     super.dispose();
   }
@@ -1871,15 +1880,6 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
       _initializeControllerFuture = null;
 
       if (_controller != null) {
-        // Stop recording if active
-        if (_isRecording) {
-          try {
-            await _controller!.stopVideoRecording();
-          } catch (e) {
-            print('Error stopping recording during dispose: $e');
-          }
-        }
-
         // Dispose the controller
         try {
           await _controller!.dispose();
@@ -1907,96 +1907,6 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
           _buildTopControls(),
           _buildBottomControls(),
           _buildFocusFrame(),
-
-          // Recording timer display
-          if (_isRecording)
-            Positioned(
-              top: 120,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.8),
-                    borderRadius: BorderRadius.circular(25),
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        _formatDuration(_recordingDuration),
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-          // Recording progress bar
-          if (_isRecording)
-            Positioned(
-              top: 100,
-              left: 20,
-              right: 20,
-              child: AnimatedBuilder(
-                animation: _progressController,
-                builder: (context, child) {
-                  return Container(
-                    height: 6,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(3),
-                      color: Colors.white.withOpacity(0.3),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: _progressController.value,
-                        backgroundColor: Colors.transparent,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
-                        minHeight: 6,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-
-          // Instruction text
-          if (!_isRecording)
-            Positioned(
-              bottom: 150,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  'Tap to take photo and hold to record video',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -2137,61 +2047,41 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
 
   Widget _buildCaptureButton() {
     return GestureDetector(
-      onTap: () {
-        if (!_isRecording) {
-          _capturePhoto();
-        }
-      },
-      onLongPressStart: (details) {
-        _startVideoRecording();
-      },
-      onLongPressEnd: (details) {
-        _stopVideoRecording();
-      },
+      onTap: _capturePhoto,
       child: Container(
         width: 70,
         height: 70,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(
-              color: _isRecording ? Colors.red : Colors.white,
-              width: 3
-          ),
+          border: Border.all(color: Colors.white, width: 3),
         ),
         child: Container(
           margin: EdgeInsets.all(6),
           decoration: BoxDecoration(
-            color: _isRecording ? Colors.red : Colors.white,
-            shape: _isRecording ? BoxShape.rectangle : BoxShape.circle,
-            borderRadius: _isRecording ? BorderRadius.circular(8) : null,
+            color: Colors.white,
+            shape: BoxShape.circle,
           ),
-          child: _isRecording
-              ? Center(
-            child: Icon(
-              Icons.stop,
-              color: Colors.white,
-              size: 30,
-            ),
-          )
-              : null,
         ),
       ),
     );
   }
 
   Widget _buildGalleryButton() {
-    return Container(
-      width: 50,
-      height: 50,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white, width: 2),
-        borderRadius: BorderRadius.circular(10),
-        color: Colors.white.withOpacity(0.1),
-      ),
-      child: Icon(
-        Icons.photo_library,
-        color: Colors.white,
-        size: 25,
+    return GestureDetector(
+      onTap: _openAppGallery,
+      child: Container(
+        width: 50,
+        height: 50,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white, width: 2),
+          borderRadius: BorderRadius.circular(10),
+          color: Colors.white.withOpacity(0.1),
+        ),
+        child: Icon(
+          Icons.photo_library,
+          color: Colors.white,
+          size: 25,
+        ),
       ),
     );
   }
@@ -2215,6 +2105,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
       ),
     );
   }
+
 
   Widget _buildFocusFrame() {
     return Center(
@@ -2264,9 +2155,17 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
 
       final image = await _controller!.takePicture();
 
-      // Store image path before navigation
-      final imagePath = image.path;
+// Save to app gallery directory
+      final appDir = await getApplicationDocumentsDirectory();
+      final appGalleryDir = Directory('${appDir.path}/chat_images');
+      await appGalleryDir.create(recursive: true);
 
+      final fileName = 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final savedImagePath = '${appGalleryDir.path}/$fileName';
+      await File(image.path).copy(savedImagePath);
+
+// Store saved image path for navigation
+      final imagePath = savedImagePath;
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -2287,76 +2186,6 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
           SnackBar(content: Text('Failed to capture photo')),
         );
       }
-    }
-  }
-
-  Future<void> _startVideoRecording() async {
-    if (_isRecording || _controller == null) return;
-
-    try {
-      await _initializeControllerFuture;
-
-      setState(() {
-        _isRecording = true;
-        _recordingDuration = 0;
-      });
-
-      // Start progress animation
-      _progressController.reset();
-      _progressController.forward();
-
-      // Start timer
-      _recordingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
-        setState(() {
-          _recordingDuration++;
-        });
-
-        if (_recordingDuration >= _maxRecordingDuration) {
-          _stopVideoRecording();
-        }
-      });
-
-      await _controller!.startVideoRecording();
-      HapticFeedback.heavyImpact();
-      print('🎥 Started video recording');
-    } catch (e) {
-      print('Error starting video recording: $e');
-      setState(() {
-        _isRecording = false;
-      });
-    }
-  }
-
-  Future<void> _stopVideoRecording() async {
-    if (!_isRecording || _controller == null) return;
-
-    try {
-      setState(() {
-        _isRecording = false;
-      });
-
-      _progressController.stop();
-      _recordingTimer?.cancel();
-
-      final video = await _controller!.stopVideoRecording();
-      HapticFeedback.lightImpact();
-      print('🎥 Stopped video recording after $_recordingDuration seconds');
-
-      // Navigate to video editing screen
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => VideoEditScreen(
-            videoPath: video.path,
-            recordingDuration: _recordingDuration,
-            onVideoSent: (caption) {
-              widget.onImageCaptured(caption, null, null);
-            },
-          ),
-        ),
-      );
-    } catch (e) {
-      print('Error stopping video recording: $e');
     }
   }
 
@@ -2435,10 +2264,117 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
     }
   }
 
-  String _formatDuration(int seconds) {
-    int minutes = seconds ~/ 60;
-    int remainingSeconds = seconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  Future<void> _openAppGallery() async {
+    try {
+      // Get the app's documents directory where we save photos
+      final appDir = await getApplicationDocumentsDirectory();
+      final appGalleryDir = Directory('${appDir.path}/chat_images');
+
+      // Check if directory exists
+      if (!await appGalleryDir.exists()) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No photos taken with this camera yet'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Get all image files from the app gallery
+      final imageFiles = appGalleryDir
+          .listSync()
+          .where((file) => file.path.toLowerCase().endsWith('.jpg') ||
+          file.path.toLowerCase().endsWith('.jpeg') ||
+          file.path.toLowerCase().endsWith('.png'))
+          .cast<File>()
+          .toList();
+
+      if (imageFiles.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No photos found in app gallery'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Sort by modification date (newest first)
+      imageFiles.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+
+      // Show gallery selection dialog
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Select Photo'),
+          content: Container(
+            width: double.maxFinite,
+            height: 400,
+            child: GridView.builder(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 4,
+                mainAxisSpacing: 4,
+              ),
+              itemCount: imageFiles.length,
+              itemBuilder: (context, index) {
+                final file = imageFiles[index];
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => PhotoEditScreen(
+                          imagePath: file.path,
+                          onImageSent: (caption, textOverlays, imageUrl) {
+                            widget.onImageCaptured(caption, textOverlays, imageUrl);
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(
+                        file,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: Colors.grey[300],
+                            child: Icon(Icons.broken_image),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      print('Error opening app gallery: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open gallery: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 
@@ -2988,6 +2924,356 @@ class VideoEditScreen extends StatefulWidget {
 
 class _VideoEditScreenState extends State<VideoEditScreen> {
   final TextEditingController _captionController = TextEditingController();
+  VideoPlayerController? _videoController;
+  bool _isVideoInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeVideo();
+  }
+
+  Future<void> _initializeVideo() async {
+    try {
+      print('🎥 Initializing video: ${widget.videoPath}');
+
+      final videoFile = File(widget.videoPath);
+
+      // Add delay to ensure file system is ready
+      await Future.delayed(Duration(milliseconds: 500));
+
+      if (!await videoFile.exists()) {
+        print('❌ File does not exist at path: ${widget.videoPath}');
+        if (mounted) _showSendWithoutPreviewDialog();
+        return;
+      }
+
+      // Check if device supports video decoding before attempting
+      // Skip video initialization entirely on problematic devices
+      if (Platform.isAndroid) {
+        try {
+          // Quick file validation only
+          final fileSize = await videoFile.length();
+          if (fileSize < 1024) {
+            throw Exception('Video file too small');
+          }
+
+          // For Android, bypass video preview entirely
+          print('⚠️ Android device detected - skipping video preview for compatibility');
+          if (mounted) _showSendWithoutPreviewDialog();
+          return;
+        } catch (e) {
+          print('❌ File validation failed: $e');
+          if (mounted) _showSendWithoutPreviewDialog();
+          return;
+        }
+      }
+
+      final fileSize = await videoFile.length();
+      print('📊 File size: ${fileSize / 1024 / 1024} MB');
+
+      if (fileSize == 0) {
+        print('❌ File is empty');
+        if (mounted) _showSendWithoutPreviewDialog();
+        return;
+      }
+
+      // Dispose any existing controller first
+      if (_videoController != null) {
+        try {
+          await _videoController!.dispose();
+        } catch (e) {
+          print('Error disposing previous controller: $e');
+        }
+        _videoController = null;
+      }
+
+      // Wait for file to be ready
+      await _waitForVideoFileReady(videoFile);
+
+      try {
+        // Initialize with software decoder fallback
+        // Add software decoder fallback for Android
+        if (Platform.isAndroid) {
+          _videoController = VideoPlayerController.file(
+            videoFile,
+            videoPlayerOptions: VideoPlayerOptions(
+              mixWithOthers: true,
+              allowBackgroundPlayback: false,
+              webOptions: VideoPlayerWebOptions(),
+            ),
+          );
+
+          // Set video format hint to help decoder selection
+          await _videoController!.setVolume(0.0); // Mute initially
+          await _videoController!.initialize();
+
+          // If initialization fails, retry with different settings
+          if (_videoController!.value.hasError) {
+            _videoController = VideoPlayerController.file(videoFile);
+            await _videoController!.initialize();
+          }
+        } else {
+          _videoController = VideoPlayerController.file(videoFile);
+          await _videoController!.initialize();
+        }
+
+        // Add listener for errors before initialization
+        _videoController!.addListener(() {
+          if (_videoController!.value.hasError) {
+            print('Video controller error: ${_videoController!.value.errorDescription}');
+          }
+        });
+
+        try {
+          await _videoController!.initialize().timeout(
+            Duration(seconds: 10),
+            onTimeout: () {
+              throw Exception('Video initialization timed out');
+            },
+          );
+        } catch (e) {
+          print('Video initialization failed: $e');
+
+          // Check for specific codec errors
+          if (e.toString().contains('0x80001001') ||
+              e.toString().contains('0xffffff92') ||
+              e.toString().contains('MediaCodec') ||
+              e.toString().contains('OMX.') ||
+              e.toString().contains('IllegalStateException') ||
+              e.toString().contains('Decoder failed')) {
+            print('❌ Video codec error detected - disposing controller');
+
+            // Properly dispose the failed controller
+            try {
+              await _videoController?.dispose();
+            } catch (disposeError) {
+              print('Error disposing failed controller: $disposeError');
+            }
+            _videoController = null;
+
+            throw Exception('Video codec not supported on this device');
+          }
+          throw e;
+        }
+
+        // Set looping and play once to ensure video is loaded
+        await _videoController!.setLooping(false);
+        await _videoController!.setVolume(1.0);
+
+        if (_videoController!.value.hasError) {
+          throw Exception('Video has error: ${_videoController!.value.errorDescription}');
+        }
+
+        if (!_videoController!.value.isInitialized) {
+          throw Exception('Video controller failed to initialize');
+        }
+
+        print('✅ Video initialized successfully');
+        print('📐 Video dimensions: ${_videoController!.value.size}');
+        print('⏱️ Video duration: ${_videoController!.value.duration}');
+
+        if (mounted) {
+          setState(() {
+            _isVideoInitialized = true;
+          });
+
+          // Auto-play once to load frames
+          _videoController!.play();
+          await Future.delayed(Duration(milliseconds: 100));
+          _videoController!.pause();
+          _videoController!.seekTo(Duration.zero);
+        }
+
+      } on Exception catch (e) {
+        print('❌ Video player error: $e');
+
+        // Check if it's a codec error
+        if (e.toString().contains('codec') ||
+            e.toString().contains('MediaCodec') ||
+            e.toString().contains('0x80001001') ||
+            e.toString().contains('0xffffff92')) {
+          print('❌ Video codec error detected - device may not support this video format');
+        }
+
+        if (mounted) {
+          _showSendWithoutPreviewDialog();
+        }
+      }
+
+    } catch (e) {
+      print('❌ General error: $e');
+      if (mounted) {
+        _showSendWithoutPreviewDialog();
+      }
+    }
+  }
+
+  Future<void> _waitForVideoFileReady(File videoFile) async {
+    int attempts = 0;
+    const maxAttempts = 15;
+
+    while (attempts < maxAttempts) {
+      try {
+        if (await videoFile.exists()) {
+          final size = await videoFile.length();
+          if (size > 1024) {
+            await videoFile.openRead(0, 1024).length;
+            print('✅ Video file is ready (${size} bytes)');
+            return;
+          }
+        }
+
+        await Future.delayed(Duration(milliseconds: 500));
+        attempts++;
+
+      } catch (e) {
+        await Future.delayed(Duration(milliseconds: 500));
+        attempts++;
+      }
+    }
+
+    throw Exception('Video file not ready after ${maxAttempts} attempts');
+  }
+
+  void _showSendWithoutPreviewDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Video Codec Issue'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('This device cannot preview this video format.'),
+            SizedBox(height: 8),
+            Text(
+              'Common causes:\n• Unsupported codec (H.264/H.265)\n• Hardware decoder limitations\n• Android MediaCodec issues',
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+            ),
+            SizedBox(height: 8),
+            Text('The video can still be sent and may work on other devices.'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => WillPopScope(
+                  onWillPop: () async => false,
+                  child: Center(
+                    child: Container(
+                      padding: EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text('Uploading video...'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+
+              try {
+                final videoFile = File(widget.videoPath);
+
+                if (!await videoFile.exists() || await videoFile.length() == 0) {
+                  throw Exception('Video file is not valid');
+                }
+
+                final videoBytes = await videoFile.readAsBytes();
+
+                String fileName = '${DateTime.now().millisecondsSinceEpoch}_video.mp4';
+                String storagePath = 'chat_videos/${FirebaseAuth.instance.currentUser!.uid}/$fileName';
+
+                final ref = FirebaseStorage.instance.ref().child(storagePath);
+                final uploadTask = ref.putData(videoBytes, SettableMetadata(
+                  contentType: 'video/mp4',
+                  customMetadata: {
+                    'duration': widget.recordingDuration.toString(),
+                  },
+                ));
+
+                final snapshot = await uploadTask;
+                final videoUrl = await snapshot.ref.getDownloadURL();
+
+                Navigator.pop(context);
+                Navigator.pop(context);
+
+                widget.onVideoSent('${_captionController.text.trim()}|$videoUrl|${widget.recordingDuration}');
+              } catch (e) {
+                Navigator.pop(context);
+                print('Upload error: $e');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to upload video: $e'),
+                    backgroundColor: Colors.red,
+                    duration: Duration(seconds: 3),
+                  ),
+                );
+              }
+            },
+            child: Text('Send Anyway'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    if (_videoController != null) {
+      try {
+        // Stop playback first
+        if (_videoController!.value.isPlaying) {
+          _videoController!.pause();
+        }
+
+        // Remove listeners
+        _videoController!.removeListener(() {});
+
+        // Dispose controller
+        _videoController!.dispose();
+      } catch (e) {
+        print('Error disposing video controller: $e');
+        // Force dispose even if there's an error
+        try {
+          _videoController = null;
+        } catch (e2) {
+          print('Error nullifying controller: $e2');
+        }
+      } finally {
+        _videoController = null;
+      }
+    }
+    _captionController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3005,20 +3291,73 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
         children: [
           Expanded(
             child: Container(
-              color: Colors.grey[800],
-              child: Center(
+              color: Colors.black,
+              child: _isVideoInitialized && _videoController != null && !_videoController!.value.hasError
+                  ? Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    height: double.infinity,
+                    child: AspectRatio(
+                      aspectRatio: _videoController!.value.aspectRatio > 0
+                          ? _videoController!.value.aspectRatio
+                          : 16/9,
+                      child: VideoPlayer(_videoController!),
+                    ),
+                  ),
+                  // Play/Pause button overlay
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        if (_videoController!.value.isPlaying) {
+                          _videoController!.pause();
+                        } else {
+                          _videoController!.play();
+                        }
+                      });
+                    },
+                    child: Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        _videoController!.value.isPlaying
+                            ? Icons.pause
+                            : Icons.play_arrow,
+                        color: Colors.white,
+                        size: 30,
+                      ),
+                    ),
+                  ),
+                  // Video position indicator
+                  Positioned(
+                    bottom: 10,
+                    left: 10,
+                    right: 10,
+                    child: LinearProgressIndicator(
+                      value: _videoController!.value.position.inMilliseconds > 0
+                          ? _videoController!.value.position.inMilliseconds /
+                          _videoController!.value.duration.inMilliseconds
+                          : 0.0,
+                      backgroundColor: Colors.white.withOpacity(0.3),
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                ],
+              )
+                  : Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(
-                      Icons.play_circle_filled,
-                      size: 100,
-                      color: Colors.white,
-                    ),
+                    CircularProgressIndicator(color: Colors.white),
                     SizedBox(height: 20),
                     Text(
-                      'Recorded Video (${widget.recordingDuration}s)',
-                      style: TextStyle(color: Colors.white, fontSize: 18),
+                      'Loading video...',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
                     ),
                   ],
                 ),
@@ -3058,10 +3397,63 @@ class _VideoEditScreenState extends State<VideoEditScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         String caption = _captionController.text.trim();
-                        Navigator.pop(context);
-                        widget.onVideoSent(caption.isNotEmpty ? caption : '🎥 Video');
+
+                        // Show loading dialog
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (context) => Center(
+                            child: Container(
+                              padding: EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  CircularProgressIndicator(),
+                                  SizedBox(height: 16),
+                                  Text('Uploading video...'),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+
+                        try {
+                          // Upload video to Firebase Storage
+                          final videoFile = File(widget.videoPath);
+                          final videoBytes = await videoFile.readAsBytes();
+
+                          String fileName = '${DateTime.now().millisecondsSinceEpoch}_video.mp4';
+                          String storagePath = 'chat_videos/${FirebaseAuth.instance.currentUser!.uid}/$fileName';
+
+                          final ref = FirebaseStorage.instance.ref().child(storagePath);
+                          final uploadTask = ref.putData(videoBytes, SettableMetadata(
+                            contentType: 'video/mp4',
+                            customMetadata: {
+                              'duration': widget.recordingDuration.toString(),
+                            },
+                          ));
+
+                          final snapshot = await uploadTask;
+                          final videoUrl = await snapshot.ref.getDownloadURL();
+
+                          Navigator.pop(context); // Close loading dialog
+                          Navigator.pop(context); // Close video edit screen
+
+                          // Pass the video URL along with caption
+                          widget.onVideoSent('$caption|$videoUrl|${widget.recordingDuration}');
+                        } catch (e) {
+                          Navigator.pop(context); // Close loading dialog
+                          Navigator.pop(context); // Close video edit screen
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to upload video: $e')),
+                          );
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
