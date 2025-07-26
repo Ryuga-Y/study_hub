@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "my.tarc.edu.study_hub"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -25,7 +25,7 @@ android {
     defaultConfig {
         applicationId = "my.tarc.edu.study_hub"
         minSdk = 23  // Required for Firebase Auth 23.2.0
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
