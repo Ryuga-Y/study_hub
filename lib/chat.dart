@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';  // ADD THIS
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:camera/camera.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 import 'video_call_screen.dart';
 import 'incoming_call_screen.dart';
+import 'dart:io';
 
-void main() {
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(MyApp());
 }
-
 // Text Overlay Model
 class TextOverlay {
   final String text;
@@ -60,7 +67,7 @@ class TextOverlay {
 }
 
 class ChatMessage {
-  final String id;           // ADD THIS
+  final String id;
   final String text;
   final bool isMe;
   final DateTime timestamp;
@@ -69,7 +76,7 @@ class ChatMessage {
   final int? videoDuration;
 
   ChatMessage({
-    required this.id,        // ADD THIS
+    required this.id,
     required this.text,
     required this.isMe,
     required this.timestamp,
@@ -78,7 +85,6 @@ class ChatMessage {
     this.videoDuration,
   });
 
-  // ADD THIS METHOD
   factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return ChatMessage(
@@ -121,15 +127,13 @@ class _ChatContactPageState extends State<ChatContactPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // ADD THE INITSTATE METHOD HERE
   @override
   void initState() {
     super.initState();
-    _listenForIncomingCalls();  // This listens for incoming video calls
+    _listenForIncomingCalls();
     _loadContacts();
   }
 
-  // ADD THIS METHOD RIGHT AFTER initState
   void _listenForIncomingCalls() {
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
@@ -153,13 +157,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
     });
   }
 
-  // ADD THIS METHOD - Loads contacts from Firebase users collection
   Future<void> _loadContacts() async {
     try {
       final currentUserId = _auth.currentUser?.uid;
       if (currentUserId == null) return;
 
-      // Get all users except current user
       final QuerySnapshot usersSnapshot = await _firestore
           .collection('users')
           .where('uid', isNotEqualTo: currentUserId)
@@ -171,7 +173,7 @@ class _ChatContactPageState extends State<ChatContactPage> {
           return {
             'userId': doc.id,
             'name': data['fullName'] ?? 'Unknown User',
-            'isOnline': false,  // You can implement online status later
+            'isOnline': false,
             'lastSeen': 'Offline',
             'message': 'Start a conversation',
             'unread': 0,
@@ -187,13 +189,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
     final currentUserId = _auth.currentUser?.uid ?? '';
     if (contactUserId == null) return '';
 
-    // Sort user IDs to ensure consistent chat ID regardless of who initiates
     final userIds = [currentUserId, contactUserId];
     userIds.sort();
     return '${userIds[0]}_${userIds[1]}';
   }
 
-  // ADD THIS METHOD AFTER _listenForIncomingCalls
   void _showIncomingCallDialog(String callId, String callerId, String callerName) {
     print('📞 Showing incoming call from: $callerName (ID: $callerId)');
     Navigator.push(
@@ -254,15 +254,11 @@ class _ChatContactPageState extends State<ChatContactPage> {
       actions: [
         IconButton(
           icon: Icon(Icons.search, color: Colors.black),
-          onPressed: () {
-            // Search functionality
-          },
+          onPressed: () {},
         ),
         IconButton(
           icon: Icon(Icons.more_vert, color: Colors.black),
-          onPressed: () {
-            // More options
-          },
+          onPressed: () {},
         ),
       ],
     );
@@ -315,8 +311,8 @@ class _ChatContactPageState extends State<ChatContactPage> {
                     contactName: contacts[index]['name'],
                     isOnline: contacts[index]['isOnline'],
                     lastSeen: contacts[index]['lastSeen'],
-                    chatId: _generateChatId(contacts[index]['userId']),  // ADD THIS
-                    contactId: contacts[index]['userId'] ?? '',          // ADD THIS
+                    chatId: _generateChatId(contacts[index]['userId']),
+                    contactId: contacts[index]['userId'] ?? '',
                   ),
                 ),
               );
@@ -543,7 +539,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         IconButton(
           icon: Icon(Icons.videocam, color: Colors.blue),
-          onPressed: () => _initiateVideoCall(),  // CHANGE THIS
+          onPressed: () => _initiateVideoCall(),
         ),
         IconButton(
           icon: Icon(Icons.more_vert, color: Colors.black),
@@ -669,7 +665,6 @@ class _ChatScreenState extends State<ChatScreen> {
         return _buildMessageBubble(_filteredMessages[index]);
       },
     );
-
   }
 
   Widget _buildMessageBubble(ChatMessage message) {
@@ -1058,8 +1053,6 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {
               if (_messageController.text.isNotEmpty) {
                 String currentText = _messageController.text;
-
-                // Use Flutter's built-in method to handle complex Unicode characters
                 final textSelection = _messageController.selection;
                 final newSelection = textSelection.copyWith(
                   baseOffset: textSelection.start,
@@ -1125,7 +1118,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text != null && text.trim().isNotEmpty) {
       setState(() {
         messages.add(ChatMessage(
-          id: DateTime.now().millisecondsSinceEpoch.toString(), // ADD THIS
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
           text: text,
           isMe: true,
           timestamp: DateTime.now(),
@@ -1141,7 +1134,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } else if (attachmentType != null) {
       setState(() {
         messages.add(ChatMessage(
-          id: DateTime.now().millisecondsSinceEpoch.toString(), // ADD THIS
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
           text: attachmentType == 'image' ? "📷 Photo" :
           attachmentType == 'video' ? "🎥 Video" : "📎 File sent",
           isMe: true,
@@ -1250,10 +1243,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (context) => CameraScreen(
-                              onImageCaptured: (caption, textOverlays) {
-                                // Check if it's a video or image based on the caption content
+                              onImageCaptured: (caption, textOverlays, imageUrl) {
                                 if (caption.contains('🎥') || caption.toLowerCase().contains('video')) {
-                                  // Extract duration if it's in the text
                                   int? duration;
                                   RegExp durationRegex = RegExp(r'\((\d+)s\)');
                                   Match? match = durationRegex.firstMatch(caption);
@@ -1266,7 +1257,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                     SnackBar(content: Text('Video sent!')),
                                   );
                                 } else {
-                                  // Handle image
                                   if (caption.isNotEmpty) {
                                     _sendMessage(text: caption, attachmentType: 'image', textOverlays: textOverlays);
                                   } else {
@@ -1361,7 +1351,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     Future.delayed(Duration(seconds: 2), () {
       Navigator.pop(context);
-      _sendMessage(attachmentType: 'image');
+      _sendMessage(text: "📷 Photo from gallery", attachmentType: 'image');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Image selected from gallery!'),
@@ -1450,7 +1440,6 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () async {
               Navigator.pop(context);
 
-              // Create call document in Firebase first
               final callId = await _createOutgoingCall();
               if (callId != null) {
                 Navigator.push(
@@ -1578,99 +1567,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
-
-  Widget _buildVideoCallContent() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          CircleAvatar(
-            radius: 60,
-            backgroundColor: Colors.grey[300],
-            child: Text(
-              widget.contactName[0],
-              style: TextStyle(
-                fontSize: 40,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ),
-          SizedBox(height: 20),
-          Text(
-            widget.contactName,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          SizedBox(height: 10),
-          Text(
-            "Calling...",
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 16,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVideoCallControls() {
-    return Positioned(
-      bottom: 50,
-      left: 0,
-      right: 0,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              shape: BoxShape.circle,
-            ),
-            child: IconButton(
-              icon: Icon(Icons.mic_off, color: Colors.white, size: 30),
-              onPressed: () {},
-            ),
-          ),
-          Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: Colors.red,
-              shape: BoxShape.circle,
-            ),
-            child: IconButton(
-              icon: Icon(Icons.call_end, color: Colors.white, size: 30),
-              onPressed: () {
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Call ended")),
-                );
-              },
-            ),
-          ),
-          Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              shape: BoxShape.circle,
-            ),
-            child: IconButton(
-              icon: Icon(Icons.videocam_off, color: Colors.white, size: 30),
-              onPressed: () {},
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class ImageViewScreen extends StatelessWidget {
@@ -1706,9 +1602,7 @@ class ImageViewScreen extends StatelessWidget {
       actions: [
         IconButton(
           icon: Icon(Icons.more_vert, color: Colors.white),
-          onPressed: () {
-            // Show options like save, share, etc.
-          },
+          onPressed: () {},
         ),
       ],
     );
@@ -1822,7 +1716,7 @@ class ImageViewScreen extends StatelessWidget {
 }
 
 class CameraScreen extends StatefulWidget {
-  final Function(String, List<TextOverlay>?) onImageCaptured;
+  final Function(String, List<TextOverlay>?, String?) onImageCaptured;
 
   CameraScreen({required this.onImageCaptured});
 
@@ -1831,8 +1725,11 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMixin {
+  CameraController? _controller;
+  Future<void>? _initializeControllerFuture;
   bool _isFlashOn = false;
   bool _isFrontCamera = false;
+  List<CameraDescription>? _cameras;
 
   // Video recording variables
   late AnimationController _progressController;
@@ -1848,20 +1745,163 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
       vsync: this,
       duration: Duration(seconds: _maxRecordingDuration),
     );
+    _initializeCamera();
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      // Request camera permission first
+      final cameraPermission = await Permission.camera.request();
+      final microphonePermission = await Permission.microphone.request();
+
+      if (cameraPermission != PermissionStatus.granted) {
+        throw Exception('Camera permission denied');
+      }
+
+      // Shorter delay - don't over-delay
+      await Future.delayed(Duration(milliseconds: 300));
+
+      // Get available cameras - simpler approach
+      _cameras = await availableCameras();
+
+      if (_cameras == null || _cameras!.isEmpty) {
+        throw Exception('No cameras detected on this device');
+      }
+
+      print('Available cameras: ${_cameras?.length ?? 0}');
+
+      if (_cameras == null || _cameras!.isEmpty) {
+        throw Exception('No cameras detected on this device');
+      }
+
+      // Find the right camera
+      CameraDescription selectedCamera;
+      if (_isFrontCamera) {
+        selectedCamera = _cameras!.firstWhere(
+              (camera) => camera.lensDirection == CameraLensDirection.front,
+          orElse: () => _cameras!.first,
+        );
+      } else {
+        selectedCamera = _cameras!.firstWhere(
+              (camera) => camera.lensDirection == CameraLensDirection.back,
+          orElse: () => _cameras!.first,
+        );
+      }
+
+      // Dispose previous controller if exists
+      if (_controller != null) {
+        try {
+          if (_controller!.value.isInitialized) {
+            await _controller!.dispose();
+          }
+        } catch (e) {
+          print('Error disposing previous controller: $e');
+        }
+        _controller = null;
+      }
+
+      // Create new controller with retry
+      _controller = CameraController(
+        selectedCamera,
+        ResolutionPreset.medium,
+        enableAudio: true,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+      // Initialize with shorter timeout and better error handling
+      _initializeControllerFuture = _controller!.initialize().timeout(
+        Duration(seconds: 5),
+        onTimeout: () {
+          throw Exception('Camera initialization timed out');
+        },
+      );
+
+      await _initializeControllerFuture;
+
+      // Ensure we're still mounted before setting state
+      if (mounted) {
+        setState(() {});
+      }
+
+      print('Camera initialized successfully');
+    } catch (e) {
+      print('Error initializing camera: $e');
+      if (mounted) {
+        String errorMessage;
+        if (e.toString().contains('timed out')) {
+          errorMessage = 'Camera is taking too long to start. Please try again.';
+        } else if (e.toString().contains('No cameras')) {
+          errorMessage = 'No cameras found on this device.';
+        } else {
+          errorMessage = 'Camera failed to start. Please restart the app.';
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Close',
+              textColor: Colors.white,
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  void deactivate() {
+    // Don't dispose here, only in dispose()
+    super.deactivate();
   }
 
   @override
   void dispose() {
-    _progressController.dispose();
     _recordingTimer?.cancel();
+    _progressController.dispose();
+    _disposeCamera();
     super.dispose();
+  }
+
+  Future<void> _disposeCamera() async {
+    try {
+      // Cancel any pending initialization
+      _initializeControllerFuture = null;
+
+      if (_controller != null) {
+        // Stop recording if active
+        if (_isRecording) {
+          try {
+            await _controller!.stopVideoRecording();
+          } catch (e) {
+            print('Error stopping recording during dispose: $e');
+          }
+        }
+
+        // Dispose the controller
+        try {
+          await _controller!.dispose();
+        } catch (e) {
+          print('Error disposing controller: $e');
+        }
+
+        _controller = null;
+      }
+    } catch (e) {
+      print('Error in _disposeCamera: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      extendBody: true,
+      extendBodyBehindAppBar: true,
       body: Stack(
+        fit: StackFit.expand,
         children: [
           _buildCameraPreview(),
           _buildTopControls(),
@@ -1958,35 +1998,88 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
               ),
             ),
         ],
-      )
+      ),
     );
   }
 
   Widget _buildCameraPreview() {
-    return Container(
-      width: double.infinity,
-      height: double.infinity,
-      color: Colors.grey[800],
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.camera_alt,
-              size: 100,
-              color: Colors.white54,
-            ),
-            SizedBox(height: 20),
-            Text(
-              _isFrontCamera ? "Front Camera" : "Back Camera",
-              style: TextStyle(
-                color: Colors.white54,
-                fontSize: 18,
-              ),
-            ),
-          ],
+    if (_controller == null || _initializeControllerFuture == null) {
+      return Container(
+        width: double.infinity,
+        height: double.infinity,
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Colors.white),
+              SizedBox(height: 16),
+              Text('Initializing camera...', style: TextStyle(color: Colors.white)),
+            ],
+          ),
         ),
-      ),
+      );
+    }
+
+    return FutureBuilder<void>(
+      future: _initializeControllerFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.done) {
+          if (snapshot.hasError) {
+            return Container(
+              width: double.infinity,
+              height: double.infinity,
+              color: Colors.black,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error, color: Colors.red, size: 64),
+                    SizedBox(height: 16),
+                    Text('Camera Error: ${snapshot.error}',
+                        style: TextStyle(color: Colors.white),
+                        textAlign: TextAlign.center),
+                    SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text('Go Back'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          if (_controller!.value.isInitialized) {
+            return SizedBox.expand(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _controller!.value.previewSize!.height,
+                  height: _controller!.value.previewSize!.width,
+                  child: CameraPreview(_controller!),
+                ),
+              ),
+            );
+          }
+        }
+
+        return Container(
+          width: double.infinity,
+          height: double.infinity,
+          color: Colors.black,
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(color: Colors.white),
+                SizedBox(height: 16),
+                Text('Loading camera...', style: TextStyle(color: Colors.white)),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -2011,12 +2104,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
                   color: Colors.white,
                   size: 30,
                 ),
-                onPressed: () {
-                  setState(() {
-                    _isFlashOn = !_isFlashOn;
-                  });
-                  HapticFeedback.lightImpact();
-                },
+                onPressed: _toggleFlash,
               ),
             ],
           ),
@@ -2027,7 +2115,7 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
 
   Widget _buildBottomControls() {
     return Positioned(
-      bottom: 50,
+      bottom: 30,
       left: 0,
       right: 0,
       child: SafeArea(
@@ -2047,78 +2135,6 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
     );
   }
 
-  void _startVideoRecording() {
-    if (_isRecording) return;
-
-    setState(() {
-      _isRecording = true;
-      _recordingDuration = 0;
-    });
-
-    // Start progress animation
-    _progressController.reset();
-    _progressController.forward();
-
-    // Start timer
-    _recordingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
-      setState(() {
-        _recordingDuration++;
-      });
-
-      if (_recordingDuration >= _maxRecordingDuration) {
-        _stopVideoRecording();
-      }
-    });
-
-    HapticFeedback.heavyImpact();
-    print('🎥 Started video recording');
-  }
-
-  void _stopVideoRecording() {
-    if (!_isRecording) return;
-
-    setState(() {
-      _isRecording = false;
-    });
-
-    _progressController.stop();
-    _recordingTimer?.cancel();
-
-    HapticFeedback.lightImpact();
-    print('🎥 Stopped video recording after $_recordingDuration seconds');
-
-    // Navigate to video editing screen
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => VideoEditScreen(
-          videoPath: "recorded_video_path",
-          recordingDuration: _recordingDuration,
-          onVideoSent: (caption) {
-            widget.onImageCaptured(caption, null);
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGalleryButton() {
-    return Container(
-      width: 50,
-      height: 50,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white, width: 2),
-        borderRadius: BorderRadius.circular(10),
-        color: Colors.white.withOpacity(0.1),
-      ),
-      child: Icon(
-        Icons.photo_library,
-        color: Colors.white,
-        size: 25,
-      ),
-    );
-  }
-
   Widget _buildCaptureButton() {
     return GestureDetector(
       onTap: () {
@@ -2133,13 +2149,13 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
         _stopVideoRecording();
       },
       child: Container(
-        width: 80,
-        height: 80,
+        width: 70,
+        height: 70,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
               color: _isRecording ? Colors.red : Colors.white,
-              width: 4
+              width: 3
           ),
         ),
         child: Container(
@@ -2163,14 +2179,26 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
     );
   }
 
+  Widget _buildGalleryButton() {
+    return Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.white, width: 2),
+        borderRadius: BorderRadius.circular(10),
+        color: Colors.white.withOpacity(0.1),
+      ),
+      child: Icon(
+        Icons.photo_library,
+        color: Colors.white,
+        size: 25,
+      ),
+    );
+  }
+
   Widget _buildCameraSwitchButton() {
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          _isFrontCamera = !_isFrontCamera;
-        });
-        HapticFeedback.lightImpact();
-      },
+      onTap: _switchCamera,
       child: Container(
         width: 50,
         height: 50,
@@ -2188,91 +2216,235 @@ class _CameraScreenState extends State<CameraScreen> with TickerProviderStateMix
     );
   }
 
+  Widget _buildFocusFrame() {
+    return Center(
+      child: Container(
+        width: 120,
+        height: 120,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withOpacity(0.5),
+            width: 2,
+          ),
+        ),
+        child: Center(
+          child: Icon(
+            Icons.add,
+            color: Colors.white.withOpacity(0.7),
+            size: 40,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _capturePhoto() async {
+    try {
+      // Check if controller is initialized
+      if (_controller == null || !_controller!.value.isInitialized) {
+        print('Camera not initialized');
+        return;
+      }
+
+      await _initializeControllerFuture;
+
+      HapticFeedback.heavyImpact();
+
+      // Flash effect
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: Colors.white,
+        builder: (context) => Container(),
+      );
+
+      await Future.delayed(Duration(milliseconds: 100));
+      if (mounted) Navigator.pop(context);
+
+      final image = await _controller!.takePicture();
+
+      // Store image path before navigation
+      final imagePath = image.path;
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PhotoEditScreen(
+              imagePath: imagePath,
+              onImageSent: (caption, textOverlays, imageUrl) {
+                widget.onImageCaptured(caption, textOverlays, imageUrl);
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error capturing photo: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to capture photo')),
+        );
+      }
+    }
+  }
+
+  Future<void> _startVideoRecording() async {
+    if (_isRecording || _controller == null) return;
+
+    try {
+      await _initializeControllerFuture;
+
+      setState(() {
+        _isRecording = true;
+        _recordingDuration = 0;
+      });
+
+      // Start progress animation
+      _progressController.reset();
+      _progressController.forward();
+
+      // Start timer
+      _recordingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+        setState(() {
+          _recordingDuration++;
+        });
+
+        if (_recordingDuration >= _maxRecordingDuration) {
+          _stopVideoRecording();
+        }
+      });
+
+      await _controller!.startVideoRecording();
+      HapticFeedback.heavyImpact();
+      print('🎥 Started video recording');
+    } catch (e) {
+      print('Error starting video recording: $e');
+      setState(() {
+        _isRecording = false;
+      });
+    }
+  }
+
+  Future<void> _stopVideoRecording() async {
+    if (!_isRecording || _controller == null) return;
+
+    try {
+      setState(() {
+        _isRecording = false;
+      });
+
+      _progressController.stop();
+      _recordingTimer?.cancel();
+
+      final video = await _controller!.stopVideoRecording();
+      HapticFeedback.lightImpact();
+      print('🎥 Stopped video recording after $_recordingDuration seconds');
+
+      // Navigate to video editing screen
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => VideoEditScreen(
+            videoPath: video.path,
+            recordingDuration: _recordingDuration,
+            onVideoSent: (caption) {
+              widget.onImageCaptured(caption, null, null);
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      print('Error stopping video recording: $e');
+    }
+  }
+
+  Future<void> _toggleFlash() async {
+    if (_controller == null) return;
+
+    try {
+      setState(() {
+        _isFlashOn = !_isFlashOn;
+      });
+
+      await _controller!.setFlashMode(
+          _isFlashOn ? FlashMode.torch : FlashMode.off
+      );
+      HapticFeedback.lightImpact();
+    } catch (e) {
+      print('Error toggling flash: $e');
+    }
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameras == null || _cameras!.length < 2) return;
+
+    try {
+      setState(() {
+        _isFrontCamera = !_isFrontCamera;
+      });
+
+      // Proper disposal
+      if (_controller != null) {
+        if (_controller!.value.isInitialized) {
+          await _controller!.dispose();
+        }
+        _controller = null;
+      }
+
+      // Find the right camera
+      CameraDescription selectedCamera;
+      if (_isFrontCamera) {
+        selectedCamera = _cameras!.firstWhere(
+              (camera) => camera.lensDirection == CameraLensDirection.front,
+          orElse: () => _cameras!.first,
+        );
+      } else {
+        selectedCamera = _cameras!.firstWhere(
+              (camera) => camera.lensDirection == CameraLensDirection.back,
+          orElse: () => _cameras!.first,
+        );
+      }
+
+      _controller = CameraController(
+        selectedCamera,
+        ResolutionPreset.medium,
+        enableAudio: true,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      _initializeControllerFuture = _controller!.initialize();
+      await _initializeControllerFuture;
+
+      if (mounted) {
+        setState(() {});
+      } else {
+        // Clean up if widget is unmounted
+        _disposeCamera();
+      }
+
+      HapticFeedback.lightImpact();
+    } catch (e) {
+      print('Error switching camera: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to switch camera: $e')),
+        );
+      }
+    }
+  }
+
   String _formatDuration(int seconds) {
     int minutes = seconds ~/ 60;
     int remainingSeconds = seconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
-
-  Widget _buildFocusFrame() {
-    return Center(
-      child: Container(
-        width: 200,
-        height: 200,
-        child: Stack(
-          children: [
-            _buildCorner(0, 0, true, true),
-            _buildCorner(0, null, true, false),
-            _buildCorner(null, 0, false, true),
-            _buildCorner(null, null, false, false),
-            Center(
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCorner(double? top, double? bottom, bool left, bool isTop) {
-    return Positioned(
-      top: top,
-      bottom: bottom,
-      left: left ? 0 : null,
-      right: left ? null : 0,
-      child: Container(
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          border: Border(
-            top: isTop ? BorderSide(color: Colors.white, width: 2) : BorderSide.none,
-            bottom: !isTop ? BorderSide(color: Colors.white, width: 2) : BorderSide.none,
-            left: left ? BorderSide(color: Colors.white, width: 2) : BorderSide.none,
-            right: !left ? BorderSide(color: Colors.white, width: 2) : BorderSide.none,
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _capturePhoto() {
-    HapticFeedback.heavyImpact();
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.white,
-      builder: (context) => Container(),
-    );
-
-    Future.delayed(Duration(milliseconds: 100), () {
-      Navigator.pop(context);
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => PhotoEditScreen(
-            imagePath: "captured_image_path",
-            onImageSent: (caption, textOverlays) {
-              widget.onImageCaptured(caption, textOverlays);
-            },
-          ),
-        ),
-      );
-    });
-  }
 }
 
 class PhotoEditScreen extends StatefulWidget {
   final String imagePath;
-  final Function(String, List<TextOverlay>?) onImageSent;
+  final Function(String, List<TextOverlay>?, String?) onImageSent;
 
   PhotoEditScreen({
     required this.imagePath,
@@ -2298,9 +2470,7 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
   void initState() {
     super.initState();
     _captionController.addListener(() {
-      setState(() {
-        // This will trigger a rebuild to update the helper text
-      });
+      setState(() {});
     });
   }
 
@@ -2332,7 +2502,7 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
             _buildCloseButton(),
             _buildAddTextButton(),
             if (_showTextInput) _buildTextInputOverlay(),
-            _buildBottomCaptionArea(),
+            if (!_showTextInput) _buildBottomCaptionArea(),  // Hide caption area when text input is shown
           ],
         ),
       ),
@@ -2345,29 +2515,38 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
       height: double.infinity,
       child: Stack(
         children: [
+          // Display the actual captured image
           Container(
             width: double.infinity,
             height: double.infinity,
-            color: Colors.grey[400],
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.image,
-                    size: 100,
-                    color: Colors.grey[600],
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    "Captured Photo",
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 16,
+            child: Image.file(
+              File(widget.imagePath),
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  color: Colors.grey[400],
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.error,
+                          size: 100,
+                          color: Colors.grey[600],
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          "Failed to load image",
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
           Container(
@@ -2512,7 +2691,7 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
 
   Widget _buildTextInputOverlay() {
     return Positioned(
-      top: 120,
+      top: MediaQuery.of(context).size.height * 0.25,  // Position it at 25% from top
       left: 20,
       right: 20,
       child: SafeArea(
@@ -2686,12 +2865,77 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
     );
   }
 
-  void _sendPhoto() {
+  void _sendPhoto() async {
     String caption = _captionController.text.trim();
-    Navigator.of(context).pop();
-    Future.delayed(Duration(milliseconds: 100), () {
-      widget.onImageSent(caption, _textOverlays.isNotEmpty ? _textOverlays : null);
-    });
+
+    // Show upload progress
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          padding: EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Uploading photo...'),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      // Upload image to Firebase Storage
+      String? imageUrl = await _uploadImageToStorage();
+      Navigator.pop(context); // Close loading dialog
+      Navigator.of(context).pop(); // Close photo edit screen
+
+      // Send with image URL
+      widget.onImageSent(caption, _textOverlays.isNotEmpty ? _textOverlays : null, imageUrl);
+    } catch (e) {
+      Navigator.pop(context); // Close loading dialog
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to upload photo: $e')),
+      );
+    }
+  }
+
+  Future<String?> _uploadImageToStorage() async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) return null;
+
+      // Create unique file name
+      String fileName = '${DateTime.now().millisecondsSinceEpoch}_chat_image.jpg';
+      String storagePath = 'chat_images/${currentUser.uid}/$fileName';
+
+      // Read image file
+      final imageFile = File(widget.imagePath);
+      final imageBytes = await imageFile.readAsBytes();
+
+      // Upload to Firebase Storage
+      final ref = FirebaseStorage.instance.ref().child(storagePath);
+      final uploadTask = ref.putData(imageBytes, SettableMetadata(
+        contentType: 'image/jpeg',
+        customMetadata: {
+          'uploadedBy': currentUser.uid,
+          'type': 'chat_image',
+        },
+      ));
+
+      final snapshot = await uploadTask;
+      return await snapshot.ref.getDownloadURL();
+    } catch (e) {
+      print('Error uploading image: $e');
+      throw e;
+    }
   }
 
   void _addTextOverlay() {
@@ -2727,7 +2971,6 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
   }
 }
 
-// ✅ PhotoEditScreen class ends above, VideoEditScreen starts below
 class VideoEditScreen extends StatefulWidget {
   final String videoPath;
   final int recordingDuration;

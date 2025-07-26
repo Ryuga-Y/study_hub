@@ -1748,7 +1748,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             child: Stack(
               children: [
-                // Show real image if URL exists, otherwise show placeholder
+                // ✅ SHOW ACTUAL IMAGE IF URL EXISTS
                 if (message.attachmentUrl != null && message.attachmentUrl!.isNotEmpty)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(10),
@@ -1771,7 +1771,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                             SizedBox(height: 8),
                             Text(
-                              'Photo',
+                              'Failed to load',
                               style: TextStyle(
                                 color: Colors.grey[600],
                                 fontSize: 12,
@@ -1783,6 +1783,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   )
                 else
+                // Fallback placeholder
                   Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -1852,7 +1853,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ],
     );
   }
-
   Widget _buildVideoMessage(ChatMessage message, bool isMe) {
     return Column(
       children: [
@@ -2394,7 +2394,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => CameraScreen(
-          onImageCaptured: (text, textOverlays) {
+          onImageCaptured: (text, textOverlays, imageUrl) {
             // Check if it's a video or image based on content
             if (text.contains('🎥') || text.toLowerCase().contains('video')) {
               // Extract duration if it's in the text
@@ -2408,14 +2408,14 @@ class _ChatScreenState extends State<ChatScreen> {
               _sendMessage(
                 text: text.isNotEmpty ? text : '🎥 Video',
                 attachmentType: 'video',
-                // Remove attachmentUrl to avoid network errors
+                attachmentUrl: imageUrl, // ✅ ADD THIS BACK
                 videoDuration: duration,
               );
             } else {
               _sendMessage(
                 text: text.isNotEmpty ? text : '📷 Photo',
                 attachmentType: 'image',
-                // Remove attachmentUrl to avoid network errors
+                attachmentUrl: imageUrl, // ✅ ADD THIS BACK
                 textOverlays: textOverlays,
               );
             }
@@ -2629,7 +2629,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // Real file picker for gallery images
   Future<void> _pickGalleryImage() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -2681,9 +2680,9 @@ class _ChatScreenState extends State<ChatScreen> {
         if (downloadUrl != null) {
           // Send message with image
           await _sendMessage(
-            text: '📷 Photo',
+            text: '📷 Photo from gallery',
             attachmentType: 'image',
-            attachmentUrl: downloadUrl,
+            attachmentUrl: downloadUrl, // ✅ ADD THIS BACK
           );
 
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2834,6 +2833,7 @@ class FullImageViewer extends StatelessWidget {
               ),
               child: Stack(
                 children: [
+                  // Display actual image if URL exists
                   if (imageUrl != null && imageUrl!.isNotEmpty)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
@@ -2852,13 +2852,13 @@ class FullImageViewer extends StatelessWidget {
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
-                                  Icons.image,
+                                  Icons.broken_image,
                                   size: 100,
                                   color: Colors.grey[600],
                                 ),
                                 SizedBox(height: 10),
                                 Text(
-                                  "Photo",
+                                  "Failed to load image",
                                   style: TextStyle(
                                     color: Colors.grey[600],
                                     fontSize: 16,
@@ -2871,6 +2871,7 @@ class FullImageViewer extends StatelessWidget {
                       ),
                     )
                   else
+                  // Fallback placeholder when no URL
                     Container(
                       color: Colors.grey[400],
                       child: Center(
@@ -2884,7 +2885,7 @@ class FullImageViewer extends StatelessWidget {
                             ),
                             SizedBox(height: 10),
                             Text(
-                              "Photo",
+                              "No image available",
                               style: TextStyle(
                                 color: Colors.grey[600],
                                 fontSize: 16,
