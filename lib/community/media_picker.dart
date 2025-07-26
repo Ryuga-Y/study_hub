@@ -142,25 +142,28 @@ class _MediaPickerState extends State<MediaPicker> {
   Widget _buildMediaButtons() {
     return Container(
       padding: EdgeInsets.symmetric(vertical: 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _buildMediaOption(
-            icon: Icons.photo_library,
-            label: 'Gallery',
-            onTap: () => _showMediaOptions(ImageSource.gallery),
-          ),
-          _buildMediaOption(
-            icon: Icons.camera_alt,
-            label: 'Camera',
-            onTap: () => _showMediaOptions(ImageSource.camera),
-          ),
-          _buildMediaOption(
-            icon: Icons.collections,
-            label: 'Multiple',
-            onTap: _pickMultipleImages,
-          ),
-        ],
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildMediaOption(
+              icon: Icons.photo_library,
+              label: 'Gallery',
+              onTap: () => _showMediaOptions(ImageSource.gallery),
+            ),
+            _buildMediaOption(
+              icon: Icons.camera_alt,
+              label: 'Camera',
+              onTap: () => _showMediaOptions(ImageSource.camera),
+            ),
+            _buildMediaOption(
+              icon: Icons.collections,
+              label: 'Multiple',
+              onTap: _pickMultipleImages,
+            ),
+          ],
+        ),
       ),
     );
   }

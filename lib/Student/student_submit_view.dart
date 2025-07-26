@@ -150,26 +150,35 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
               .get();
 
           if (evalDoc.exists) {
-            evaluation = evalDoc.data();
-            print('Found evaluation for submission');
+            final evalData = evalDoc.data()!;
 
-            // Load rubric if evaluation used one
-            if (evaluation!['rubricUsed'] == true) {
-              final rubricDoc = await FirebaseFirestore.instance
-                  .collection('organizations')
-                  .doc(widget.organizationCode)
-                  .collection('courses')
-                  .doc(widget.courseId)
-                  .collection('assignments')
-                  .doc(widget.assignmentId)
-                  .collection('rubric')
-                  .doc('main')
-                  .get();
+            // Only show evaluation if it's released
+            if (evalData['isReleased'] == true) {
+              evaluation = evalData;
+              print('Found released evaluation for submission');
 
-              if (rubricDoc.exists) {
-                rubric = rubricDoc.data();
-                print('Loaded rubric data');
+              // Load rubric if evaluation used one
+              if (evaluation!['rubricUsed'] == true) {
+                final rubricDoc = await FirebaseFirestore.instance
+                    .collection('organizations')
+                    .doc(widget.organizationCode)
+                    .collection('courses')
+                    .doc(widget.courseId)
+                    .collection('assignments')
+                    .doc(widget.assignmentId)
+                    .collection('rubric')
+                    .doc('main')
+                    .get();
+
+                if (rubricDoc.exists) {
+                  rubric = rubricDoc.data();
+                  print('Loaded rubric data');
+                }
               }
+            } else {
+              print('Evaluation exists but is not released (draft)');
+              // Don't set evaluation if it's a draft
+              evaluation = null;
             }
           }
         } catch (evalError) {
@@ -177,14 +186,17 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           // Continue without evaluation data
         }
 
-        // Also check if grade exists in submission document
-        if (latestSubmission!['grade'] != null && evaluation == null) {
+        // Also check if grade exists in submission document (for released evaluations)
+        if (latestSubmission!['grade'] != null &&
+            latestSubmission!['isReleased'] == true &&
+            evaluation == null) {
           // Create a synthetic evaluation object from submission data
           evaluation = {
             'grade': latestSubmission!['grade'],
             'letterGrade': latestSubmission!['letterGrade'],
             'feedback': latestSubmission!['feedback'],
             'evaluatedAt': latestSubmission!['gradedAt'] ?? latestSubmission!['submittedAt'],
+            'isReleased': true,
           };
         }
       } else {
@@ -337,7 +349,9 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
   }
 
   Widget _buildSubmissionContent() {
-    final isGraded = evaluation != null || latestSubmission!['grade'] != null;
+    final isGraded = evaluation != null || (latestSubmission!['grade'] != null && latestSubmission!['isReleased'] == true);
+    final isDraftEvaluation = latestSubmission!['evaluationIsDraft'] == true;
+    final hasEvaluation = latestSubmission!['hasEvaluation'] == true;
     final grade = latestSubmission!['grade'] ?? evaluation?['grade'];
     final letterGrade = latestSubmission!['letterGrade'] ?? evaluation?['letterGrade'];
     final maxPoints = widget.assignmentData['points'] ?? 100;
@@ -417,8 +431,58 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
           ),
           SizedBox(height: 16),
 
-          // Resubmit Option - Only if not graded
-          if (latestSubmission?['grade'] == null)
+          // Evaluation Status
+          if (hasEvaluation && isDraftEvaluation) ...[
+            // Draft evaluation - show pending status
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.blue[300]!),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.hourglass_top, color: Colors.blue[600], size: 32),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Evaluation In Progress',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Your lecturer has evaluated your submission but hasn\'t released the grade yet.',
+                          style: TextStyle(
+                            color: Colors.blue[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+          ],
+
+          // Resubmit Option - Only if not graded or not evaluated
+          if (!hasEvaluation && latestSubmission?['grade'] == null)
             Container(
               padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -475,7 +539,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
                   ),
                 ],
               ),
-            ) else
+            ) else if (isGraded)
             Container(
               padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -537,7 +601,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
             ),
           SizedBox(height: 16),
 
-          // Grade Card (if graded) - Enhanced with letter grade
+          // Grade Card (if graded and released)
           if (isGraded && grade != null)
             Container(
               padding: EdgeInsets.all(24),
@@ -639,7 +703,7 @@ class _StudentSubmissionViewState extends State<StudentSubmissionView> {
               ),
             ),
 
-          if (!isGraded)
+          if (!isGraded && !isDraftEvaluation)
             Container(
               padding: EdgeInsets.all(20),
               decoration: BoxDecoration(

@@ -6,6 +6,7 @@ import 'package:study_hub/community/post_card.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../community/bloc.dart';
 import '../community/models.dart';
+import 'edit_dialogs.dart';
 
 class PostScreen extends StatefulWidget {
   final Post post;
@@ -483,82 +484,9 @@ class _PostScreenState extends State<PostScreen> {
   }
 
   void _showEditPostDialog() {
-    final captionController = TextEditingController(text: widget.post.caption);
-    PostPrivacy selectedPrivacy = widget.post.privacy;
-
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text('Edit Post'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: captionController,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  hintText: 'Write a caption...',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              SizedBox(height: 16),
-              DropdownButtonFormField<PostPrivacy>(
-                value: selectedPrivacy,
-                decoration: InputDecoration(
-                  labelText: 'Privacy',
-                  border: OutlineInputBorder(),
-                ),
-                items: PostPrivacy.values.map((privacy) {
-                  return DropdownMenuItem(
-                    value: privacy,
-                    child: Row(
-                      children: [
-                        Icon(
-                          privacy == PostPrivacy.public
-                              ? Icons.public
-                              : privacy == PostPrivacy.friendsOnly
-                              ? Icons.people
-                              : Icons.lock,
-                          size: 20,
-                        ),
-                        SizedBox(width: 8),
-                        Text(privacy == PostPrivacy.public
-                            ? 'Public'
-                            : privacy == PostPrivacy.friendsOnly
-                            ? 'Friends Only'
-                            : 'Private'),
-                      ],
-                    ),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => selectedPrivacy = value);
-                  }
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                context.read<CommunityBloc>().add(UpdatePost(
-                  postId: widget.post.id,
-                  caption: captionController.text,
-                  privacy: selectedPrivacy,
-                ));
-                Navigator.pop(context);
-              },
-              child: Text('Update'),
-            ),
-          ],
-        ),
-      ),
+      builder: (context) => EnhancedEditPostDialog(post: widget.post),
     );
   }
 

@@ -208,7 +208,23 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
     return totalScore;
   }
 
-  Future<void> _saveEvaluation() async {
+  Future<void> _saveEvaluation({bool isDraft = true}) async {
+    // Check if evaluation is already released
+    if (existingEvaluation != null && existingEvaluation!['isReleased'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.lock, color: Colors.white),
+              SizedBox(width: 8),
+              Text('This evaluation has been returned and cannot be modified'),
+            ],
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     setState(() {
       isLoading = true;
     });
@@ -222,17 +238,10 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
       final percentage = (grade / totalPoints) * 100;
       final letterGrade = _calculateLetterGrade(percentage);
 
-      // Debug logging to check studentId
-      print('=== DEBUG EVALUATION SAVE ===');
-      print('Widget submissionData: ${widget.submissionData}');
-      print('StudentId from submissionData: ${widget.submissionData['studentId']}');
-      print('StudentName from submissionData: ${widget.submissionData['studentName']}');
-
       // Ensure we have a valid studentId
       final studentId = widget.submissionData['studentId']?.toString() ?? '';
       if (studentId.isEmpty) {
-        print('ERROR: StudentId is empty or null!');
-        // Try to fetch it from the submission document directly
+        // Try to fetch from submission document
         final submissionDoc = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(widget.organizationCode)
@@ -244,153 +253,91 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
             .doc(widget.submissionId)
             .get();
 
-        if (submissionDoc.exists) {
-          final submissionData = submissionDoc.data()!;
-          final fetchedStudentId = submissionData['studentId']?.toString() ?? '';
-          print('Fetched studentId from document: $fetchedStudentId');
-
-          if (fetchedStudentId.isEmpty) {
-            throw Exception('Cannot find studentId in submission document');
-          }
-
-          // Update the evaluation data with the fetched studentId
-          final evaluationData = {
-            'submissionId': widget.submissionId,
-            'studentId': fetchedStudentId, // Use fetched studentId
-            'studentName': submissionData['studentName'] ?? widget.submissionData['studentName'] ?? '',
-            'studentEmail': submissionData['studentEmail'] ?? widget.submissionData['studentEmail'] ?? '',
-            'assignmentId': widget.assignmentId,
-            'courseId': widget.courseId,
-            'evaluatorId': FirebaseAuth.instance.currentUser?.uid,
-            'evaluatedAt': FieldValue.serverTimestamp(),
-            'grade': grade,
-            'letterGrade': letterGrade,
-            'percentage': percentage,
-            'totalScore': totalScore,
-            'maxPoints': totalPoints,
-            'criteriaScores': criteriaScores,
-            'feedback': _feedbackController.text.trim(),
-            'privateNotes': _privateNotesController.text.trim(),
-            'rubricUsed': rubric != null,
-          };
-
-          print('Final evaluationData studentId: ${evaluationData['studentId']}');
-
-          // Save to evaluations subcollection
-          await FirebaseFirestore.instance
-              .collection('organizations')
-              .doc(widget.organizationCode)
-              .collection('courses')
-              .doc(widget.courseId)
-              .collection('assignments')
-              .doc(widget.assignmentId)
-              .collection('submissions')
-              .doc(widget.submissionId)
-              .collection('evaluations')
-              .doc('current')
-              .set(evaluationData);
-
-          // Update submission with grade, letter grade and feedback
-          await FirebaseFirestore.instance
-              .collection('organizations')
-              .doc(widget.organizationCode)
-              .collection('courses')
-              .doc(widget.courseId)
-              .collection('assignments')
-              .doc(widget.assignmentId)
-              .collection('submissions')
-              .doc(widget.submissionId)
-              .update({
-            'grade': grade,
-            'letterGrade': letterGrade,
-            'percentage': percentage,
-            'feedback': _feedbackController.text.trim(),
-            'gradedAt': FieldValue.serverTimestamp(),
-            'gradedBy': FirebaseAuth.instance.currentUser?.uid,
-            'status': 'completed',
-          });
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Evaluation saved successfully'),
-                backgroundColor: Colors.green,
-              ),
-            );
-
-            Navigator.pop(context, true);
-          }
-        } else {
+        if (!submissionDoc.exists) {
           throw Exception('Submission document not found');
         }
-      } else {
-        // StudentId is available, proceed normally
-        final evaluationData = {
-          'submissionId': widget.submissionId,
-          'studentId': studentId, // Use the validated studentId
-          'studentName': widget.submissionData['studentName']?.toString() ?? '',
-          'studentEmail': widget.submissionData['studentEmail']?.toString() ?? '',
-          'assignmentId': widget.assignmentId,
-          'courseId': widget.courseId,
-          'evaluatorId': FirebaseAuth.instance.currentUser?.uid,
-          'evaluatedAt': FieldValue.serverTimestamp(),
+      }
+
+      final evaluationData = {
+        'submissionId': widget.submissionId,
+        'studentId': studentId,
+        'studentName': widget.submissionData['studentName']?.toString() ?? '',
+        'studentEmail': widget.submissionData['studentEmail']?.toString() ?? '',
+        'assignmentId': widget.assignmentId,
+        'courseId': widget.courseId,
+        'evaluatorId': FirebaseAuth.instance.currentUser?.uid,
+        'evaluatedAt': FieldValue.serverTimestamp(),
+        'grade': grade,
+        'letterGrade': letterGrade,
+        'percentage': percentage,
+        'totalScore': totalScore,
+        'maxPoints': totalPoints,
+        'criteriaScores': criteriaScores,
+        'feedback': _feedbackController.text.trim(),
+        'privateNotes': _privateNotesController.text.trim(),
+        'rubricUsed': rubric != null,
+        'isDraft': isDraft,  // NEW: Track if evaluation is draft
+        'isReleased': !isDraft,  // NEW: Track if released to student
+        'releasedAt': isDraft ? null : FieldValue.serverTimestamp(),  // NEW: Track release time
+      };
+
+      // Save to evaluations subcollection
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .doc(widget.assignmentId)
+          .collection('submissions')
+          .doc(widget.submissionId)
+          .collection('evaluations')
+          .doc('current')
+          .set(evaluationData);
+
+      // Update submission - only update visible fields if not draft
+      final updateData = <String, dynamic>{
+        'gradedAt': FieldValue.serverTimestamp(),
+        'gradedBy': FirebaseAuth.instance.currentUser?.uid,
+        'status': isDraft ? 'evaluated_draft' : 'completed',
+        'hasEvaluation': true,
+        'evaluationIsDraft': isDraft,
+      };
+
+      // Only add grade data if not draft (released to student)
+      if (!isDraft) {
+        updateData.addAll({
           'grade': grade,
           'letterGrade': letterGrade,
           'percentage': percentage,
-          'totalScore': totalScore,
-          'maxPoints': totalPoints,
-          'criteriaScores': criteriaScores,
           'feedback': _feedbackController.text.trim(),
-          'privateNotes': _privateNotesController.text.trim(),
-          'rubricUsed': rubric != null,
-        };
-
-        print('Final evaluationData studentId: ${evaluationData['studentId']}');
-
-        // Save to evaluations subcollection
-        await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(widget.organizationCode)
-            .collection('courses')
-            .doc(widget.courseId)
-            .collection('assignments')
-            .doc(widget.assignmentId)
-            .collection('submissions')
-            .doc(widget.submissionId)
-            .collection('evaluations')
-            .doc('current')
-            .set(evaluationData);
-
-        // Update submission with grade, letter grade and feedback
-        await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(widget.organizationCode)
-            .collection('courses')
-            .doc(widget.courseId)
-            .collection('assignments')
-            .doc(widget.assignmentId)
-            .collection('submissions')
-            .doc(widget.submissionId)
-            .update({
-          'grade': grade,
-          'letterGrade': letterGrade,
-          'percentage': percentage,
-          'feedback': _feedbackController.text.trim(),
-          'gradedAt': FieldValue.serverTimestamp(),
-          'gradedBy': FirebaseAuth.instance.currentUser?.uid,
-          'status': 'completed',
+          'isReleased': true,
         });
+      }
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Evaluation saved successfully'),
-              backgroundColor: Colors.green,
-            ),
-          );
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .doc(widget.assignmentId)
+          .collection('submissions')
+          .doc(widget.submissionId)
+          .update(updateData);
 
-          Navigator.pop(context, true);
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isDraft
+                ? 'Evaluation saved as draft. Remember to return it to the student!'
+                : 'Evaluation saved and returned to student'),
+            backgroundColor: isDraft ? Colors.orange : Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+
+        Navigator.pop(context, true);
       }
     } catch (e) {
       print('Error saving evaluation: $e');
@@ -398,6 +345,190 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error saving evaluation: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _releaseEvaluation() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.send, color: Colors.green[600], size: 24),
+            SizedBox(width: 8),
+            Text('Return to Student'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to return this evaluation to the student?',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.blue[600], size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'Once returned:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  Text('• Student will see their grade and feedback',
+                      style: TextStyle(fontSize: 13, color: Colors.blue[700])),
+                  Text('• You can still edit the evaluation later',
+                      style: TextStyle(fontSize: 13, color: Colors.blue[700])),
+                  Text('• Student will receive a notification',
+                      style: TextStyle(fontSize: 13, color: Colors.blue[700])),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green[600],
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.send, size: 16, color: Colors.white),
+                SizedBox(width: 4),
+                Text('Return to Student', style: TextStyle(color: Colors.white)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      // Get current evaluation data
+      final evalDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .doc(widget.assignmentId)
+          .collection('submissions')
+          .doc(widget.submissionId)
+          .collection('evaluations')
+          .doc('current')
+          .get();
+
+      if (!evalDoc.exists) {
+        throw Exception('Evaluation not found');
+      }
+
+      final evalData = evalDoc.data()!;
+
+      // Update evaluation to released
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .doc(widget.assignmentId)
+          .collection('submissions')
+          .doc(widget.submissionId)
+          .collection('evaluations')
+          .doc('current')
+          .update({
+        'isDraft': false,
+        'isReleased': true,
+        'releasedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update submission with grade data
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('assignments')
+          .doc(widget.assignmentId)
+          .collection('submissions')
+          .doc(widget.submissionId)
+          .update({
+        'grade': evalData['grade'],
+        'letterGrade': evalData['letterGrade'],
+        'percentage': evalData['percentage'],
+        'feedback': evalData['feedback'],
+        'status': 'completed',
+        'isReleased': true,
+        'evaluationIsDraft': false,
+        'releasedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Text('Evaluation returned to student successfully'),
+              ],
+            ),
+            backgroundColor: Colors.green[600],
+          ),
+        );
+
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error releasing evaluation: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -435,6 +566,23 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
   }
 
   Future<void> _clearEvaluation() async {
+    // Check if evaluation is already released
+    if (existingEvaluation != null && existingEvaluation!['isReleased'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.lock, color: Colors.white),
+              SizedBox(width: 8),
+              Text('Cannot clear a returned evaluation'),
+            ],
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -632,16 +780,107 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          TextButton.icon(
-            onPressed: _saveEvaluation,
-            icon: Icon(Icons.save),
-            label: Text('Save Evaluation'),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.purple[600],
+          // Show different buttons based on evaluation state
+          if (existingEvaluation != null && existingEvaluation!['isReleased'] == true) ...[
+            // Evaluation is already released - show read-only indicator
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.green[100],
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.green[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.lock, size: 16, color: Colors.green[700]),
+                    SizedBox(width: 4),
+                    Text(
+                      'Returned',
+                      style: TextStyle(
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-          // Show clear button only if evaluation exists
-          if (existingEvaluation != null)
+          ] else if (existingEvaluation != null && existingEvaluation!['isDraft'] == true) ...[
+            // Draft exists - show Return button
+            TextButton.icon(
+              onPressed: _releaseEvaluation,
+              icon: Icon(Icons.send),
+              label: Text('Return to Student'),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.green[600],
+                backgroundColor: Colors.green[50],
+                padding: EdgeInsets.symmetric(horizontal: 12),
+              ),
+            ),
+            SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () => _saveEvaluation(isDraft: true),
+              icon: Icon(Icons.save),
+              label: Text('Update Draft'),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.orange[600],
+              ),
+            ),
+          ] else ...[
+            // No evaluation yet - show Save buttons
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'save_draft') {
+                  _saveEvaluation(isDraft: true);
+                } else if (value == 'save_return') {
+                  _saveEvaluation(isDraft: false);
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'save_draft',
+                  child: Row(
+                    children: [
+                      Icon(Icons.save, color: Colors.orange[600], size: 20),
+                      SizedBox(width: 8),
+                      Text('Save as Draft'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'save_return',
+                  child: Row(
+                    children: [
+                      Icon(Icons.send, color: Colors.green[600], size: 20),
+                      SizedBox(width: 8),
+                      Text('Save & Return'),
+                    ],
+                  ),
+                ),
+              ],
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.save, color: Colors.purple[600]),
+                    SizedBox(width: 4),
+                    Text(
+                      'Save',
+                      style: TextStyle(
+                        color: Colors.purple[600],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Icon(Icons.arrow_drop_down, color: Colors.purple[600]),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          // Only show clear option for non-released evaluations
+          if (existingEvaluation != null && existingEvaluation!['isReleased'] != true)
             PopupMenuButton<String>(
               onSelected: (value) {
                 if (value == 'clear') {
@@ -665,6 +904,31 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
       ),
       body: Column(
         children: [
+          // Show locked banner if evaluation is released
+          if (existingEvaluation != null && existingEvaluation!['isReleased'] == true)
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(12),
+              color: Colors.green[100],
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.lock, color: Colors.green[700], size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This evaluation has been returned to the student (Read-Only)',
+                      style: TextStyle(
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Student Info Header with Submission Timing Info
           Container(
             margin: EdgeInsets.all(16),
@@ -869,9 +1133,9 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
     return Container(
       padding: EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -915,6 +1179,8 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
   }
 
   Widget _buildRubricTab() {
+    final isReleased = existingEvaluation != null && existingEvaluation!['isReleased'] == true;
+
     if (rubric == null) {
       return Center(
         child: Column(
@@ -941,14 +1207,56 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
       child: Column(
-        children: criteria.map((criterion) {
-          return _buildCriterionEvaluation(criterion);
-        }).toList(),
+        children: [
+          // Show lock banner if evaluation is released
+          if (isReleased) ...[
+            Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green[300]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.lock, color: Colors.green[600]),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Evaluation Locked',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[700],
+                          ),
+                        ),
+                        Text(
+                          'This evaluation has been returned to the student and cannot be modified.',
+                          style: TextStyle(
+                            color: Colors.green[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+          ],
+          // Show rubric criteria
+          ...criteria.map((criterion) {
+            return _buildCriterionEvaluation(criterion, isReadOnly: isReleased);
+          }).toList(),
+        ],
       ),
     );
   }
 
-  Widget _buildCriterionEvaluation(Map<String, dynamic> criterion) {
+  Widget _buildCriterionEvaluation(Map<String, dynamic> criterion, {bool isReadOnly = false}) {
     final criterionId = criterion['id'];
     final levels = criterion['levels'] as List;
     final selectedLevel = criteriaScores[criterionId];
@@ -1022,7 +1330,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
               return Container(
                 margin: EdgeInsets.only(bottom: 8),
                 child: InkWell(
-                  onTap: () {
+                  onTap: isReadOnly ? null : () {
                     setState(() {
                       criteriaScores[criterionId] = {
                         'levelId': level['name'],
@@ -1034,10 +1342,14 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                   child: Container(
                     padding: EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: isSelected ? Colors.purple[50] : Colors.grey[50],
+                      color: isSelected
+                          ? (isReadOnly ? Colors.green[50] : Colors.purple[50])
+                          : Colors.grey[50],
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: isSelected ? Colors.purple[400]! : Colors.grey[300]!,
+                        color: isSelected
+                            ? (isReadOnly ? Colors.green[400]! : Colors.purple[400]!)
+                            : Colors.grey[300]!,
                         width: isSelected ? 2 : 1,
                       ),
                     ),
@@ -1046,7 +1358,9 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                         Radio<String>(
                           value: level['name'],
                           groupValue: selectedLevel?['levelId'],
-                          onChanged: (value) {
+                          onChanged: (existingEvaluation != null && existingEvaluation!['isReleased'] == true)
+                              ? null  // This disables the radio button
+                              : (value) {
                             setState(() {
                               criteriaScores[criterionId] = {
                                 'levelId': value,
@@ -1066,14 +1380,18 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                                     level['name'] ?? 'Level',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      color: isSelected ? Colors.purple[700] : null,
+                                      color: isSelected
+                                          ? (isReadOnly ? Colors.green[700] : Colors.purple[700])
+                                          : null,
                                     ),
                                   ),
                                   SizedBox(width: 8),
                                   Container(
                                     padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: isSelected ? Colors.purple[400] : Colors.grey[400],
+                                      color: isSelected
+                                          ? (isReadOnly ? Colors.green[400] : Colors.purple[400])
+                                          : Colors.grey[400],
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Text(
@@ -1115,11 +1433,52 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
   }
 
   Widget _buildFeedbackTab() {
+    final isReleased = existingEvaluation != null && existingEvaluation!['isReleased'] == true;
+
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Show lock banner if evaluation is released
+          if (isReleased) ...[
+            Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green[300]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.lock, color: Colors.green[600]),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Feedback Locked',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[700],
+                          ),
+                        ),
+                        Text(
+                          'This evaluation has been returned to the student and cannot be modified.',
+                          style: TextStyle(
+                            color: Colors.green[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+          ],
           // Student Feedback
           Container(
             padding: EdgeInsets.all(20),
@@ -1148,21 +1507,49 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    if (isReleased) ...[
+                      SizedBox(width: 8),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green[100],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Visible to Student',
+                          style: TextStyle(
+                            color: Colors.green[700],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 SizedBox(height: 16),
                 TextField(
                   controller: _feedbackController,
                   maxLines: 6,
+                  readOnly: isReleased,
                   decoration: InputDecoration(
-                    hintText: 'Provide constructive feedback for the student...',
+                    hintText: isReleased
+                        ? 'Feedback has been sent to student'
+                        : 'Provide constructive feedback for the student...',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.blue[400]!, width: 2),
+                      borderSide: BorderSide(
+                          color: isReleased ? Colors.green[400]! : Colors.blue[400]!,
+                          width: 2
+                      ),
                     ),
+                    filled: isReleased,
+                    fillColor: isReleased ? Colors.grey[100] : null,
+                  ),
+                  style: TextStyle(
+                    color: isReleased ? Colors.grey[700] : null,
                   ),
                 ),
               ],
@@ -1219,15 +1606,26 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
                 TextField(
                   controller: _privateNotesController,
                   maxLines: 4,
+                  readOnly: isReleased,
                   decoration: InputDecoration(
-                    hintText: 'Notes only visible to Lecturer...',
-                       border: OutlineInputBorder(
+                    hintText: isReleased
+                        ? 'Private notes (locked)'
+                        : 'Notes only visible to Lecturer...',
+                    border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.orange[400]!, width: 2),
+                      borderSide: BorderSide(
+                          color: isReleased ? Colors.green[400]! : Colors.orange[400]!,
+                          width: 2
+                      ),
                     ),
+                    filled: isReleased,
+                    fillColor: isReleased ? Colors.grey[100] : null,
+                  ),
+                  style: TextStyle(
+                    color: isReleased ? Colors.grey[700] : null,
                   ),
                 ),
               ],

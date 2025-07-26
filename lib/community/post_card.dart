@@ -7,6 +7,7 @@ import 'package:study_hub/community/share_modal.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../community/models.dart';
 import '../community/bloc.dart';
+import 'edit_dialogs.dart';
 
 
 class PostCard extends StatefulWidget {
@@ -397,7 +398,7 @@ class _PostCardState extends State<PostCard> {
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_horiz, color: Colors.grey[700]),
                   itemBuilder: (context) => [
-                    if (widget.onEdit != null && !widget.post.isRepost) // Don't allow editing reposts
+                    if (widget.onEdit != null && !widget.post.isRepost)
                       PopupMenuItem(
                         value: 'edit',
                         child: Row(
@@ -421,13 +422,13 @@ class _PostCardState extends State<PostCard> {
                       ),
                   ],
                   onSelected: (value) {
-                    if (value == 'edit' && widget.onEdit != null) {
-                      widget.onEdit!();
+                    if (value == 'edit') {
+                      _showEnhancedEditDialog(context, widget.post);
                     } else if (value == 'delete' && widget.onDelete != null) {
                       widget.onDelete!();
                     }
                   },
-                ),
+                )
             ],
           ),
         ],
@@ -746,6 +747,13 @@ class _PostCardState extends State<PostCard> {
             ),
         ],
       ),
+    );
+  }
+
+  void _showEnhancedEditDialog(BuildContext context, Post post) {
+    showDialog(
+      context: context,
+      builder: (context) => EnhancedEditPostDialog(post: post),
     );
   }
 

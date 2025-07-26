@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:percent_indicator/linear_percent_indicator.dart';
 import 'bloc.dart';
+import 'edit_dialogs.dart';
 import 'models.dart';
 
 class PollWidget extends StatefulWidget {
@@ -134,12 +135,12 @@ class _PollWidgetState extends State<PollWidget> {
                       ],
                       onSelected: (value) {
                         if (value == 'edit') {
-                          _showEditPollDialog(context, poll);
+                          _showEnhancedEditPollDialog(context, poll);
                         } else if (value == 'delete') {
                           _showDeletePollDialog(context, poll);
                         }
                       },
-                    ),
+                    )
                 ],
               ),
 
@@ -521,93 +522,10 @@ class _PollWidgetState extends State<PollWidget> {
     );
   }
 
-  void _showEditPollDialog(BuildContext context, Poll poll) {
-    final questionController = TextEditingController(text: poll.question);
-    DateTime? selectedEndDate = poll.endsAt;
-
+  void _showEnhancedEditPollDialog(BuildContext context, Poll poll) {
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text('Edit Poll'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: questionController,
-                  decoration: InputDecoration(
-                    labelText: 'Poll Question',
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLines: 2,
-                ),
-                SizedBox(height: 16),
-                ListTile(
-                  title: Text('End Date'),
-                  subtitle: Text(
-                    selectedEndDate != null
-                        ? '${selectedEndDate!.toLocal()}'.split(' ')[0]
-                        : 'No end date',
-                  ),
-                  trailing: Icon(Icons.calendar_today),
-                  onTap: () async {
-                    final date = await showDatePicker(
-                      context: context,
-                      initialDate: selectedEndDate ?? DateTime.now().add(Duration(days: 7)),
-                      firstDate: DateTime.now(),
-                      lastDate: DateTime.now().add(Duration(days: 365)),
-                    );
-                    if (date != null) {
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.now(),
-                      );
-                      if (time != null) {
-                        setState(() {
-                          selectedEndDate = DateTime(
-                            date.year,
-                            date.month,
-                            date.day,
-                            time.hour,
-                            time.minute,
-                          );
-                        });
-                      }
-                    }
-                  },
-                ),
-                if (selectedEndDate != null)
-                  ListTile(
-                    title: Text('Remove End Date'),
-                    trailing: Icon(Icons.remove_circle, color: Colors.red),
-                    onTap: () => setState(() => selectedEndDate = null),
-                  ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                context.read<CommunityBloc>().add(UpdatePoll(
-                  pollId: poll.id,
-                  question: questionController.text.trim(),
-                  endsAt: selectedEndDate,
-                ));
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.purple[600],
-              ),
-              child: Text('Update', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
-      ),
+      builder: (context) => EnhancedEditPollDialog(poll: poll),
     );
   }
 
