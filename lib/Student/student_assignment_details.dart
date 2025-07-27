@@ -305,7 +305,12 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
                   size: 24,
                 ),
                 SizedBox(width: 8),
-                Text(confirmationTitle),
+                Expanded(
+                  child: Text(
+                    confirmationTitle,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
             content: Column(

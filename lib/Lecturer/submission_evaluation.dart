@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../notification.dart';
 
 class SubmissionEvaluationPage extends StatefulWidget {
   final String courseId;
@@ -239,7 +240,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
       final letterGrade = _calculateLetterGrade(percentage);
 
       // Ensure we have a valid studentId
-      final studentId = widget.submissionData['studentId']?.toString() ?? '';
+      String studentId = widget.submissionData['studentId']?.toString() ?? '';
       if (studentId.isEmpty) {
         // Try to fetch from submission document
         final submissionDoc = await FirebaseFirestore.instance
@@ -255,6 +256,14 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
 
         if (!submissionDoc.exists) {
           throw Exception('Submission document not found');
+        }
+
+        // Extract studentId from the submission document
+        final submissionData = submissionDoc.data();
+        studentId = submissionData?['studentId']?.toString() ?? '';
+
+        if (studentId.isEmpty) {
+          throw Exception('Student ID not found in submission document');
         }
       }
 
@@ -295,7 +304,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
           .doc('current')
           .set(evaluationData);
 
-      // Update submission - only update visible fields if not draft
+// Update submission - only update visible fields if not draft
       final updateData = <String, dynamic>{
         'gradedAt': FieldValue.serverTimestamp(),
         'gradedBy': FirebaseAuth.instance.currentUser?.uid,
@@ -304,7 +313,7 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         'evaluationIsDraft': isDraft,
       };
 
-      // Only add grade data if not draft (released to student)
+// Only add grade data if not draft (released to student)
       if (!isDraft) {
         updateData.addAll({
           'grade': grade,
@@ -325,6 +334,30 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
           .collection('submissions')
           .doc(widget.submissionId)
           .update(updateData);
+
+      // 🔔 FIXED: Send notification to student when evaluation is returned (not draft)
+      if (!isDraft) {
+        try {
+          // Ensure studentId is valid
+          // Use the already validated studentId
+          if (studentId.isEmpty) {
+            throw Exception('Student ID not found for notification');
+          }
+
+          await _createEvaluationNotification(
+            studentId: studentId,
+            assignmentTitle: widget.assignmentData['title'] ?? 'Assignment',
+            grade: grade,
+            totalPoints: totalPoints,
+            letterGrade: letterGrade,
+          );
+
+          print('✅ Evaluation notification sent to student: $studentId');
+        } catch (e) {
+          print('❌ Error sending evaluation notification: $e');
+          // Don't fail the evaluation save if notification fails
+        }
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -487,7 +520,6 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         'releasedAt': FieldValue.serverTimestamp(),
       });
 
-      // Update submission with grade data
       await FirebaseFirestore.instance
           .collection('organizations')
           .doc(widget.organizationCode)
@@ -507,6 +539,54 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
         'evaluationIsDraft': false,
         'releasedAt': FieldValue.serverTimestamp(),
       });
+
+// 🔔 NEW: Send notification to student when evaluation is returned
+      try {
+        String studentId = evalData['studentId']?.toString() ?? '';
+
+        // If studentId is not in evalData, get it from submission data
+        if (studentId.isEmpty) {
+          studentId = widget.submissionData['studentId']?.toString() ?? '';
+        }
+
+        // If still empty, fetch from submission document
+        if (studentId.isEmpty) {
+          final submissionDoc = await FirebaseFirestore.instance
+              .collection('organizations')
+              .doc(widget.organizationCode)
+              .collection('courses')
+              .doc(widget.courseId)
+              .collection('assignments')
+              .doc(widget.assignmentId)
+              .collection('submissions')
+              .doc(widget.submissionId)
+              .get();
+
+          if (submissionDoc.exists) {
+            final submissionData = submissionDoc.data();
+            studentId = submissionData?['studentId']?.toString() ?? '';
+          }
+        }
+
+        print('🔔 DEBUG: Attempting to send notification to student: $studentId');
+        print('🔔 DEBUG: Organization code: ${widget.organizationCode}');
+        print('🔔 DEBUG: Assignment title: ${widget.assignmentData['title']}');
+
+        if (studentId.isNotEmpty) {
+          await _createEvaluationNotification(
+            studentId: studentId,
+            assignmentTitle: widget.assignmentData['title'] ?? 'Assignment',
+            grade: evalData['grade'] ?? 0,
+            totalPoints: evalData['maxPoints'] ?? 100,
+            letterGrade: evalData['letterGrade'] ?? '',
+          );
+        } else {
+          print('❌ Cannot send notification: Student ID is empty');
+        }
+      } catch (e) {
+        print('Error sending evaluation notification: $e');
+        // Don't fail the release if notification fails
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1991,6 +2071,58 @@ class _SubmissionEvaluationPageState extends State<SubmissionEvaluationPage> wit
       return 'Yesterday at $timeStr';
     } else {
       return '$dateStr at $timeStr';
+    }
+  }
+
+  // 🔔 NEW: Create notification for student when evaluation is returned
+  Future<void> _createEvaluationNotification({
+    required String studentId,
+    required String assignmentTitle,
+    required int grade,
+    required int totalPoints,
+    required String letterGrade,
+  }) async {
+    try {
+      print('🔔 Creating evaluation notification for student: $studentId');
+      print('📍 Path: organizations/${widget.organizationCode}/students/$studentId/notifications');
+
+      // Verify lecturer permissions first
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        throw Exception('Lecturer not authenticated');
+      }
+
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(widget.organizationCode)
+          .collection('students')
+          .doc(studentId)
+          .collection('notifications')
+          .add({
+        'title': '📝 Assignment Graded',
+        'body': 'Your assignment "$assignmentTitle" has been graded: $grade/$totalPoints ($letterGrade)',
+        'type': 'NotificationType.assignment',
+        'sourceId': widget.assignmentId,
+        'sourceType': 'assignment',
+        'courseId': widget.courseId, // CRITICAL: Required for Firebase rules
+        'courseName': widget.assignmentData['courseName'] ?? 'Course',
+        'organizationCode': widget.organizationCode,
+        'lecturerId': currentUser.uid, // ADDED: For permission verification
+        'assignmentTitle': assignmentTitle, // ADDED: For better context
+        'grade': grade,
+        'totalPoints': totalPoints,
+        'letterGrade': letterGrade,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'notificationCategory': 'evaluation', // ADDED: For filtering
+      });
+
+      print('✅ Created evaluation notification for student: $studentId');
+      print('📧 Notification details: Assignment "$assignmentTitle" graded $grade/$totalPoints ($letterGrade)');
+      print('📍 Notification path: organizations/${widget.organizationCode}/students/$studentId/notifications');
+    } catch (e) {
+      print('❌ Error creating evaluation notification: $e');
+      throw e;
     }
   }
 }
