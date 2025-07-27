@@ -634,7 +634,10 @@ enum NotificationType {
   friendAccepted,
   mention,
   newPost,
-  general
+  message,        // ADD THIS
+  newMessage,     // ADD THIS
+  chatMessage,    // ADD THIS
+  general,
 }
 
 // Feed item wrapper for mixed content

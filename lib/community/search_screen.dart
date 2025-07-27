@@ -5,9 +5,11 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../community/bloc.dart';
 import '../community/models.dart';
 import 'profile_screen.dart';
-import '../chat_integrated.dart';
+import '../chat_integrated.dart' show ChatScreen;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-enum SearchScreenTab { search, friendRequests, notifications }
+enum SearchScreenTab { search, friendRequests, notifications, chat }
 
 class SearchScreen extends StatefulWidget {
   final String organizationCode;
@@ -27,13 +29,14 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   bool _isSearching = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 3,
+      length: 4,
       vsync: this,
       initialIndex: widget.initialTab.index,
     );
@@ -115,8 +118,29 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
               if (_tabController.index == 2 && state.notifications.isNotEmpty)
                 IconButton(
                   icon: Icon(Icons.done_all),
-                  onPressed: () {
+                  onPressed: () async {
                     context.read<CommunityBloc>().add(MarkAllNotificationsRead());
+
+                    // Also update Firestore directly for real-time updates
+                    try {
+                      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+                      if (currentUserId != null) {
+                        final batch = FirebaseFirestore.instance.batch();
+                        final unreadNotifications = await FirebaseFirestore.instance
+                            .collection('notifications')
+                            .where('userId', isEqualTo: currentUserId)
+                            .where('isRead', isEqualTo: false)
+                            .get();
+
+                        for (final doc in unreadNotifications.docs) {
+                          batch.update(doc.reference, {'isRead': true});
+                        }
+
+                        await batch.commit();
+                      }
+                    } catch (e) {
+                      print('Error marking all notifications as read: $e');
+                    }
                   },
                 ),
             ],
@@ -139,22 +163,29 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('Requests'),
+                      Flexible(
+                        child: Text(
+                          'Requests',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       if (state.pendingRequests.isNotEmpty) ...[
-                        SizedBox(width: 2), // Reduced from 4
+                        SizedBox(width: 2),
                         Container(
-                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                           decoration: BoxDecoration(
                             color: Colors.red,
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(8),
                           ),
+                          constraints: BoxConstraints(minWidth: 16),
                           child: Text(
-                            state.pendingRequests.length.toString(),
+                            state.pendingRequests.length > 9 ? '9+' : state.pendingRequests.length.toString(),
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 10,
+                              fontSize: 9,
                               fontWeight: FontWeight.bold,
                             ),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       ],
@@ -165,27 +196,72 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('Messages'),
+                      Flexible(
+                        child: Text(
+                          'Messages',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       if (state.unreadNotificationCount > 0) ...[
-                        SizedBox(width: 2), // Reduced from 4
+                        SizedBox(width: 2),
                         Container(
-                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                           decoration: BoxDecoration(
                             color: Colors.red,
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(8),
                           ),
+                          constraints: BoxConstraints(minWidth: 16),
                           child: Text(
                             state.unreadNotificationCount > 99
                                 ? '99+'
                                 : state.unreadNotificationCount.toString(),
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 10,
+                              fontSize: 9,
                               fontWeight: FontWeight.bold,
                             ),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       ],
+                    ],
+                  ),
+                ),
+                Tab(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Chat'),
+                      // Add chat unread count here if needed
+                      StreamBuilder<int>(
+                        stream: _getChatUnreadCountStream(),
+                        builder: (context, snapshot) {
+                          final chatUnread = snapshot.data ?? 0;
+                          if (chatUnread > 0) {
+                            return Row(
+                              children: [
+                                SizedBox(width: 2),
+                                Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    chatUnread > 99 ? '99+' : chatUnread.toString(),
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+                          return SizedBox.shrink();
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -198,6 +274,7 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
               _buildSearchTab(state),
               _buildFriendRequestsTab(state),
               _buildNotificationsTab(state),
+              _buildChatTab(state),
             ],
           ),
         );
@@ -524,12 +601,14 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                   children: [
                     Expanded(
                       child: ElevatedButton(
+                        // Replace the problematic onPressed handler with this fixed version:
+
                         onPressed: () async {
                           print('DEBUG: UI - Accept button pressed for request: ${request.id}');
                           context.read<CommunityBloc>().add(AcceptFriendRequest(request.id));
 
-                          // 🆕 UPDATED - Better timing and navigation
-                          await Future.delayed(Duration(milliseconds: 1500)); // Reduced wait time
+                          // Wait for the request to be processed
+                          await Future.delayed(Duration(milliseconds: 1500));
 
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -538,17 +617,11 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                                 backgroundColor: Colors.green,
                                 duration: Duration(seconds: 4),
                                 action: SnackBarAction(
-                                  label: 'Open Chat',
+                                  label: 'Go to Chat',
                                   textColor: Colors.white,
                                   onPressed: () {
-                                    // 🆕 IMPROVED - Navigate and force refresh
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(builder: (context) => ChatContactPage()),
-                                    ).then((_) {
-                                      // Refresh this screen when returning from chat
-                                      context.read<CommunityBloc>().add(LoadPendingRequests());
-                                    });
+                                    // Option 1: Switch to the Chat tab in this screen
+                                    _tabController.animateTo(3); // Chat tab is index 3
                                   },
                                 ),
                               ),
@@ -587,6 +660,7 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
   }
 
   Widget _buildNotificationsTab(CommunityState state) {
+    // Only show community notifications, NOT chat notifications
     if (state.notifications.isEmpty) {
       return Center(
         child: Column(
@@ -664,10 +738,20 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
     }
 
     return InkWell(
-      onTap: () {
-        // Mark as read
+      onTap: () async {
+        // Mark as read immediately for better UX
         if (!notification.isRead) {
           context.read<CommunityBloc>().add(MarkNotificationRead(notification.id));
+
+          // Also update Firestore directly for real-time updates
+          try {
+            await FirebaseFirestore.instance
+                .collection('notifications')
+                .doc(notification.id)
+                .update({'isRead': true});
+          } catch (e) {
+            print('Error marking notification as read: $e');
+          }
         }
 
         // Navigate based on notification type
@@ -759,6 +843,119 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
     );
   }
 
+  Widget _buildChatNotificationTile(Map<String, dynamic> chatNotif) {
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              contactId: chatNotif['otherUserId'],
+              contactName: chatNotif['senderName'],
+              contactAvatar: chatNotif['senderAvatar'],
+              isOnline: false,
+              chatId: chatNotif['chatId'],
+            ),
+          ),
+        );
+      },
+      child: Container(
+        color: chatNotif['unreadCount'] > 0 ? Colors.blue[50] : Colors.white,
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Message icon
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.message,
+                color: Colors.blue,
+                size: 24,
+              ),
+            ),
+            SizedBox(width: 12),
+            // Content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  RichText(
+                    text: TextSpan(
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 14,
+                      ),
+                      children: [
+                        TextSpan(
+                          text: chatNotif['senderName'],
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        TextSpan(text: ' sent you a message'),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    chatNotif['message'],
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    timeago.format(chatNotif['timestamp']),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // User avatar
+            if (chatNotif['senderAvatar'] != null) ...[
+              SizedBox(width: 12),
+              CircleAvatar(
+                radius: 20,
+                backgroundImage: CachedNetworkImageProvider(
+                  chatNotif['senderAvatar'],
+                ),
+              ),
+            ],
+            // Unread badge
+            if (chatNotif['unreadCount'] > 0) ...[
+              SizedBox(width: 8),
+              Container(
+                padding: EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  chatNotif['unreadCount'].toString(),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Color _getRoleColor(String role) {
     switch (role) {
       case 'admin':
@@ -770,5 +967,285 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
       default:
         return Colors.grey;
     }
+  }
+
+  Widget _buildChatTab(CommunityState state) {
+    final currentUserId = _auth.currentUser?.uid;
+    if (currentUserId == null) {
+      return Center(child: Text('Please log in to see chat notifications'));
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: currentUserId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        final chatDocs = snapshot.data?.docs ?? [];
+
+        if (chatDocs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.chat_bubble_outline,
+                  size: 64,
+                  color: Colors.grey[300],
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'No chat notifications yet',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Chat notifications will appear here',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[500],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          itemCount: chatDocs.length,
+          itemBuilder: (context, index) {
+            final chatData = chatDocs[index].data() as Map<String, dynamic>;
+            final chatId = chatDocs[index].id;
+            return _buildChatNotificationTileFromStream(chatData, chatId, currentUserId);
+          },
+        );
+      },
+    );
+  }
+
+  Stream<int> _getChatUnreadCountStream() {
+    final currentUserId = _auth.currentUser?.uid;
+    if (currentUserId == null) return Stream.value(0);
+
+    return FirebaseFirestore.instance
+        .collection('chats')
+        .where('participants', arrayContains: currentUserId)
+        .snapshots()
+        .map((snapshot) {
+      int totalUnread = 0;
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final unreadCount = data['unreadCount']?[currentUserId] ?? 0;
+        totalUnread += (unreadCount as num).toInt();
+      }
+      return totalUnread;
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> _getChatNotifications() async {
+    try {
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null) return [];
+
+      print('🔍 Getting chat notifications for user: $currentUserId');
+
+      final chatsSnapshot = await FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: currentUserId)
+          .limit(50)
+          .get();
+
+      print('📱 Found ${chatsSnapshot.docs.length} chats');
+
+      // Sort in Dart to avoid index requirement
+      final sortedDocs = chatsSnapshot.docs;
+      sortedDocs.sort((a, b) {
+        final aTime = a.data()['lastMessageTime'] as Timestamp?;
+        final bTime = b.data()['lastMessageTime'] as Timestamp?;
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime.compareTo(aTime);
+      });
+
+      final limitedDocs = sortedDocs.take(20).toList();
+
+      print('📱 Found ${chatsSnapshot.docs.length} chats');
+
+      List<Map<String, dynamic>> notifications = [];
+
+      for (final doc in limitedDocs) {
+        final data = doc.data();
+        final unreadCount = data['unreadCount']?[currentUserId] ?? 0;
+
+        print('💬 Chat ${doc.id}: unread = $unreadCount');
+
+        // Show all recent chats with messages, including unread ones and recent activity
+        if (data['lastMessage'] != null &&
+            data['lastMessage'].toString().isNotEmpty &&
+            data['lastMessage'].toString() != '0') {
+          final participants = List<String>.from(data['participants'] ?? []);
+          final otherUserId = participants.firstWhere((id) => id != currentUserId, orElse: () => '');
+
+          print('👤 Other user: $otherUserId');
+
+          if (otherUserId.isNotEmpty) {
+            try {
+              // Get other user's name with error handling
+              final userDoc = await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(otherUserId)
+                  .get();
+
+              if (!userDoc.exists) {
+                print('⚠️ User document not found for: $otherUserId');
+                continue;
+              }
+
+              final userData = userDoc.data();
+              final userName = userData?['fullName'] ?? 'Unknown User';
+              final userAvatar = userData?['avatarUrl'];
+              final lastMessage = data['lastMessage']?.toString() ?? '';
+              final lastMessageTime = data['lastMessageTime'] as Timestamp?;
+
+              // Skip if message is empty or invalid
+              if (lastMessage.isEmpty || lastMessage == '0') {
+                print('⚠️ Skipping chat with empty/invalid message');
+                continue;
+              }
+
+              print('✅ Adding notification: $userName - $lastMessage (unread: $unreadCount)');
+
+              notifications.add({
+                'id': doc.id,
+                'senderName': userName,
+                'senderAvatar': userAvatar,
+                'message': lastMessage,
+                'unreadCount': unreadCount,
+                'timestamp': lastMessageTime?.toDate() ?? DateTime.now(),
+                'chatId': doc.id,
+                'otherUserId': otherUserId,
+                'hasUnread': unreadCount > 0,
+                'isRecentActivity': lastMessageTime != null &&
+                    DateTime.now().difference(lastMessageTime.toDate()).inHours < 24,
+              });
+            } catch (e) {
+              print('❌ Error processing chat ${doc.id}: $e');
+              continue;
+            }
+          }
+        }
+      }
+
+      print('📋 Total notifications: ${notifications.length}');
+      return notifications;
+    } catch (e) {
+      print('❌ Error getting chat notifications: $e');
+      return [];
+    }
+  }
+
+  Widget _buildChatNotificationTileFromStream(
+  Map<String, dynamic> chatData,
+  String chatId,
+  String currentUserId,
+  ) {
+  final participants = List<String>.from(chatData['participants'] ?? []);
+  final otherUserId = participants.firstWhere(
+  (id) => id != currentUserId,
+  orElse: () => '',
+  );
+
+  if (otherUserId.isEmpty) return SizedBox.shrink();
+
+  final unreadCount = chatData['unreadCount']?[currentUserId] ?? 0;
+  final lastMessage = chatData['lastMessage']?.toString() ?? '';
+  final lastMessageTime = chatData['lastMessageTime'] as Timestamp?;
+
+  // Skip invalid or empty messages
+  if (lastMessage.isEmpty || lastMessage == '0') return SizedBox.shrink();
+
+  return FutureBuilder<DocumentSnapshot>(
+  future: FirebaseFirestore.instance.collection('users').doc(otherUserId).get(),
+  builder: (context, userSnapshot) {
+  if (!userSnapshot.hasData) return SizedBox.shrink();
+
+  final userData = userSnapshot.data?.data() as Map<String, dynamic>?;
+  final userName = userData?['fullName'] ?? 'Unknown User';
+  final userAvatar = userData?['avatarUrl'];
+
+  return InkWell(
+  onTap: () {
+  Navigator.push(
+  context,
+  MaterialPageRoute(
+  builder: (context) => ChatScreen(
+  contactId: otherUserId,
+  contactName: userName,
+  contactAvatar: userAvatar,
+  isOnline: false,
+  chatId: chatId,
+  ),
+  ),
+  );
+  },
+  child: Container(
+  color: unreadCount > 0 ? Colors.blue[50] : Colors.white,
+  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+  child: Row(
+  children: [
+  userAvatar != null
+  ? CircleAvatar(
+  radius: 24,
+  backgroundImage: CachedNetworkImageProvider(userAvatar),
+  )
+      : Container(
+  width: 48,
+  height: 48,
+  decoration: BoxDecoration(
+  color: Colors.blue[100],
+  shape: BoxShape.circle,
+  ),
+  child: Icon(Icons.person, color: Colors.blue, size: 24),
+  ),
+  SizedBox(width: 12),
+  Expanded(
+  child: Column(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
+  Text(userName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+  if (lastMessageTime != null)
+  Text(timeago.format(lastMessageTime.toDate()),
+  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+  if (lastMessage.isNotEmpty)
+  Text(lastMessage,
+  style: TextStyle(fontSize: 14,
+  color: unreadCount > 0 ? Colors.black87 : Colors.grey[700]),
+  maxLines: 2, overflow: TextOverflow.ellipsis),
+  ],
+  ),
+  ),
+  if (unreadCount > 0)
+  Container(
+  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+  decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(12)),
+  child: Text(unreadCount > 99 ? '99+' : unreadCount.toString(),
+  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+  ),
+  ],
+  ),
+  ),
+  );
+  },
+  );
   }
 }

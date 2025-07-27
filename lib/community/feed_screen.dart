@@ -14,6 +14,7 @@ import 'profile_screen.dart';
 import 'search_screen.dart';
 import '../chat_integrated.dart';
 import '../community/community_services.dart';
+import 'package:rxdart/rxdart.dart';
 
 class FeedScreen extends StatefulWidget {
   final String organizationCode;
@@ -44,6 +45,8 @@ class _FeedScreenState extends State<FeedScreen> {
     _checkAuthenticationStatus();
     _initializeFeed();
     _scrollController.addListener(_onScroll);
+
+    Future.delayed(Duration(seconds: 3), () => _debugBellIconData());
   }
 
   void _debugAuthState() {
@@ -176,6 +179,71 @@ class _FeedScreenState extends State<FeedScreen> {
     return currentScroll >= (maxScroll * 0.9);
   }
 
+  Stream<int> _getTotalUnreadCountStream() {
+    return Stream.periodic(Duration(seconds: 1)).asyncMap((_) async {
+      try {
+        final currentUserId = _authService.currentUser?.uid;
+        if (currentUserId == null) return 0;
+
+        // Get EXACT same count as shown in Messages tab
+        final state = context.read<CommunityBloc>().state;
+        final communityCount = state.unreadNotificationCount;
+
+        // Get EXACT same count as shown in Chat tab
+        final chatsSnapshot = await FirebaseFirestore.instance
+            .collection('chats')
+            .where('participants', arrayContains: currentUserId)
+            .get();
+
+        int chatCount = 0;
+        for (final doc in chatsSnapshot.docs) {
+          final data = doc.data();
+          final unreadCount = data['unreadCount']?[currentUserId] ?? 0;
+          chatCount += unreadCount as int;
+        }
+
+        final total = communityCount + chatCount;
+        print('🔔 Bell Icon Debug:');
+        print('   Messages tab count: $communityCount');
+        print('   Chat tab count: $chatCount');
+        print('   Total for bell: $total');
+
+        return total;
+      } catch (e) {
+        print('❌ Error in bell icon count: $e');
+        return 0;
+      }
+    }).distinct();
+  }
+
+  Future<void> _debugBellIconData() async {
+    final currentUserId = _authService.currentUser?.uid;
+    print('🔍 BELL ICON DEBUG:');
+    print('   Current User ID: $currentUserId');
+
+    if (currentUserId != null) {
+      // Check BLoC state
+      final state = context.read<CommunityBloc>().state;
+      print('   BLoC unread notifications: ${state.unreadNotificationCount}');
+
+      // Check chat directly
+      final chats = await FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: currentUserId)
+          .get();
+
+      int chatTotal = 0;
+      for (final doc in chats.docs) {
+        final data = doc.data();
+        final unread = data['unreadCount']?[currentUserId] ?? 0;
+        chatTotal += unread as int;
+        print('   Chat ${doc.id}: unread = $unread');
+      }
+      print('   Total chat unread: $chatTotal');
+      print('   SHOULD SHOW: ${state.unreadNotificationCount + chatTotal}');
+    }
+  }
+
   @override
   void dispose() {
     _scrollController.dispose();
@@ -280,51 +348,57 @@ class _FeedScreenState extends State<FeedScreen> {
                 );
               },
             ),
-            Stack(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.notifications_outlined),
-                  color: Colors.black87,
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => SearchScreen(
-                          organizationCode: widget.organizationCode,
-                          initialTab: SearchScreenTab.notifications,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                if (state.unreadNotificationCount > 0)
-                  Positioned(
-                    right: 8,
-                    top: 8,
-                    child: Container(
-                      padding: EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      constraints: BoxConstraints(
-                        minWidth: 16,
-                        minHeight: 16,
-                      ),
-                      child: Text(
-                        state.unreadNotificationCount > 99
-                            ? '99+'
-                            : state.unreadNotificationCount.toString(),
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
+            StreamBuilder<int>(
+              stream: _getTotalUnreadCountStream(),
+              builder: (context, snapshot) {
+                final totalUnread = snapshot.hasData ? snapshot.data! : 0;
+                print('🔔 UI Bell Icon Update - Showing: $totalUnread, hasData: ${snapshot.hasData}');
+
+                return Stack(
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.notifications_outlined),
+                      color: Colors.black87,
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => SearchScreen(
+                              organizationCode: widget.organizationCode,
+                              initialTab: SearchScreenTab.notifications,
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  ),
-              ],
+                    if (totalUnread > 0)
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: Container(
+                          padding: EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          constraints: BoxConstraints(
+                            minWidth: 16,
+                            minHeight: 16,
+                          ),
+                          child: Text(
+                            totalUnread > 99 ? '99+' : totalUnread.toString(),
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
           ],
         ),
