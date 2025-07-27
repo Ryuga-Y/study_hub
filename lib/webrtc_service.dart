@@ -69,7 +69,10 @@ class WebRTCService {
         print('📺 Remote track received');
         if (event.streams.isNotEmpty) {
           _remoteStream = event.streams.first;
-          onRemoteStream?.call(_remoteStream!);
+          // Add small delay to ensure both users receive streams simultaneously
+          Future.delayed(Duration(milliseconds: 500), () {
+            onRemoteStream?.call(_remoteStream!);
+          });
         }
       };
 
@@ -308,12 +311,14 @@ class WebRTCService {
         print('📤 Created and set local answer');
 
         // Update call with answer
+        // Update call with answer and connection timestamp for synchronization
         await _firestore.collection('videoCalls').doc(callId).update({
           'answer': {
             'type': answer.type,
             'sdp': answer.sdp,
           },
-          'status': 'connected'
+          'status': 'connected',
+          'connectedAt': FieldValue.serverTimestamp(), // Add connection timestamp
         });
 
         print('✅ Answer saved to Firebase');
@@ -371,7 +376,8 @@ class WebRTCService {
 
           if (!_isDisposed) {
             await _firestore.collection('videoCalls').doc(currentCallId).update({
-              'status': 'connected'
+              'status': 'connected',
+              'connectedAt': FieldValue.serverTimestamp(), // Add connection timestamp
             });
             // Start listening for ICE candidates after answer is set
             _listenForIceCandidates();

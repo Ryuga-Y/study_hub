@@ -79,6 +79,7 @@ class ChatMessage {
   final String? attachmentType;
   final List<TextOverlay>? textOverlays;
   final int? videoDuration;
+  final String? messageType;
 
   ChatMessage({
     required this.id,
@@ -90,6 +91,7 @@ class ChatMessage {
     this.attachmentType,
     this.textOverlays,
     this.videoDuration,
+    this.messageType,
   });
 
   factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -108,6 +110,7 @@ class ChatMessage {
           ? (data['textOverlays'] as List).map((overlay) => TextOverlay.fromMap(overlay)).toList()
           : null,
       videoDuration: data['videoDuration'],
+      messageType: data['messageType'], // ADD THIS LINE
     );
   }
 
@@ -1709,13 +1712,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   message.text != "📷 Photo" &&
                   message.text != "🎥 Video" &&
                   message.attachmentType != 'image')
-                Text(
-                  message.text,
-                  style: TextStyle(
-                    color: isMe ? Colors.white : Colors.black,
-                    fontSize: 16,
-                  ),
-                ),
+                _buildMessageText(message, isMe),
               SizedBox(height: 4),
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -1742,6 +1739,68 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // ADD THIS METHOD RIGHT AFTER _buildMessageBubble method in _ChatScreenState class
+  Widget _buildMessageText(ChatMessage message, bool isMe) {
+    // Check if it's a call record by looking for "Video call" pattern
+    if (message.text.startsWith('Video call\n') || message.messageType == 'call_record') {
+      final lines = message.text.split('\n');
+      return Container(
+        padding: EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: isMe ? Colors.white.withOpacity(0.2) : Colors.grey.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.videocam,
+                    size: 16,
+                    color: isMe ? Colors.white : Colors.black,
+                  ),
+                ),
+                SizedBox(width: 8),
+                Text(
+                  lines[0], // "Video call"
+                  style: TextStyle(
+                    color: isMe ? Colors.white : Colors.black,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+            if (lines.length > 1)
+              Padding(
+                padding: EdgeInsets.only(left: 28, top: 4),
+                child: Text(
+                  lines[1].replaceAll(RegExp(r' • \d+ joined'), ''), // Remove "• X joined" part
+                  style: TextStyle(
+                    color: isMe ? Colors.white70 : Colors.grey[600],
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    // Regular text message
+    return Text(
+      message.text,
+      style: TextStyle(
+        color: isMe ? Colors.white : Colors.black,
+        fontSize: 16,
       ),
     );
   }

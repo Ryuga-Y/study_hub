@@ -4,7 +4,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'webrtc_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class VideoCallScreen extends StatefulWidget {
   final String contactName;
@@ -27,6 +29,9 @@ class VideoCallScreen extends StatefulWidget {
 }
 
 class _VideoCallScreenState extends State<VideoCallScreen> {
+  // ADD THESE LINES AFTER OTHER VARIABLES
+  DateTime? _callStartTime;
+  Duration _callDuration = Duration.zero;
   final WebRTCService _webRTCService = WebRTCService();
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
@@ -38,6 +43,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   bool _isVideoOff = false;
   bool _isConnected = false;
   bool _isConnecting = true;
+  Timer? _callTimer;
 
   @override
   void initState() {
@@ -107,13 +113,20 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 _remoteRenderer.srcObject = stream;
                 _isConnected = true;
                 _isConnecting = false;
+                _callStartTime = DateTime.now(); // Start timing when actually connected
               });
               print('✅ Remote video stream connected in UI');
+              _startCallTimer();
             }
           });
         }
       };
-      _webRTCService.onCallEnd = () {
+      _webRTCService.onCallEnd = () async {
+        // Send call record if call was connected
+        if (_isConnected && _callStartTime != null) {
+          _callDuration = DateTime.now().difference(_callStartTime!);
+          await _sendCallRecord();
+        }
         if (mounted) {
           Navigator.pop(context);
         }
@@ -144,6 +157,20 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         Navigator.pop(context);
       }
     }
+  }
+
+  void _startCallTimer() {
+    _callTimer?.cancel();
+    _callTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (mounted && _isConnected && _callStartTime != null) {
+        setState(() {
+          _callDuration = DateTime.now().difference(_callStartTime!);
+        });
+      } else if (!_isConnected) {
+        // Stop timer if connection lost
+        timer.cancel();
+      }
+    });
   }
 
   void _monitorCallStatus() {
@@ -211,6 +238,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   void dispose() {
     // Cancel monitoring first
     _callStatusMonitor?.cancel();
+    _callTimer?.cancel();
 
     // Ensure call is marked as ended in Firebase
     if (widget.callId != null) {
@@ -377,30 +405,58 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             colors: [Colors.black54, Colors.transparent],
           ),
         ),
-        child: Row(
+        child: Column(
           children: [
-            Icon(Icons.videocam, color: Colors.white),
-            SizedBox(width: 8),
-            Text(
-              widget.contactName,
-              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+            Row(
+              children: [
+                Icon(Icons.videocam, color: Colors.white),
+                SizedBox(width: 8),
+                Text(
+                  widget.contactName,
+                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+                Spacer(),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _isConnected ? Colors.green : Colors.orange,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    _isConnected ? 'Connected' : 'Connecting',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ],
             ),
-            Spacer(),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: _isConnected ? Colors.green : Colors.orange,
-                borderRadius: BorderRadius.circular(16),
+            if (_isConnected && _callStartTime != null) ...[
+              SizedBox(height: 8),
+              Text(
+                _formatCallDuration(_callDuration),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-              child: Text(
-                _isConnected ? 'Connected' : 'Connecting',
-                style: TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  String _formatCallDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    String hours = twoDigits(duration.inHours);
+    String minutes = twoDigits(duration.inMinutes.remainder(60));
+    String seconds = twoDigits(duration.inSeconds.remainder(60));
+
+    if (duration.inHours > 0) {
+      return "$hours:$minutes:$seconds";
+    } else {
+      return "$minutes:$seconds";
+    }
   }
 
   Widget _buildCallControls() {
@@ -429,11 +485,19 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             onPressed: () async {
               print('📞 User pressed end call button');
 
+              // Calculate call duration
+              if (_callStartTime != null) {
+                _callDuration = DateTime.now().difference(_callStartTime!);
+              }
+
               // Cancel monitoring first to prevent race conditions
               _callStatusMonitor?.cancel();
 
               // Set callback to null to prevent double navigation
               _webRTCService.onCallEnd = null;
+
+              // Send call record to chat BEFORE ending call
+              await _sendCallRecord();
 
               // End the call
               await _webRTCService.endCall();
@@ -480,5 +544,65 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         onPressed: onPressed,
       ),
     );
+  }
+
+  Future<void> _sendCallRecord() async {
+    // Only send call record if we have target user and call was connected
+    if (widget.targetUserId == null || !_isConnected) return;
+
+    // Ensure minimum duration of 1 second for display
+    if (_callDuration.inSeconds < 1) {
+      _callDuration = Duration(seconds: 1);
+    }
+
+    try {
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUserId == null) return;
+
+      // Generate chat ID
+      final chatId = _generateChatId(currentUserId, widget.targetUserId!);
+
+      // Format duration - make it more user-friendly
+      String durationText;
+      if (_callDuration.inHours > 0) {
+        durationText = '${_callDuration.inHours}h ${_callDuration.inMinutes.remainder(60)}m';
+      } else if (_callDuration.inMinutes > 0) {
+        durationText = '${_callDuration.inMinutes} mins';
+      } else {
+        durationText = '${_callDuration.inSeconds}s';
+      }
+
+      // Create call record message
+      // Create call record message
+      await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .add({
+        'text': 'Video call\n$durationText',
+        'senderId': currentUserId,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'messageType': 'call_record',
+        'callDuration': _callDuration.inSeconds,
+      });
+
+// Update chat last message
+      await FirebaseFirestore.instance.collection('chats').doc(chatId).update({
+        'lastMessage': 'Video call ($durationText)',
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'unreadCount.${widget.targetUserId}': FieldValue.increment(1),
+      });
+
+      print('✅ Call record sent: $durationText');
+
+    } catch (e) {
+      print('Error sending call record: $e');
+    }
+  }
+
+  String _generateChatId(String userId1, String userId2) {
+    final sortedIds = [userId1, userId2]..sort();
+    return '${sortedIds[0]}_${sortedIds[1]}';
   }
 }
