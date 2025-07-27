@@ -10,6 +10,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../community/models.dart';
 import '../community/search_screen.dart';
 import '../community/feed_screen.dart';
+import '../community/profile_screen.dart';
 import 'dart:async';
 import 'video_call_screen.dart';
 import 'chat.dart' show TextOverlay, CameraScreen, PhotoEditScreen;
@@ -32,6 +33,7 @@ class ChatContact {
   final String chatId;
   final bool isPinned;
   final bool isStuckOnTop;
+  final String userRole;
 
   ChatContact({
     required this.userId,
@@ -44,9 +46,10 @@ class ChatContact {
     required this.chatId,
     this.isPinned = false,
     this.isStuckOnTop = false,
+    required this.userRole,  // ADD THIS LINE
   });
 
-  factory ChatContact.fromFriend(Friend friend, {String? lastMessage, DateTime? lastMessageTime, int unreadCount = 0, bool isPinned = false, bool isStuckOnTop = false}) {
+  factory ChatContact.fromFriend(Friend friend, {String? lastMessage, DateTime? lastMessageTime, int unreadCount = 0, bool isPinned = false, bool isStuckOnTop = false, String userRole = 'student'}) {
     return ChatContact(
       userId: friend.friendId,
       name: friend.friendName,
@@ -58,6 +61,7 @@ class ChatContact {
       chatId: _generateChatId(FirebaseAuth.instance.currentUser!.uid, friend.friendId),
       isPinned: isPinned,
       isStuckOnTop: isStuckOnTop,
+      userRole: userRole, // ADD THIS LINE
     );
   }
 
@@ -141,10 +145,12 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
   final FirebaseAuth _auth = FirebaseAuth.instance;
   List<ChatContact> _contacts = [];
   List<ChatContact> _filteredContacts = [];
+  String _filterRole = 'all';
   bool _isLoading = true;
   bool _hasFriends = false;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
+  String _roleFilter = 'all'; // ADD THIS LINE
 
   // Add these new variables
   Timer? _refreshTimer;
@@ -271,6 +277,10 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
           isStuckOnTop = false;
         }
 
+        // Get user role from Firestore
+        final userDoc = await _firestore.collection('users').doc(friend.friendId).get();
+        final userRole = userDoc.data()?['role'] ?? 'student';
+
         contacts.add(ChatContact.fromFriend(
           friend,
           lastMessage: lastMessage,
@@ -278,6 +288,7 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
           unreadCount: unreadCount,
           isPinned: isPinned,
           isStuckOnTop: isStuckOnTop,
+          userRole: userRole, // Pass the role
         ));
       }
 
@@ -472,9 +483,54 @@ void _startPeriodicRefresh() {
             });
           },
         ),
-        IconButton(
+        PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: Colors.black),
-          onPressed: () {},
+          onSelected: (value) {
+            setState(() {
+              _roleFilter = value;
+            });
+          },
+          itemBuilder: (BuildContext context) => [
+            PopupMenuItem<String>(
+              value: 'all',
+              child: Row(
+                children: [
+                  Icon(
+                    _roleFilter == 'all' ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                    color: Colors.blue,
+                  ),
+                  SizedBox(width: 8),
+                  Text('All Contacts'),
+                ],
+              ),
+            ),
+            PopupMenuItem<String>(
+              value: 'student',
+              child: Row(
+                children: [
+                  Icon(
+                    _roleFilter == 'student' ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                    color: Colors.blue,
+                  ),
+                  SizedBox(width: 8),
+                  Text('Students Only'),
+                ],
+              ),
+            ),
+            PopupMenuItem<String>(
+              value: 'lecturer',
+              child: Row(
+                children: [
+                  Icon(
+                    _roleFilter == 'lecturer' ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                    color: Colors.blue,
+                  ),
+                  SizedBox(width: 8),
+                  Text('Lecturers Only'),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -562,7 +618,12 @@ void _startPeriodicRefresh() {
   }
 
   Widget _buildContactsList() {
-    final displayContacts = _isSearching ? _filteredContacts : _contacts;
+    var displayContacts = _isSearching ? _filteredContacts : _contacts;
+
+    // Apply role filter
+    if (_roleFilter != 'all') {
+      displayContacts = displayContacts.where((contact) => contact.userRole == _roleFilter).toList();
+    }
 
     displayContacts.sort((a, b) {
       if (a.isStuckOnTop && !b.isStuckOnTop) return -1;
@@ -1287,21 +1348,34 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       title: Row(
         children: [
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: Colors.grey[300],
-            backgroundImage: widget.contactAvatar != null
-                ? CachedNetworkImageProvider(widget.contactAvatar!)
-                : null,
-            child: widget.contactAvatar == null
-                ? Text(
-              widget.contactName[0],
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            )
-                : null,
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ProfileScreen(
+                    userId: widget.contactId,
+                    isCurrentUser: false,
+                  ),
+                ),
+              );
+            },
+            child: CircleAvatar(
+              radius: 20,
+              backgroundColor: Colors.grey[300],
+              backgroundImage: widget.contactAvatar != null
+                  ? CachedNetworkImageProvider(widget.contactAvatar!)
+                  : null,
+              child: widget.contactAvatar == null
+                  ? Text(
+                widget.contactName[0],
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              )
+                  : null,
+            ),
           ),
           SizedBox(width: 12),
           Expanded(

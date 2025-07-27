@@ -8,6 +8,7 @@ import 'profile_screen.dart';
 import '../chat_integrated.dart' show ChatScreen;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'post_screen.dart';
 
 enum SearchScreenTab { search, friendRequests, notifications, chat }
 
@@ -757,7 +758,37 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
         // Navigate based on notification type
         if (notification.postId != null) {
           // Navigate to post
-          // You would need to fetch the post data first
+          try {
+            // Fetch the post data
+            final postDoc = await FirebaseFirestore.instance
+                .collection('posts')
+                .doc(notification.postId)
+                .get();
+
+            if (postDoc.exists) {
+              final post = Post.fromFirestore(postDoc);
+              Navigator.pushNamed(
+                context,
+                '/post',
+                arguments: post,
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Post not found'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          } catch (e) {
+            print('Error loading post: $e');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to load post'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         } else if (notification.actionUserId != null) {
           Navigator.push(
             context,
