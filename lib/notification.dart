@@ -280,25 +280,43 @@ class NotificationService {
 
     print('📅 Starting calendar event listener');
 
+    // Listen to ALL calendar events to catch reminder updates
     _calendarEventsSubscription = _firestore
         .collection('organizations')
         .doc(_userOrgCode)
         .collection('students')
         .doc(user.uid)
         .collection('calendar_events')
-        .where('startTime', isGreaterThan: Timestamp.fromDate(DateTime.now()))
         .snapshots()
         .listen((snapshot) {
-      print('📅 Calendar events updated: ${snapshot.docs.length} upcoming events');
+      print('📅 Calendar events updated: ${snapshot.docs.length} total events');
 
-      // Check for new events and existing events that need reminder notifications
+      // Process ALL events immediately when listener starts
+      for (var doc in snapshot.docs) {
+        final eventData = doc.data();
+        final eventTime = (eventData['startTime'] as Timestamp).toDate();
+        final now = DateTime.now();
+
+        // Process events that are in the future or very recently past (within 5 minutes)
+        if (eventTime.isAfter(now.subtract(Duration(minutes: 5)))) {
+          _checkAndCreateNotificationForEvent(doc.id, eventData);
+        }
+      }
+
+      // Also check for any document changes
+      // Also check for any document changes
       for (var change in snapshot.docChanges) {
         if (change.type == DocumentChangeType.added || change.type == DocumentChangeType.modified) {
           final eventData = change.doc.data() as Map<String, dynamic>;
-          final sourceType = eventData['sourceType'] ?? '';
+          final eventTime = (eventData['startTime'] as Timestamp).toDate();
+          final now = DateTime.now();
 
-          // Process assignments, tutorials, AND personal calendar events for reminders
-          if (sourceType == 'assignment' || sourceType == 'tutorial' || sourceType == null || sourceType == '') {
+          // For modified events, clean up all existing reminders first
+          if (change.type == DocumentChangeType.modified) {
+            _cleanupExistingReminders(change.doc.id);
+          }
+
+          if (eventTime.isAfter(now.subtract(Duration(minutes: 5)))) {
             _checkAndCreateNotificationForEvent(change.doc.id, eventData);
           }
         }
@@ -313,6 +331,7 @@ class NotificationService {
       final now = DateTime.now();
       final minutesUntilDue = eventTime.difference(now).inMinutes;
       final sourceType = eventData['sourceType'] ?? '';
+      final reminderMinutes = eventData['reminderMinutes'] ?? 15; // Get custom reminder time
 
       // Check existing reminder notifications for this event
       final existingNotifications = await _firestore
@@ -336,7 +355,14 @@ class NotificationService {
 
       final eventTitle = eventData['title'] ?? 'Event';
 
-      // Check for 1-day reminder (1440 minutes = 24 hours)
+      // Check for custom reminder time for personal calendar events
+      if (sourceType == '' || sourceType == null) {
+        // This is a personal calendar note - ONLY handle through precise timing check
+        // Skip the general reminder logic to avoid duplicates
+        return; // Exit early - let _checkPreciseReminderTiming handle this
+      }
+
+      // Check for 1-day reminder (1440 minutes = 24 hours) for assignments/tutorials
       if (minutesUntilDue <= 1440 && minutesUntilDue > 600 && !sentReminders.contains('1day')) {
         String title;
         String body;
@@ -348,7 +374,6 @@ class NotificationService {
           title = '📚 Tutorial Due Tomorrow';
           body = '$eventTitle is due tomorrow!';
         } else {
-          // For personal calendar events
           title = '📅 Calendar Reminder';
           body = '$eventTitle is scheduled for tomorrow!';
         }
@@ -363,7 +388,7 @@ class NotificationService {
         );
       }
 
-// Check for 10-minute reminder
+      // Check for 10-minute reminder for assignments/tutorials
       if (minutesUntilDue <= 10 && minutesUntilDue > 0 && !sentReminders.contains('10min')) {
         String title;
         String body;
@@ -397,16 +422,22 @@ class NotificationService {
   void _startDeadlineChecker() {
     _checkTimer?.cancel();
 
-    // Check every hour
-    _checkTimer = Timer.periodic(Duration(hours: 1), (timer) {
+    // Check every 15 seconds for more precise reminder timing for personal notes
+    _checkTimer = Timer.periodic(Duration(seconds: 15), (timer) {
       _checkUpcomingDeadlines();
+      _checkPersonalCalendarReminders();
     });
 
-    // Also check immediately
+    // Also check immediately and after a short delay
     _checkUpcomingDeadlines();
+    _checkPersonalCalendarReminders();
+
+    // Additional check after 5 seconds to catch any initialization delays
+    Future.delayed(Duration(seconds: 5), () {
+      _checkPersonalCalendarReminders();
+    });
   }
 
-  // Check for upcoming deadlines (24 hours before)
   // Check for upcoming deadlines (24 hours before)
   Future<void> _checkUpcomingDeadlines() async {
     final user = _auth.currentUser;
@@ -489,6 +520,139 @@ class NotificationService {
       }
     } catch (e) {
       print('❌ Error checking deadlines: $e');
+    }
+  }
+
+  // Check for personal calendar note reminders with precise timing
+  Future<void> _checkPersonalCalendarReminders() async {
+    final user = _auth.currentUser;
+    if (user == null || _userOrgCode == null || _userRole == null) return;
+
+    try {
+      final now = DateTime.now();
+      final pastRange = now.subtract(Duration(minutes: 5)); // Check 5 minutes in the past
+      final futureRange = now.add(Duration(days: 30)); // Check up to 30 days ahead
+
+      print('🔍 Checking personal calendar reminders from $pastRange to $futureRange');
+
+      // Get ALL calendar events in the expanded range
+      final eventsSnapshot = await _firestore
+          .collection('organizations')
+          .doc(_userOrgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('calendar_events')
+          .where('startTime', isGreaterThan: Timestamp.fromDate(pastRange))
+          .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(futureRange))
+          .get();
+
+      print('📅 Found ${eventsSnapshot.docs.length} events to check for reminders');
+
+      for (var eventDoc in eventsSnapshot.docs) {
+        final eventData = eventDoc.data();
+        final sourceType = eventData['sourceType'];
+        final eventTime = (eventData['startTime'] as Timestamp).toDate();
+
+        // Only process personal calendar events (no sourceType or empty sourceType) that are in the future
+        if ((sourceType == null || sourceType == '') && eventTime.isAfter(now)) {
+          print('📝 Checking personal event: ${eventData['title']} at $eventTime');
+          await _checkPreciseReminderTiming(eventDoc.id, eventData);
+        }
+      }
+    } catch (e) {
+      print('❌ Error checking personal calendar reminders: $e');
+    }
+  }
+// Check precise reminder timing for personal calendar events
+  Future<void> _checkPreciseReminderTiming(String eventId, Map<String, dynamic> eventData) async {
+    try {
+      final eventTime = (eventData['startTime'] as Timestamp).toDate();
+      final now = DateTime.now();
+      final reminderMinutes = eventData['reminderMinutes'] ?? 15;
+
+      print('⏰ Checking reminder for event: ${eventData['title']}');
+      print('   Event time: $eventTime');
+      print('   Reminder minutes: $reminderMinutes');
+
+      // Skip if no reminder is set (-1 means no reminder)
+      if (reminderMinutes == -1) {
+        print('   ⏩ Skipping - no reminder set');
+        return;
+      }
+
+      // Calculate exact reminder time
+      DateTime reminderTime;
+      if (reminderMinutes == 0) {
+        // "On time" means exactly at event time
+        reminderTime = eventTime;
+      } else {
+        // Normal reminder before event
+        reminderTime = eventTime.subtract(Duration(minutes: reminderMinutes));
+      }
+
+      final secondsUntilReminder = reminderTime.difference(now).inSeconds;
+
+      print('   Reminder time: $reminderTime');
+      print('   Seconds until reminder: $secondsUntilReminder');
+
+// Tighter timing window - check if we're within 30 seconds of the reminder time
+// This ensures "1 minute before" triggers at the exact time, not 5 minutes early
+      if (secondsUntilReminder <= 30 && secondsUntilReminder >= -30) {
+        print('   ✅ Within reminder window!');
+        final customReminderKey = 'custom_${reminderMinutes}min';
+
+        // Check if reminder already sent
+        final existingNotifications = await _firestore
+            .collection('organizations')
+            .doc(_userOrgCode)
+            .collection('students')
+            .doc(_auth.currentUser!.uid)
+            .collection('notifications')
+            .where('eventId', isEqualTo: eventId)
+            .where('reminderType', isEqualTo: customReminderKey)
+            .get();
+
+        if (existingNotifications.docs.isEmpty) {
+          final eventTitle = eventData['title'] ?? 'Event';
+          String title = '📅 Calendar Reminder';
+          String body;
+
+          // For precise timing, use the actual reminder time calculation
+          if (reminderMinutes == 0) {
+            // "On time" notification
+            title = '⏰ Event Starting Now!';
+            body = '$eventTitle is starting now!';
+          } else if (reminderMinutes >= 1440) { // 1 day or more
+            final days = (reminderMinutes / 1440).round();
+            body = '$eventTitle is scheduled ${days == 1 ? 'tomorrow' : 'in $days days'}!';
+          } else if (reminderMinutes >= 60) { // 1 hour or more
+            final hours = (reminderMinutes / 60).round();
+            body = '$eventTitle starts in $hours hour${hours == 1 ? '' : 's'}!';
+          } else {
+            // For precise minute reminders, show the exact reminder time
+            body = '$eventTitle starts in $reminderMinutes minute${reminderMinutes == 1 ? '' : 's'}!';
+          }
+
+          print('🔔 Creating reminder notification:');
+          print('   Title: $title');
+          print('   Body: $body');
+
+          await _createReminderNotification(
+            eventId: eventId,
+            eventData: eventData,
+            reminderType: customReminderKey,
+            title: title,
+            body: body,
+            minutesUntil: eventTime.difference(now).inMinutes,
+          );
+
+          print('✅ Sent precise reminder for: $eventTitle at ${DateTime.now()}');
+        } else {
+          print('   ⏩ Reminder already sent for this event');
+        }
+      }
+    } catch (e) {
+      print('❌ Error checking precise reminder timing: $e');
     }
   }
 
@@ -702,7 +866,8 @@ class NotificationService {
 
     try {
       // Check if this exact reminder already exists to prevent duplicates
-      final existingReminder = await _firestore
+      // For edited events, clean up old reminders first
+      final existingReminders = await _firestore
           .collection('organizations')
           .doc(_userOrgCode)
           .collection('students')
@@ -712,9 +877,15 @@ class NotificationService {
           .where('reminderType', isEqualTo: reminderType)
           .get();
 
-      if (existingReminder.docs.isNotEmpty) {
-        print('⚠️ Reminder $reminderType already exists for event $eventId');
-        return;
+// Delete existing reminders for this event and reminder type
+      final batch = _firestore.batch();
+      for (var doc in existingReminders.docs) {
+        batch.delete(doc.reference);
+      }
+
+      if (existingReminders.docs.isNotEmpty) {
+        await batch.commit();
+        print('🗑️ Cleaned up ${existingReminders.docs.length} old reminders for edited event');
       }
 
       String notificationType;
@@ -1039,6 +1210,34 @@ class NotificationService {
       }
     } catch (e) {
       print('❌ Error cleaning up duplicates: $e');
+    }
+  }
+
+  // Clean up existing reminders for an event (add this method)
+  Future<void> _cleanupExistingReminders(String eventId) async {
+    final user = _auth.currentUser;
+    if (user == null || _userOrgCode == null) return;
+
+    try {
+      final existingReminders = await _firestore
+          .collection('organizations')
+          .doc(_userOrgCode)
+          .collection('students')
+          .doc(user.uid)
+          .collection('notifications')
+          .where('eventId', isEqualTo: eventId)
+          .get();
+
+      if (existingReminders.docs.isNotEmpty) {
+        final batch = _firestore.batch();
+        for (var doc in existingReminders.docs) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+        print('🗑️ Cleaned up ${existingReminders.docs.length} old reminders for modified event $eventId');
+      }
+    } catch (e) {
+      print('❌ Error cleaning up existing reminders: $e');
     }
   }
 

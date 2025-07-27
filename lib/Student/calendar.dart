@@ -1910,6 +1910,8 @@ class _NoteDialogState extends State<NoteDialog> {
     'goals'
   ];
 
+  int _reminderMinutes = -1; // Default to "No reminder"
+
   @override
   void initState() {
     super.initState();
@@ -1922,6 +1924,7 @@ class _NoteDialogState extends State<NoteDialog> {
       _selectedTime = TimeOfDay.fromDateTime(widget.event!.startTime);
       _selectedColor = widget.event!.color;
       _selectedCalendar = widget.event!.calendar;
+      _reminderMinutes = widget.event!.reminderMinutes;
     }
   }
 
@@ -1975,6 +1978,42 @@ class _NoteDialogState extends State<NoteDialog> {
                 prefixIcon: Icon(Icons.description),
               ),
               maxLines: 3,
+            ),
+            SizedBox(height: 16),
+// Add reminder time selector
+            Text(
+              'Reminder:',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            SizedBox(height: 8),
+            DropdownButtonFormField<int>(
+              value: _reminderMinutes,
+              decoration: InputDecoration(
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                prefixIcon: Icon(Icons.notifications),
+              ),
+              items: [
+                DropdownMenuItem(value: -1, child: Text('No reminder')),
+                DropdownMenuItem(value: 0, child: Text('On time')),
+                DropdownMenuItem(value: 1, child: Text('1 minute before')),
+                DropdownMenuItem(value: 5, child: Text('5 minutes before')),
+                DropdownMenuItem(value: 10, child: Text('10 minutes before')),
+                DropdownMenuItem(value: 15, child: Text('15 minutes before')),
+                DropdownMenuItem(value: 30, child: Text('30 minutes before')),
+                DropdownMenuItem(value: 60, child: Text('1 hour before')),
+                DropdownMenuItem(value: 120, child: Text('2 hours before')),
+                DropdownMenuItem(value: 1440, child: Text('1 day before')),
+                DropdownMenuItem(value: 2880, child: Text('2 days before')),
+                DropdownMenuItem(value: 10080, child: Text('1 week before')),
+              ],
+              onChanged: (value) {
+                setState(() => _reminderMinutes = value ?? 15);
+              },
             ),
             SizedBox(height: 16),
             DropdownButtonFormField<String>(
@@ -2129,7 +2168,7 @@ class _NoteDialogState extends State<NoteDialog> {
                 calendar: _selectedCalendar,
                 eventType: EventType.normal,
                 recurrenceType: RecurrenceType.none,
-                reminderMinutes: 15,
+                reminderMinutes: _reminderMinutes, // Make sure this uses the selected value
                 location: '',
                 sourceId: widget.event?.sourceId,
                 sourceType: widget.event?.sourceType,
