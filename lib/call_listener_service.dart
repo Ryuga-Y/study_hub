@@ -79,6 +79,16 @@ class CallListenerService {
   }
 
   void dispose() {
+    // Only dispose if explicitly called, not automatically
+    print('⚠️ CallListenerService dispose called - this should rarely happen');
     _callSubscription?.cancel();
+  }
+
+// Add method to ensure service is always listening
+  void ensureListening() {
+    if (_callSubscription == null || _callSubscription!.isPaused) {
+      print('🔄 Restarting call listener service');
+      _startListening();
+    }
   }
 }

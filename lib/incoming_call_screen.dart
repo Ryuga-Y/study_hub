@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class IncomingCallScreen extends StatefulWidget {
   final String callId;
@@ -42,6 +43,31 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     ));
 
     _pulseController.repeat(reverse: true);
+
+    // ADD THIS: Check if call is still valid
+    _checkCallValidity();
+  }
+
+  Future<void> _checkCallValidity() async {
+    try {
+      // Listen to real-time updates instead of one-time check
+      FirebaseFirestore.instance
+          .collection('videoCalls')
+          .doc(widget.callId)
+          .snapshots()
+          .listen((snapshot) {
+        if (!mounted) return;
+
+        if (!snapshot.exists ||
+            snapshot.data()?['status'] == 'ended' ||
+            snapshot.data()?['status'] == 'declined') {
+          print('⚠️ Call no longer valid (${snapshot.data()?['status']}), closing incoming call screen');
+          Navigator.pop(context);
+        }
+      });
+    } catch (e) {
+      print('Error checking call validity: $e');
+    }
   }
 
   @override

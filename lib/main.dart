@@ -16,9 +16,16 @@ import 'community/bloc.dart';
 import 'call_listener_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+// Initialize CallListenerService globally
+final CallListenerService globalCallListener = CallListenerService();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  // Initialize the global call listener
+  globalCallListener.initialize();
+
   runApp(MyApp());
 }
 
@@ -28,17 +35,27 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
-  final CallListenerService _callListener = CallListenerService();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _requestPermissions(); // Add this line
-    _callListener.initialize();  // Initialize call listener
+    _requestPermissions();
+    // Don't initialize here - already done globally
+    // Ensure it's listening
+    globalCallListener.ensureListening();
   }
 
-// Add this method in _MyAppState class
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed) {
+      // Ensure call listener is active when app resumes
+      globalCallListener.ensureListening();
+    }
+  }
+
   Future<void> _requestPermissions() async {
     await [
       Permission.camera,
@@ -50,7 +67,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _callListener.dispose();
+    // DON'T dispose the global call listener
+    // _callListener.dispose();  // Remove this line
     super.dispose();
   }
 

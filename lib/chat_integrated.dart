@@ -133,7 +133,7 @@ class ChatContactPage extends StatefulWidget {
   _ChatContactPageState createState() => _ChatContactPageState();
 }
 
-class _ChatContactPageState extends State<ChatContactPage> {
+class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingObserver {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   List<ChatContact> _contacts = [];
@@ -147,14 +147,40 @@ class _ChatContactPageState extends State<ChatContactPage> {
   Timer? _refreshTimer;
   StreamSubscription? _friendsSubscription;
   StreamSubscription? _chatsSubscription;
+  StreamSubscription? _incomingCallSubscription; // ADD THIS LINE
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // ADD THIS LINE
     _loadFriendsAsContacts();
     _setupRealtimeContactUpdates();
     _startPeriodicRefresh();
     _listenForIncomingCalls();
+    _cleanupOldCalls();
+  }
+
+  Future<void> _cleanupOldCalls() async {
+    try {
+      final cutoffTime = DateTime.now().subtract(Duration(minutes: 2));
+      final oldCalls = await _firestore
+          .collection('videoCalls')
+          .where('createdAt', isLessThan: Timestamp.fromDate(cutoffTime))
+          .where('status', whereIn: ['calling', 'answered'])
+          .get();
+
+      final batch = _firestore.batch();
+      for (final doc in oldCalls.docs) {
+        batch.delete(doc.reference);
+      }
+
+      if (oldCalls.docs.isNotEmpty) {
+        await batch.commit();
+        print('🗑️ Cleaned up ${oldCalls.docs.length} old call documents');
+      }
+    } catch (e) {
+      print('Error cleaning up old calls: $e');
+    }
   }
 
   void _setupRealtimeContactUpdates() {
@@ -851,31 +877,112 @@ void _startPeriodicRefresh() {
   }
 
   // ✅ INCOMING CALL METHODS - INSIDE THE CLASS
+// ADD THIS as a class-level variable at the top of _ChatContactPageState
+  Set<String> _handledCallIds = Set<String>();
+
   void _listenForIncomingCalls() {
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
 
-    _firestore
+    _incomingCallSubscription?.cancel();
+
+    _incomingCallSubscription = _firestore
         .collection('videoCalls')
         .where('targetId', isEqualTo: currentUserId)
         .where('status', isEqualTo: 'calling')
         .snapshots()
         .listen((snapshot) {
       for (var change in snapshot.docChanges) {
+        // Only handle added documents, not modified ones
         if (change.type == DocumentChangeType.added) {
-          final callData = change.doc.data() as Map<String, dynamic>;
-          _showIncomingCallDialog(
-            callData['callId'],
-            callData['callerId'],
-            callData['callerName'] ?? 'Unknown',
-          );
+          final callData = change.doc.data() as Map<String, dynamic>?;
+          if (callData == null) continue;
+
+          // Check status again to ensure it's still 'calling'
+          if (callData['status'] != 'calling') {
+            print('⚠️ Ignoring call with status: ${callData['status']}');
+            continue;
+          }
+
+          final callId = callData['callId'];
+          final callerId = callData['callerId'];
+
+          // Prevent self-calling
+          if (callerId == currentUserId) {
+            print('⚠️ Ignoring self-initiated call: $callId');
+            continue;
+          }
+
+          // Skip if already handled
+          if (_handledCallIds.contains(callId)) {
+            print('⚠️ Call already handled: $callId');
+            continue;
+          }
+
+          // Check if call is recent (within 30 seconds)
+          final createdAt = callData['createdAt'] as Timestamp?;
+          if (createdAt != null) {
+            final callTime = createdAt.toDate();
+            final timeDifference = DateTime.now().difference(callTime).inSeconds;
+
+            if (timeDifference <= 30) {
+              _handledCallIds.add(callId);
+              _showIncomingCallDialog(callId, callerId, callData['callerName'] ?? 'Unknown');
+            } else {
+              print('⚠️ Ignoring old call: $timeDifference seconds old');
+              _handledCallIds.add(callId);
+            }
+          } else {
+            print('⚠️ Ignoring call without timestamp: $callId');
+            _handledCallIds.add(callId);
+          }
         }
+      }
+    }, onError: (error) {
+      print('Error listening for incoming calls: $error');
+    });
+
+    // Add cleanup timer
+    Timer.periodic(Duration(minutes: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      final now = DateTime.now();
+      final oldCallIds = <String>[];
+
+      for (final callId in _handledCallIds) {
+        final parts = callId.split('_');
+        if (parts.length >= 2) {
+          final timestamp = int.tryParse(parts.last);
+          if (timestamp != null) {
+            final callTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+            if (now.difference(callTime).inMinutes > 5) {
+              oldCallIds.add(callId);
+            }
+          }
+        }
+      }
+
+      for (final oldId in oldCallIds) {
+        _handledCallIds.remove(oldId);
+      }
+
+      if (oldCallIds.isNotEmpty) {
+        print('🧹 Cleaned up ${oldCallIds.length} old handled call IDs');
       }
     });
   }
 
   void _showIncomingCallDialog(String callId, String callerId, String callerName) {
     print('📞 Showing incoming call from: $callerName (ID: $callerId)');
+
+    if (!mounted) {
+      print('⚠️ Widget unmounted, skipping incoming call dialog');
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -896,16 +1003,56 @@ void _startPeriodicRefresh() {
               ),
             );
           },
-          onDecline: () {
+          onDecline: () async {
             print('❌ Call declined');
-            _firestore.collection('videoCalls').doc(callId).update({
-              'status': 'declined',
-            });
+            try {
+              await _firestore.collection('videoCalls').doc(callId).update({
+                'status': 'declined',
+                'declinedAt': FieldValue.serverTimestamp(),
+              });
+            } catch (e) {
+              print('Error declining call: $e');
+              // If update fails, try to delete
+              try {
+                await _firestore.collection('videoCalls').doc(callId).delete();
+              } catch (e2) {
+                print('Error deleting call: $e2');
+              }
+            }
             Navigator.pop(context);
           },
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _friendsSubscription?.cancel();
+    _chatsSubscription?.cancel();
+    // DON'T cancel incoming call subscription on dispose
+    // Only cancel if widget is being permanently removed
+    if (!mounted) {
+      _incomingCallSubscription?.cancel();
+    }
+
+    // Clear handled calls to prevent memory leaks
+    _handledCallIds.clear();
+
+    WidgetsBinding.instance.removeObserver(this); // ADD THIS LINE
+
+    super.dispose();
+  }
+
+// Add this method to restart listening when returning from video call
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // Restart listening when app resumes
+      _listenForIncomingCalls();
+    }
   }
 }
 
@@ -949,6 +1096,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _verifyFriendshipBeforeChat();
+    // Remove any _listenForIncomingCalls() call from here if it exists
   }
 
   Future<void> _verifyFriendshipBeforeChat() async {

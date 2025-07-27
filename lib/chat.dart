@@ -138,6 +138,9 @@ class _ChatContactPageState extends State<ChatContactPage> {
     _loadContacts();
   }
 
+// ADD THIS as a class-level variable at the top of _ChatContactPageState
+  Set<String> _handledCallIds = Set<String>();
+
   void _listenForIncomingCalls() {
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
@@ -151,11 +154,29 @@ class _ChatContactPageState extends State<ChatContactPage> {
       for (var change in snapshot.docChanges) {
         if (change.type == DocumentChangeType.added) {
           final callData = change.doc.data() as Map<String, dynamic>;
-          _showIncomingCallDialog(
-            callData['callId'],
-            callData['callerId'],
-            callData['callerName'] ?? 'Unknown',
-          );
+          final callId = callData['callId'];
+
+          // Skip if already handled
+          if (_handledCallIds.contains(callId)) {
+            continue;
+          }
+
+          // Check call age
+          final createdAt = callData['createdAt'] as Timestamp?;
+          if (createdAt != null) {
+            final callTime = createdAt.toDate();
+            final now = DateTime.now();
+            final timeDifference = now.difference(callTime).inSeconds;
+
+            if (timeDifference <= 30) {
+              _handledCallIds.add(callId);
+              _showIncomingCallDialog(
+                callData['callId'],
+                callData['callerId'],
+                callData['callerName'] ?? 'Unknown',
+              );
+            }
+          }
         }
       }
     });

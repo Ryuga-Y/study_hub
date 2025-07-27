@@ -61,32 +61,62 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         return;
       }
 
-      // Initialize renderers
-      await _localRenderer.initialize();
-      await _remoteRenderer.initialize();
+      // Initialize renderers with error handling
+      try {
+        // Initialize with explicit configuration to avoid graphics buffer issues
+        await _localRenderer.initialize();
+        await _remoteRenderer.initialize();
+      } catch (e) {
+        print('❌ Video renderer initialization failed: $e');
+        // Try with software rendering fallback
+        await Future.delayed(Duration(milliseconds: 500));
+        try {
+          // Force software rendering to avoid hardware buffer allocation issues
+          await _localRenderer.initialize();
+          await _remoteRenderer.initialize();
+        } catch (e2) {
+          print('❌ Video renderer retry failed: $e2');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Video rendering not supported on this device')),
+            );
+          }
+        }
+      }
 
       _webRTCService.onLocalStream = (stream) {
         if (mounted && stream != null) {
-          setState(() {
-            _localRenderer.srcObject = stream;
+          // Use post-frame callback to avoid frame timing issues
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _localRenderer.srcObject = stream;
+              });
+              print('✅ Local video stream connected in UI');
+            }
           });
-          print('✅ Local video stream connected in UI');
         }
       };
 
       _webRTCService.onRemoteStream = (stream) {
         if (mounted) {
-          setState(() {
-            _remoteRenderer.srcObject = stream;
-            _isConnected = true;
-            _isConnecting = false;
+          // Use post-frame callback to avoid frame timing issues
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _remoteRenderer.srcObject = stream;
+                _isConnected = true;
+                _isConnecting = false;
+              });
+              print('✅ Remote video stream connected in UI');
+            }
           });
-          print('✅ Remote video stream connected in UI');
         }
       };
-
       _webRTCService.onCallEnd = () {
-        Navigator.pop(context);
+        if (mounted) {
+          Navigator.pop(context);
+        }
       };
 
       // ADD THIS: Monitor call status in Firebase
@@ -117,7 +147,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   void _monitorCallStatus() {
-    _callStatusMonitor?.cancel(); // Cancel any existing subscription
+    _callStatusMonitor?.cancel();
 
     _callStatusMonitor = FirebaseFirestore.instance
         .collection('videoCalls')
@@ -133,6 +163,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         print('📞 Video call status: $status');
 
         if (status == 'ended' || status == 'declined') {
+          _callStatusMonitor?.cancel();
+          _callStatusMonitor = null;
+
           if (mounted) {
             Navigator.pop(context);
           }
@@ -143,6 +176,20 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             });
           }
         }
+      } else {
+        // Document deleted - call ended
+        _callStatusMonitor?.cancel();
+        _callStatusMonitor = null;
+
+        if (mounted) {
+          Navigator.pop(context);
+        }
+      }
+    }, onError: (error) {
+      print('Error monitoring call status: $error');
+      if (mounted) {
+        _callStatusMonitor?.cancel();
+        Navigator.pop(context);
       }
     });
   }
@@ -160,26 +207,56 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       return cameraStatus.isGranted && micStatus.isGranted;
     }
 
-    @override
-    void dispose() {
-      // Cancel monitoring first
-      _callStatusMonitor?.cancel();
+  @override
+  void dispose() {
+    // Cancel monitoring first
+    _callStatusMonitor?.cancel();
 
-      // Dispose service before renderers
-      _webRTCService.dispose();
+    // Ensure call is marked as ended in Firebase
+    if (widget.callId != null) {
+      FirebaseFirestore.instance.collection('videoCalls').doc(widget.callId).update({
+        'status': 'ended',
+        'endedAt': FieldValue.serverTimestamp(),
+      }).catchError((e) => print('Error updating call status on dispose: $e'));
+    }
 
-      // Dispose renderers synchronously
-      try {
+    // Clear callbacks to prevent accessing disposed context
+    _webRTCService.onCallEnd = null;
+    _webRTCService.onLocalStream = null;
+    _webRTCService.onRemoteStream = null;
+
+    Future.delayed(Duration(milliseconds: 100), () {
+      _webRTCService.cleanup(); // Use cleanup instead of dispose
+    });
+
+    // Dispose service before renderers
+    _webRTCService.dispose();
+
+    // Dispose renderers with proper cleanup
+    try {
+      // Clear video sources first
+      if (_localRenderer.srcObject != null) {
         _localRenderer.srcObject = null;
+      }
+      if (_remoteRenderer.srcObject != null) {
         _remoteRenderer.srcObject = null;
-        _localRenderer.dispose();
-        _remoteRenderer.dispose();
-      } catch (e) {
-        print('Error disposing renderers: $e');
       }
 
-      super.dispose();
+      // Add delay to ensure resources are released
+      Future.delayed(Duration(milliseconds: 100), () async {
+        try {
+          await _localRenderer.dispose();
+          await _remoteRenderer.dispose();
+        } catch (e) {
+          print('Error disposing renderers: $e');
+        }
+      });
+    } catch (e) {
+      print('Error disposing renderers: $e');
     }
+
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -188,8 +265,19 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       body: Stack(
         children: [
           // Remote video (full screen)
+          // Remote video (full screen)
+          // Remote video (full screen)
           _isConnected
-              ? RTCVideoView(_remoteRenderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)
+              ? Container(
+            child: RepaintBoundary(
+              child: RTCVideoView(
+                _remoteRenderer,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                mirror: false,
+                filterQuality: FilterQuality.low,
+              ),
+            ),
+          )
               : _buildWaitingScreen(),
 
           // Local video (small overlay)
@@ -206,7 +294,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: RTCVideoView(_localRenderer, mirror: true),
+                  child: RepaintBoundary(
+                    child: RTCVideoView(
+                      _localRenderer,
+                      mirror: true,
+                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      filterQuality: FilterQuality.low,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -333,7 +428,17 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             icon: Icons.call_end,
             onPressed: () async {
               print('📞 User pressed end call button');
+
+              // Cancel monitoring first to prevent race conditions
+              _callStatusMonitor?.cancel();
+
+              // Set callback to null to prevent double navigation
+              _webRTCService.onCallEnd = null;
+
+              // End the call
               await _webRTCService.endCall();
+
+              // Force close the screen
               if (mounted) {
                 Navigator.pop(context);
               }

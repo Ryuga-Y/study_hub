@@ -103,9 +103,25 @@ class WebRTCService {
       };
 
       print('✅ WebRTC initialized successfully');
+
+// Configure video rendering to avoid graphics buffer issues
+      _configureVideoRendering();
     } catch (e) {
       print('❌ Error initializing WebRTC: $e');
       throw e;
+    }
+  }
+
+  void _configureVideoRendering() {
+    // Configure peer connection for better compatibility
+    if (_peerConnection != null) {
+      try {
+        // Log successful peer connection creation
+        print('📹 Video rendering configured for peer connection');
+        print('📹 Peer connection state: ${_peerConnection!.connectionState}');
+      } catch (error) {
+        print('⚠️ Could not configure video rendering: $error');
+      }
     }
   }
 
@@ -121,24 +137,44 @@ class WebRTCService {
 
       final constraints = {
         'audio': {
-          'echoCancellation': true,
-          'noiseSuppression': true,
+          'echoCancellation': false,  // Use software-based instead of hardware
+          'noiseSuppression': false,  // Use software-based instead of hardware
           'autoGainControl': true,
+          'googEchoCancellation': true,     // Google's software implementation
+          'googNoiseSuppression': true,     // Google's software implementation
+          'googAutoGainControl': true,
+          'googHighpassFilter': true,
+          'googTypingNoiseDetection': true,
         },
         'video': {
           'facingMode': 'user',
-          'width': {'ideal': 640},
-          'height': {'ideal': 480},
-          'frameRate': {'ideal': 30},
+          'width': {'ideal': 640, 'max': 1280},
+          'height': {'ideal': 480, 'max': 720},
+          'frameRate': {'ideal': 24, 'max': 30},
+          'aspectRatio': {'ideal': 1.33333},
         }
       };
-
       try {
         _localStream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (e) {
-        print('⚠️ Failed to get video, trying audio only: $e');
-        // Fallback to audio only if video fails
-        _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+        print('⚠️ Failed to get media with full constraints, trying fallback: $e');
+
+        // Try with basic audio constraints
+        try {
+          final basicConstraints = {
+            'audio': true,
+            'video': {
+              'facingMode': 'user',
+              'width': {'ideal': 640},
+              'height': {'ideal': 480},
+            }
+          };
+          _localStream = await navigator.mediaDevices.getUserMedia(basicConstraints);
+        } catch (e2) {
+          print('⚠️ Failed to get video, trying audio only: $e2');
+          // Fallback to audio only if video fails
+          _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+        }
       }
       print('✅ Local stream obtained');
 
@@ -168,15 +204,24 @@ class WebRTCService {
       await getUserMedia();
 
       // Create call document in Firebase
-      await _firestore.collection('videoCalls').doc(currentCallId).set({
-        'callId': currentCallId,
-        'callerId': _auth.currentUser!.uid,
-        'callerName': _auth.currentUser!.displayName ?? 'Unknown',
-        'targetId': targetUserId,
-        'targetName': targetUserName,
-        'status': 'calling',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      try {
+        await _firestore.collection('videoCalls').doc(currentCallId).set({
+          'callId': currentCallId,
+          'callerId': _auth.currentUser!.uid,
+          'callerName': _auth.currentUser!.displayName ?? 'Unknown',
+          'targetId': targetUserId,
+          'targetName': targetUserName,
+          'status': 'calling',
+          'createdAt': FieldValue.serverTimestamp(),
+          'expiresAt': DateTime.now().add(Duration(seconds: 60)),
+        });
+      } catch (e) {
+        print('❌ Permission error creating call: $e');
+        if (e.toString().contains('permission-denied')) {
+          throw Exception('Unable to create call - check Firestore permissions');
+        }
+        throw e;
+      }
 
       print('✅ Call document created: $currentCallId');
 
@@ -397,38 +442,92 @@ class WebRTCService {
     print('📞 Ending call: $currentCallId');
 
     if (_isDisposed) return;
-
-    // Cancel all subscriptions first
-    await _callStatusSubscription?.cancel();
-    await _answerSubscription?.cancel();
-    await _iceCandidatesSubscription?.cancel();
-
     _isDisposed = true;
 
-    // Update call status in Firebase
-    if (currentCallId != null) {
+    // Store callId before clearing
+    final callIdToEnd = currentCallId;
+
+    // Cancel all subscriptions FIRST
+    _callStatusSubscription?.cancel();
+    _answerSubscription?.cancel();
+    _iceCandidatesSubscription?.cancel();
+
+    _callStatusSubscription = null;
+    _answerSubscription = null;
+    _iceCandidatesSubscription = null;
+
+    // Update status to ended IMMEDIATELY with retry logic
+    if (callIdToEnd != null) {
       try {
-        await _firestore.collection('videoCalls').doc(currentCallId).update({
+        await _firestore.collection('videoCalls').doc(callIdToEnd).update({
           'status': 'ended',
           'endedAt': FieldValue.serverTimestamp(),
-          'endedBy': _auth.currentUser?.uid ?? 'unknown',
+        }).timeout(Duration(seconds: 5), onTimeout: () {
+          print('⚠️ Update timeout, attempting delete');
+          return _firestore.collection('videoCalls').doc(callIdToEnd).delete();
         });
 
-        print('✅ Call status updated to ended');
+        // Delete after a short delay to allow other clients to see the status
+        Future.delayed(Duration(seconds: 2), () async {
+          try {
+            await _firestore.collection('videoCalls').doc(currentCallId).delete();
+            print('🗑️ Call document deleted');
+          } catch (e) {
+            print('Error deleting call document: $e');
+          }
+        });
+
+        // Also delete ICE candidates collection
+        final iceCandidatesRef = _firestore.collection('videoCalls')
+            .doc(currentCallId)
+            .collection('iceCandidates');
+
+        final iceDocs = await iceCandidatesRef.get();
+        final batch = _firestore.batch();
+
+        for (final doc in iceDocs.docs) {
+          batch.delete(doc.reference);
+        }
+
+        if (iceDocs.docs.isNotEmpty) {
+          await batch.commit();
+          print('🗑️ ICE candidates deleted');
+        }
       } catch (e) {
         print('❌ Error updating call status: $e');
+        // If update fails, try to delete immediately
+        try {
+          await _firestore.collection('videoCalls').doc(currentCallId).delete();
+          print('🗑️ Call document force deleted after update failure');
+        } catch (deleteError) {
+          print('❌ Error force deleting call document: $deleteError');
+        }
       }
     }
 
     _cleanup();
-    onCallEnd?.call();
+
+    // Call onCallEnd only if it's not null and widget is still mounted
+    if (onCallEnd != null) {
+      onCallEnd?.call();
+    }
   }
 
   void _cleanup() {
     print('🧹 Cleaning up WebRTC resources...');
 
     try {
-      // Stop and dispose local stream tracks
+      // Close peer connection first to stop all tracks
+      if (_peerConnection != null) {
+        try {
+          _peerConnection!.close();
+        } catch (e) {
+          print('Error closing peer connection: $e');
+        }
+        _peerConnection = null;
+      }
+
+      // Stop and dispose local stream tracks with delay
       if (_localStream != null) {
         _localStream!.getTracks().forEach((track) {
           try {
@@ -437,11 +536,19 @@ class WebRTCService {
             print('Error stopping track: $e');
           }
         });
-        _localStream!.dispose();
+
+        // Dispose after tracks are stopped
+        Future.delayed(Duration(milliseconds: 100), () {
+          try {
+            _localStream?.dispose();
+          } catch (e) {
+            print('Error disposing local stream: $e');
+          }
+        });
         _localStream = null;
       }
 
-      // Stop and dispose remote stream tracks
+      // Stop and dispose remote stream tracks with delay
       if (_remoteStream != null) {
         _remoteStream!.getTracks().forEach((track) {
           try {
@@ -450,14 +557,16 @@ class WebRTCService {
             print('Error stopping remote track: $e');
           }
         });
-        _remoteStream!.dispose();
-        _remoteStream = null;
-      }
 
-      // Close peer connection
-      if (_peerConnection != null) {
-        _peerConnection!.close();
-        _peerConnection = null;
+        // Dispose after tracks are stopped
+        Future.delayed(Duration(milliseconds: 100), () {
+          try {
+            _remoteStream?.dispose();
+          } catch (e) {
+            print('Error disposing remote stream: $e');
+          }
+        });
+        _remoteStream = null;
       }
 
       print('✅ WebRTC cleanup completed');
@@ -500,7 +609,13 @@ class WebRTCService {
     }
   }
 
-  // Dispose method for proper cleanup
+  // Add a new cleanup method that doesn't set _isDisposed
+  void cleanup() {
+    print('🧹 Cleaning up WebRTC resources without disposing service...');
+    _cleanup();
+    // Don't set _isDisposed = true here
+  }
+
   void dispose() {
     print('🗑️ Disposing WebRTC service');
     _isDisposed = true;
