@@ -1335,10 +1335,6 @@ class _CalendarPageState extends State<CalendarPage> {
                     return true;
                   }
 
-                  // Event matches if:
-                  // 1. It starts in this hour
-                  // 2. It spans across this hour (starts before and ends after)
-                  // 3. It's an all-day event shown at specific time (like 11:59 PM)
                   final matches = eventStartHour == hour ||
                       (eventStartHour < hour &&
                           (eventEndHour > hour ||
@@ -1377,9 +1373,8 @@ class _CalendarPageState extends State<CalendarPage> {
                             final eventStartTime = event.startTime;
                             final eventEndTime = event.endTime;
 
-                            // Calculate base position and height
                             double topPosition = 0;
-                            double eventHeight = 20; // Default minimum height
+                            double eventHeight = math.max(10.0, 20.0); // Ensure minimum height is always positive
 
                             if (eventStartTime.hour == 23 && eventStartTime.minute == 59) {
                               // Special handling for 11:59 PM events
@@ -1450,7 +1445,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                           event.title,
                                           style: TextStyle(
                                             color: Colors.white,
-                                            fontSize: math.min(9, eventHeight / 2.5),
+                                            fontSize: math.max(6, math.min(9, eventHeight / 2.5)),
                                             fontWeight: FontWeight.w600,
                                           ),
                                           overflow: TextOverflow.ellipsis,
@@ -1464,7 +1459,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                             TimeOfDay.fromDateTime(event.startTime).format(context),
                                             style: TextStyle(
                                               color: Colors.white.withOpacity(0.8),
-                                              fontSize: math.min(7, eventHeight / 3),
+                                              fontSize: math.max(6, math.min(7, eventHeight / 3)),
                                             ),
                                           ),
                                         ),
@@ -1924,7 +1919,14 @@ class _NoteDialogState extends State<NoteDialog> {
       _selectedTime = TimeOfDay.fromDateTime(widget.event!.startTime);
       _selectedColor = widget.event!.color;
       _selectedCalendar = widget.event!.calendar;
-      _reminderMinutes = widget.event!.reminderMinutes;
+
+      // Ensure reminder minutes value exists in dropdown options
+      final validReminderValues = [-1, 0, 5, 10, 15, 30, 60, 120, 1440, 2880, 10080];
+      if (validReminderValues.contains(widget.event!.reminderMinutes)) {
+        _reminderMinutes = widget.event!.reminderMinutes;
+      } else {
+        _reminderMinutes = -1; // Default to "No reminder" if invalid value
+      }
     }
   }
 
@@ -1997,19 +1999,19 @@ class _NoteDialogState extends State<NoteDialog> {
                 ),
                 prefixIcon: Icon(Icons.notifications),
               ),
+              isExpanded: true,
               items: [
-                DropdownMenuItem(value: -1, child: Text('No reminder')),
-                DropdownMenuItem(value: 0, child: Text('On time')),
-                DropdownMenuItem(value: 1, child: Text('1 minute before')),
-                DropdownMenuItem(value: 5, child: Text('5 minutes before')),
-                DropdownMenuItem(value: 10, child: Text('10 minutes before')),
-                DropdownMenuItem(value: 15, child: Text('15 minutes before')),
-                DropdownMenuItem(value: 30, child: Text('30 minutes before')),
-                DropdownMenuItem(value: 60, child: Text('1 hour before')),
-                DropdownMenuItem(value: 120, child: Text('2 hours before')),
-                DropdownMenuItem(value: 1440, child: Text('1 day before')),
-                DropdownMenuItem(value: 2880, child: Text('2 days before')),
-                DropdownMenuItem(value: 10080, child: Text('1 week before')),
+                DropdownMenuItem(value: -1, child: Text('No reminder', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 0, child: Text('On time (1 reminder)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 5, child: Text('5 minutes before (2 reminders)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 10, child: Text('10 minutes before (2 reminders)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 15, child: Text('15 minutes before (2 reminders)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 30, child: Text('30 minutes before (2 reminders)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 60, child: Text('1 hour before (2 reminders)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 120, child: Text('2 hours before (2 reminders)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 1440, child: Text('1 day before (2 reminders)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 2880, child: Text('2 days before (2 reminders)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 10080, child: Text('1 week before (2 reminders)', overflow: TextOverflow.ellipsis)),
               ],
               onChanged: (value) {
                 setState(() => _reminderMinutes = value ?? 15);
