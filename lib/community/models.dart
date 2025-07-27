@@ -13,6 +13,7 @@ class CommunityUser {
   final int friendCount;
   final DateTime joinDate;
   final bool isActive;
+  final FriendsListPrivacy friendsListPrivacy;
 
   CommunityUser({
     required this.uid,
@@ -26,6 +27,7 @@ class CommunityUser {
     this.friendCount = 0,
     required this.joinDate,
     this.isActive = true,
+    this.friendsListPrivacy = FriendsListPrivacy.public,
   });
 
   CommunityUser copyWith({
@@ -40,6 +42,7 @@ class CommunityUser {
     int? friendCount,
     DateTime? joinDate,
     bool? isActive,
+    FriendsListPrivacy? friendsListPrivacy,
   }) {
     return CommunityUser(
       uid: uid ?? this.uid,
@@ -53,6 +56,7 @@ class CommunityUser {
       friendCount: friendCount ?? this.friendCount,
       joinDate: joinDate ?? this.joinDate,
       isActive: isActive ?? this.isActive,
+      friendsListPrivacy: friendsListPrivacy ?? this.friendsListPrivacy,
     );
   }
 
@@ -70,6 +74,10 @@ class CommunityUser {
       friendCount: data['friendCount'] ?? 0,
       joinDate: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       isActive: data['isActive'] ?? true,
+      friendsListPrivacy: FriendsListPrivacy.values.firstWhere(
+            (e) => e.toString() == 'FriendsListPrivacy.${data['friendsListPrivacy'] ?? 'public'}',
+        orElse: () => FriendsListPrivacy.public,
+      ),
     );
   }
 
@@ -84,6 +92,7 @@ class CommunityUser {
       'postCount': postCount,
       'friendCount': friendCount,
       'isActive': isActive,
+      'friendsListPrivacy': friendsListPrivacy.toString().split('.').last,
     };
   }
 }
@@ -654,6 +663,7 @@ class FeedItem {
 }
 
 enum FeedItemType { post, story, suggestion }
+enum FriendsListPrivacy { public, friendsOnly, private }
 
 // Media upload progress
 class MediaUpload {

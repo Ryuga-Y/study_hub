@@ -597,108 +597,158 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
 
     final friends = widget.isCurrentUser ? state.friends : _userFriends;
+    final user = widget.isCurrentUser ? state.currentUserProfile : state.viewingUserProfile;
 
-    print('DEBUG: Displaying ${friends.length} friends for user ${widget.userId}');
+    // Check if the current viewer can see the friends list
+    return FutureBuilder<bool>(
+      future: _checkCanViewFriendsList(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
 
-    if (friends.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.people_outline,
-              size: 64,
-              color: Colors.grey[300],
-            ),
-            SizedBox(height: 16),
-            Text(
-              'No friends yet',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[600],
-              ),
-            ),
-            if (widget.isCurrentUser) ...[
-              SizedBox(height: 8),
-              TextButton(
-                onPressed: () {
-                  // Navigate to search screen
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => SearchScreen(
-                        organizationCode: state.currentUserProfile?.organizationCode ?? '',
-                      ),
-                    ),
-                  );
-                },
-                child: Text('Find Friends'),
-              ),
-            ],
-          ],
-        ),
-      );
-    }
+        final canView = snapshot.data ?? false;
 
-    return ListView.builder(
-      padding: EdgeInsets.all(16),
-      itemCount: friends.length,
-      itemBuilder: (context, index) {
-        final friend = friends[index];
-
-        // Determine the correct friend info to display
-        final displayId = friend.userId == widget.userId ? friend.friendId : friend.userId;
-        final displayName = friend.userId == widget.userId ? friend.friendName : friend.friendName;
-        final displayAvatar = friend.userId == widget.userId ? friend.friendAvatar : friend.friendAvatar;
-
-        return ListTile(
-          leading: CircleAvatar(
-            backgroundImage: displayAvatar != null
-                ? CachedNetworkImageProvider(displayAvatar)
-                : null,
-            child: displayAvatar == null
-                ? Icon(Icons.person)
-                : null,
-          ),
-          title: Text(displayName),
-          subtitle: friend.mutualFriends.isNotEmpty
-              ? Text('${friend.mutualFriends.length} mutual friends')
-              : null,
-          trailing: widget.isCurrentUser
-              ? PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert),
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'unfriend',
-                child: Text('Unfriend'),
-              ),
-              PopupMenuItem(
-                value: 'block',
-                child: Text('Block'),
-              ),
-            ],
-            onSelected: (value) {
-              if (value == 'unfriend') {
-                _showUnfriendConfirmDialog(context, displayId, displayName);
-              }
-            },
-          )
-              : null,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ProfileScreen(
-                  userId: displayId,
-                  isCurrentUser: false,
+        if (!canView) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.lock_outline,
+                  size: 64,
+                  color: Colors.grey[300],
                 ),
+                SizedBox(height: 16),
+                Text(
+                  'Friends list is private',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  user?.friendsListPrivacy == FriendsListPrivacy.friendsOnly
+                      ? 'Only friends can see this list'
+                      : 'This list is private',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[500],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (friends.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.people_outline,
+                  size: 64,
+                  color: Colors.grey[300],
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'No friends yet',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                if (widget.isCurrentUser) ...[
+                  SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => SearchScreen(
+                            organizationCode: state.currentUserProfile?.organizationCode ?? '',
+                          ),
+                        ),
+                      );
+                    },
+                    child: Text('Find Friends'),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: friends.length,
+          itemBuilder: (context, index) {
+            final friend = friends[index];
+            final displayId = friend.userId == widget.userId ? friend.friendId : friend.userId;
+            final displayName = friend.userId == widget.userId ? friend.friendName : friend.friendName;
+            final displayAvatar = friend.userId == widget.userId ? friend.friendAvatar : friend.friendAvatar;
+
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundImage: displayAvatar != null
+                    ? CachedNetworkImageProvider(displayAvatar)
+                    : null,
+                child: displayAvatar == null
+                    ? Icon(Icons.person)
+                    : null,
               ),
+              title: Text(displayName),
+              subtitle: friend.mutualFriends.isNotEmpty
+                  ? Text('${friend.mutualFriends.length} mutual friends')
+                  : null,
+              trailing: widget.isCurrentUser
+                  ? PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert),
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'unfriend',
+                    child: Text('Unfriend'),
+                  ),
+                  PopupMenuItem(
+                    value: 'block',
+                    child: Text('Block'),
+                  ),
+                ],
+                onSelected: (value) {
+                  if (value == 'unfriend') {
+                    _showUnfriendConfirmDialog(context, displayId, displayName);
+                  }
+                },
+              )
+                  : null,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProfileScreen(
+                      userId: displayId,
+                      isCurrentUser: false,
+                    ),
+                  ),
+                );
+              },
             );
           },
         );
       },
     );
+  }
+
+  Future<bool> _checkCanViewFriendsList() async {
+    if (widget.isCurrentUser) return true;
+
+    final service = CommunityService();
+    return await service.canViewFriendsList(widget.userId);
   }
 
   void _showUnfriendConfirmDialog(BuildContext context, String friendId, String friendName) {
@@ -843,7 +893,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             title: Text('Privacy Settings'),
             onTap: () {
               Navigator.pop(context);
-              // Navigate to privacy settings
+              _showPrivacySettingsDialog();
             },
           ),
           ListTile(
@@ -871,6 +921,78 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             },
           ),
         ],
+      ),
+    );
+  }
+
+  void _showPrivacySettingsDialog() {
+    final user = context.read<CommunityBloc>().state.currentUserProfile;
+    if (user == null) return;
+
+    FriendsListPrivacy selectedPrivacy = user.friendsListPrivacy;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text('Privacy Settings'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Who can see your friends list?',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              SizedBox(height: 16),
+              RadioListTile<FriendsListPrivacy>(
+                title: Text('Everyone'),
+                subtitle: Text('Anyone can see your friends list'),
+                value: FriendsListPrivacy.public,
+                groupValue: selectedPrivacy,
+                onChanged: (value) {
+                  setState(() => selectedPrivacy = value!);
+                },
+              ),
+              RadioListTile<FriendsListPrivacy>(
+                title: Text('Friends Only'),
+                subtitle: Text('Only your friends can see your friends list'),
+                value: FriendsListPrivacy.friendsOnly,
+                groupValue: selectedPrivacy,
+                onChanged: (value) {
+                  setState(() => selectedPrivacy = value!);
+                },
+              ),
+              RadioListTile<FriendsListPrivacy>(
+                title: Text('Only Me'),
+                subtitle: Text('Nobody can see your friends list'),
+                value: FriendsListPrivacy.private,
+                groupValue: selectedPrivacy,
+                onChanged: (value) {
+                  setState(() => selectedPrivacy = value!);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                context.read<CommunityBloc>().add(
+                  UpdateUserProfile(friendsListPrivacy: selectedPrivacy),
+                );
+                Navigator.pop(context);
+              },
+              child: Text('Save'),
+            ),
+          ],
+        ),
       ),
     );
   }
