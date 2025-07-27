@@ -1545,6 +1545,7 @@ class CommunityService {
   Future<void> updateUserProfile({
     String? bio,
     File? avatarFile,
+    FriendsListPrivacy? friendsListPrivacy, // Add this parameter
   }) async {
     try {
       final userId = currentUserId;
@@ -1554,6 +1555,10 @@ class CommunityService {
 
       if (bio != null) {
         updates['bio'] = bio;
+      }
+
+      if (friendsListPrivacy != null) {
+        updates['friendsListPrivacy'] = friendsListPrivacy.toString().split('.').last;
       }
 
       if (avatarFile != null) {
@@ -1570,6 +1575,39 @@ class CommunityService {
       }
     } catch (e) {
       throw Exception('Failed to update profile: $e');
+    }
+  }
+
+  Future<bool> canViewFriendsList(String targetUserId) async {
+    try {
+      final viewerId = currentUserId;
+      if (viewerId == null) return false;
+
+      // User can always see their own friends list
+      if (viewerId == targetUserId) return true;
+
+      // Get the target user's privacy setting
+      final targetUserDoc = await _firestore.collection('users').doc(targetUserId).get();
+      if (!targetUserDoc.exists) return false;
+
+      final targetUserData = targetUserDoc.data()!;
+      final privacyString = targetUserData['friendsListPrivacy'] ?? 'public';
+      final privacy = FriendsListPrivacy.values.firstWhere(
+            (e) => e.toString() == 'FriendsListPrivacy.$privacyString',
+        orElse: () => FriendsListPrivacy.public,
+      );
+
+      switch (privacy) {
+        case FriendsListPrivacy.public:
+          return true;
+        case FriendsListPrivacy.friendsOnly:
+          return await _areFriends(viewerId, targetUserId);
+        case FriendsListPrivacy.private:
+          return false;
+      }
+    } catch (e) {
+      print('Error checking friends list permission: $e');
+      return false;
     }
   }
 

@@ -410,11 +410,12 @@ class LoadUserProfile extends CommunityEvent {
 class UpdateUserProfile extends CommunityEvent {
   final String? bio;
   final File? avatarFile;
+  final FriendsListPrivacy? friendsListPrivacy; // Add this
 
-  UpdateUserProfile({this.bio, this.avatarFile});
+  UpdateUserProfile({this.bio, this.avatarFile, this.friendsListPrivacy}); // Update constructor
 
   @override
-  List<Object?> get props => [bio, avatarFile];
+  List<Object?> get props => [bio, avatarFile, friendsListPrivacy]; // Update props
 }
 
 class SyncFriendCount extends CommunityEvent {
@@ -1530,12 +1531,12 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     }
   }
 
-  Future<void> _onUpdateUserProfile(UpdateUserProfile event,
-      Emitter<CommunityState> emit) async {
+  Future<void> _onUpdateUserProfile(UpdateUserProfile event, Emitter<CommunityState> emit) async {
     try {
       await _service.updateUserProfile(
         bio: event.bio,
         avatarFile: event.avatarFile,
+        friendsListPrivacy: event.friendsListPrivacy,
       );
 
       emit(state.copyWith(successMessage: 'Profile updated successfully!'));
