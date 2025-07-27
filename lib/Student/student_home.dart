@@ -70,6 +70,11 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
               print('✅ Notification service initialized successfully');
               // Clean up test notifications once
               _notificationService.cleanupTestNotifications();
+
+              // Force check personal calendar reminders after initialization
+              Future.delayed(Duration(seconds: 5), () {
+                print('🔄 Starting initial calendar reminder check...');
+              });
             }).catchError((error) {
               print('❌ Error initializing notification service: $error');
             });
