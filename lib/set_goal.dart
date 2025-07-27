@@ -183,122 +183,141 @@ class _SetGoalPageState extends State<SetGoalPage> {
           builder: (context, setDialogState) {
             return AlertDialog(
               title: Text(goal == null ? 'Add New Goal' : 'Edit Goal'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: _titleController,
-                      decoration: InputDecoration(
-                        labelText: 'Goal Title',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.flag),
-                      ),
-                      maxLength: 50,
-                    ),
-                    SizedBox(height: 16),
-                    TextField(
-                      controller: _descriptionController,
-                      decoration: InputDecoration(
-                        labelText: 'Description (Optional)',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.description),
-                      ),
-                      maxLines: 3,
-                      maxLength: 200,
-                    ),
-                    SizedBox(height: 16),
-                    InkWell(
-                      onTap: () async {
-                        DateTime? pickedDate = await showDatePicker(
-                          context: context,
-                          initialDate: _selectedTargetDate ?? DateTime.now().add(Duration(days: 7)),
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(Duration(days: 365)),
-                        );
-                        if (pickedDate != null) {
-                          setDialogState(() {
-                            _selectedTargetDate = pickedDate;
-                          });
-                        }
-                      },
-                      child: Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(4),
+              contentPadding: EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 0.0),
+              content: Container(
+                width: double.maxFinite,
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.6,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: _titleController,
+                        decoration: InputDecoration(
+                          labelText: 'Goal Title',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.flag),
+                          isDense: true,
                         ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.calendar_today, color: Colors.grey[600]),
-                            SizedBox(width: 12),
-                            Text(
-                              _selectedTargetDate == null
-                                  ? 'Select Target Date (Optional)'
-                                  : 'Target: ${_selectedTargetDate!.day}/${_selectedTargetDate!.month}/${_selectedTargetDate!.year}',
-                              style: TextStyle(
-                                color: _selectedTargetDate == null ? Colors.grey[600] : Colors.black,
-                              ),
-                            ),
-                          ],
-                        ),
+                        maxLength: 50,
                       ),
-                    ),
-                    if (_selectedTargetDate != null) ...[
-                      SizedBox(height: 16),
+                      SizedBox(height: 12),
+                      TextField(
+                        controller: _descriptionController,
+                        decoration: InputDecoration(
+                          labelText: 'Description (Optional)',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.description),
+                          isDense: true,
+                        ),
+                        maxLines: 2,
+                        maxLength: 200,
+                      ),
+                      SizedBox(height: 12),
                       InkWell(
                         onTap: () async {
-                          TimeOfDay? pickedTime = await showTimePicker(
+                          DateTime? pickedDate = await showDatePicker(
                             context: context,
-                            initialTime: _selectedTargetTime ?? TimeOfDay(hour: 23, minute: 59),
+                            initialDate: _selectedTargetDate ?? DateTime.now().add(Duration(days: 7)),
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime.now().add(Duration(days: 365)),
                           );
-                          if (pickedTime != null) {
+                          if (pickedDate != null) {
                             setDialogState(() {
-                              _selectedTargetTime = pickedTime;
+                              _selectedTargetDate = pickedDate;
                             });
                           }
                         },
                         child: Container(
-                          padding: EdgeInsets.all(16),
+                          padding: EdgeInsets.all(12), // Reduced from 16
                           decoration: BoxDecoration(
                             border: Border.all(color: Colors.grey),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.access_time, color: Colors.grey[600]),
+                              Icon(Icons.calendar_today, color: Colors.grey[600]),
                               SizedBox(width: 12),
-                              Text(
-                                _selectedTargetTime == null
-                                    ? '11:59 PM'
-                                    : _selectedTargetTime!.format(context),
-                                style: TextStyle(color: Colors.black),
+                              Expanded( // Added to prevent overflow
+                                child: Text(
+                                  _selectedTargetDate == null
+                                      ? 'Select Target Date (Optional)'
+                                      : 'Target: ${_selectedTargetDate!.day}/${_selectedTargetDate!.month}/${_selectedTargetDate!.year}',
+                                  style: TextStyle(
+                                    color: _selectedTargetDate == null ? Colors.grey[600] : Colors.black,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ),
+                      if (_selectedTargetDate != null) ...[
+                        SizedBox(height: 12), // Reduced from 16
+                        InkWell(
+                          onTap: () async {
+                            TimeOfDay? pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime: _selectedTargetTime ?? TimeOfDay(hour: 23, minute: 59),
+                            );
+                            if (pickedTime != null) {
+                              setDialogState(() {
+                                _selectedTargetTime = pickedTime;
+                              });
+                            }
+                          },
+                          child: Container(
+                            padding: EdgeInsets.all(12), // Reduced from 16
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.access_time, color: Colors.grey[600]),
+                                SizedBox(width: 12),
+                                Text(
+                                  _selectedTargetTime == null
+                                      ? '11:59 PM'
+                                      : _selectedTargetTime!.format(context),
+                                  style: TextStyle(color: Colors.black),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      SizedBox(height: 12), // Add some bottom spacing
                     ],
-                  ],
+                  ),
                 ),
               ),
+              actionsPadding: EdgeInsets.fromLTRB(24.0, 0.0, 24.0, 16.0),
               actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
-                  child: Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    await _saveGoal();
-                    Navigator.of(context).pop();
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: Text(goal == null ? 'Add Goal' : 'Update Goal'),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                      child: Text('Cancel'),
+                    ),
+                    SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () async {
+                        await _saveGoal();
+                        Navigator.of(context).pop();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueAccent,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text(goal == null ? 'Add Goal' : 'Update Goal'),
+                    ),
+                  ],
                 ),
               ],
             );
@@ -419,14 +438,16 @@ class _SetGoalPageState extends State<SetGoalPage> {
         'body': 'Goal "$goalTitle" has been set with deadline: ${targetDate.day}/${targetDate.month}/${targetDate.year}',
         'type': 'NotificationType.goal',
         'sourceId': goalId,
-        'sourceType': 'goal',
+        'sourceType': 'goal_management',
         'itemTitle': goalTitle,
         'createdAt': FieldValue.serverTimestamp(),
         'isRead': false,
         'dueDate': Timestamp.fromDate(targetDate),
+        'navigationTarget': 'set_goals_page', // Navigate to Set Goals page
+        'navigationType': 'goal_management',
         'navigationData': {
           'sourceId': goalId,
-          'type': 'goal',
+          'type': 'goal_management',
           'title': goalTitle,
         },
       });
@@ -1010,8 +1031,9 @@ class _SetGoalPageState extends State<SetGoalPage> {
           ),
 
           // Bottom action buttons
+          // Bottom action buttons
           Container(
-            padding: EdgeInsets.all(20),
+            padding: EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
@@ -1023,65 +1045,32 @@ class _SetGoalPageState extends State<SetGoalPage> {
                 ),
               ],
             ),
-            child: Column(
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => _showAddEditGoalDialog(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blueAccent,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 2,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.add, size: 24),
-                        SizedBox(width: 8),
-                        Text(
-                          'Add New Goal',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                SizedBox(height: 12),
-                if (goals.any((g) => g.isCompleted))
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () {
-                        Goal? completedGoal = goals.where((g) => g.isCompleted).first;
-                        print('Using completed goal: ${completedGoal.title}');
-                        Navigator.pop(context, completedGoal.title);
-                      },
+                      onPressed: () => _showAddEditGoalDialog(),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
+                        backgroundColor: Colors.blueAccent,
                         foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(vertical: 16),
+                        padding: EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         elevation: 2,
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.check_circle, size: 24),
+                          Icon(Icons.add, size: 20),
                           SizedBox(width: 8),
                           Text(
-                            'Use Completed Goal',
+                            'Add New Goal',
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 14,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -1089,7 +1078,40 @@ class _SetGoalPageState extends State<SetGoalPage> {
                       ),
                     ),
                   ),
-              ],
+                  if (goals.any((g) => g.isCompleted)) ...[
+                    SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.green[300]!, width: 1),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            color: Colors.green[600],
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Completed Goals Available',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green[700],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ],

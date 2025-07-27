@@ -8,6 +8,8 @@ import '../Student/student_course.dart';
 import '../Student/student_submit_view.dart';
 import '../Student/student_tutorial.dart';
 import '../Student/calendar.dart';
+import 'Stu_goal.dart';
+import 'set_goal.dart';
 
 class NotificationService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -1053,6 +1055,8 @@ enum NotificationType {
   reminder,
   announcement,
   learning,
+  milestone,
+  achievement,
 }
 
 // Notification model
@@ -1128,6 +1132,10 @@ class NotificationModel {
         return NotificationType.reminder;
       case 'learning':
         return NotificationType.learning;
+      case 'milestone':
+        return NotificationType.milestone;
+      case 'achievement':
+        return NotificationType.achievement;
       default:
         return NotificationType.reminder;
     }
@@ -1145,6 +1153,10 @@ class NotificationModel {
         return Colors.green;
       case NotificationType.learning:
         return Colors.teal;
+      case NotificationType.milestone:
+        return Colors.amber;
+      case NotificationType.achievement:
+        return Colors.green;
       default:
         return Colors.grey;
     }
@@ -1162,6 +1174,10 @@ class NotificationModel {
         return Icons.campaign;
       case NotificationType.learning:
         return Icons.school;
+      case NotificationType.milestone:
+        return Icons.local_florist;
+      case NotificationType.achievement:
+        return Icons.emoji_events;
       default:
         return Icons.notifications;
     }
@@ -1243,6 +1259,14 @@ class _NotificationDialogState extends State<NotificationDialog> {
       }
 
       // 3. Handle based on notification type
+      // 3. Handle "New Goal Set" notifications BEFORE type-based switching
+      if (notification.title.toLowerCase().contains('new goal set')) {
+        print('🔍 Detected new goal set notification');
+        await _navigateToSetGoalsPage(scaffoldContext, notification);
+        return;
+      }
+
+// 4. Handle based on notification type
       switch (notification.type) {
         case NotificationType.assignment:
           await _navigateToAssignmentWithStatusCheck(scaffoldContext, notification, orgCode);
@@ -1260,17 +1284,35 @@ class _NotificationDialogState extends State<NotificationDialog> {
           await _handleReminderNavigation(scaffoldContext, notification, orgCode);
           break;
 
+        case NotificationType.goal:
+        case NotificationType.milestone:
+        case NotificationType.achievement:
+// Handle goal-related notifications (tree rewards, milestones, level-ups)
+          await _navigateToGoalPage(scaffoldContext, notification);
+          break;
+
         default:
-        // 4. Handle based on sourceType as fallback
+        // Handle based on sourceType as fallback
           if (notification.sourceType == 'assignment' && notification.sourceId != null) {
             await _navigateToAssignmentWithStatusCheck(scaffoldContext, notification, orgCode);
           } else if (notification.sourceType == 'tutorial' && notification.sourceId != null) {
             await _navigateToTutorialDirectly(scaffoldContext, notification, orgCode);
           } else if (notification.sourceType == 'learning' && notification.sourceId != null) {
             await _navigateToLearningMaterial(scaffoldContext, notification, orgCode);
-          } else {
-            _showNavigationError(scaffoldContext, 'Cannot open this notification type');
-          }
+          } else if (notification.sourceType == 'goal' ||
+
+      notification.sourceType == 'tree_goal' ||
+      notification.title.toLowerCase().contains('halfway') ||
+      notification.title.toLowerCase().contains('level up') ||
+      notification.title.toLowerCase().contains('congratulations') ||
+      notification.title.toLowerCase().contains('tree') ||
+      notification.title.toLowerCase().contains('milestone') ||
+      notification.title.toLowerCase().contains('achievement')) {
+      // Handle tree/goal notifications that might not have the correct type
+      await _navigateToGoalPage(scaffoldContext, notification);
+      } else {
+      _showNavigationError(scaffoldContext, 'Cannot open this notification type');
+      }
       }
     } catch (e) {
       print('❌ Navigation error: $e');
@@ -1371,6 +1413,52 @@ class _NotificationDialogState extends State<NotificationDialog> {
 
     } catch (e) {
       _showNavigationError(context, 'Failed to navigate to calendar event: $e');
+    }
+  }
+
+  // NEW: Navigate to goal page for tree rewards and milestones
+  Future<void> _navigateToGoalPage(BuildContext context, NotificationModel notification) async {
+    try {
+      print('🌳 Navigating to goal page for: ${notification.title}');
+
+      // Import the goal page
+      // Note: You'll need to add this import at the top of notification.dart
+      // import '../Stu_goal.dart';
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StuGoal(),
+        ),
+      );
+
+      print('✅ Successfully navigated to goal page');
+    } catch (e) {
+      print('❌ Error navigating to goal page: $e');
+      _showNavigationError(context, 'Failed to open goal page: $e');
+    }
+  }
+
+  // Navigate to Set Goals page for goal management notifications
+  Future<void> _navigateToSetGoalsPage(BuildContext context, NotificationModel notification) async {
+    try {
+      print('🎯 Navigating to Set Goals page for: ${notification.title}');
+
+      // Import the set goals page
+      // Note: You'll need to add this import at the top of notification.dart
+      // import '../set_goal.dart';
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SetGoalPage(),
+        ),
+      );
+
+      print('✅ Successfully navigated to Set Goals page');
+    } catch (e) {
+      print('❌ Error navigating to Set Goals page: $e');
+      _showNavigationError(context, 'Failed to open Set Goals page: $e');
     }
   }
 

@@ -304,6 +304,8 @@ class GoalProgressService {
       bool levelUpOccurred = false;
       String? newTreeLevel;
       int? newCompletedTrees;
+      bool reached50Percent = false;
+      String currentTreeLevel = 'bronze';
 
       await _firestore.runTransaction((transaction) async {
         final progressDocRef = _firestore.collection('goalProgress').doc(userId);
@@ -320,6 +322,7 @@ class GoalProgressService {
         int waterBuckets = currentProgress['waterBuckets'] ?? 0;
         int wateringCount = currentProgress['wateringCount'] ?? 0;
         double treeGrowth = (currentProgress['treeGrowth'] ?? 0.0).toDouble();
+        currentTreeLevel = currentProgress['currentTreeLevel'] ?? 'bronze';
 
         // Check if we have water buckets and tree is not complete
         if (waterBuckets <= 0) {
@@ -337,10 +340,14 @@ class GoalProgressService {
         // Use one water bucket and increase growth by 5%
         waterBuckets--;
         wateringCount++;
+        double previousGrowth = treeGrowth;
         treeGrowth = math.min(treeGrowth + 0.05, 1.0); // Cap at 1.0
 
         int totalProgress = currentProgress['totalProgress'] ?? 0;
         totalProgress++;
+
+        // 🎉 CHECK FOR 50% MILESTONE
+        reached50Percent = previousGrowth < 0.5 && treeGrowth >= 0.5;
 
         Map<String, dynamic> updatedProgress = {
           'waterBuckets': waterBuckets,
@@ -354,23 +361,23 @@ class GoalProgressService {
         // 🆕 NEW: Check if tree is complete (100% growth) and handle level up
         if (treeGrowth >= 1.0) {
           // Tree completed, level up
-          String currentTreeLevel = currentProgress['currentTreeLevel'] ?? 'bronze';
+          String currentTreeLevelVar = currentProgress['currentTreeLevel'] ?? 'bronze';
           int completedTrees = currentProgress['completedTrees'] ?? 0;
           completedTrees++;
 
-          String previousLevel = currentTreeLevel;
+          String previousLevel = currentTreeLevelVar;
 
           // Determine next tree level
-          if (currentTreeLevel == 'bronze' && completedTrees >= 1) {
-            currentTreeLevel = 'silver';
-          } else if (currentTreeLevel == 'silver' && completedTrees >= 2) {
-            currentTreeLevel = 'gold';
+          if (currentTreeLevelVar == 'bronze' && completedTrees >= 1) {
+            currentTreeLevelVar = 'silver';
+          } else if (currentTreeLevelVar == 'silver' && completedTrees >= 2) {
+            currentTreeLevelVar = 'gold';
           }
 
           // Check if level actually changed
-          if (currentTreeLevel != previousLevel) {
+          if (currentTreeLevelVar != previousLevel) {
             levelUpOccurred = true;
-            newTreeLevel = currentTreeLevel;
+            newTreeLevel = currentTreeLevelVar;
             newCompletedTrees = completedTrees;
           }
 
@@ -378,13 +385,13 @@ class GoalProgressService {
           updatedProgress.addAll({
             'wateringCount': 0,  // Reset watering count for new tree
             'treeGrowth': 0.0,
-            'currentTreeLevel': currentTreeLevel,
+            'currentTreeLevel': currentTreeLevelVar,
             'completedTrees': completedTrees,
             'maxWatering': 20, // Reset max watering for new tree
             'treeCompletedAt': FieldValue.serverTimestamp(),
           });
 
-          print('🌳 Tree completed! Level: $currentTreeLevel, Trees: $completedTrees');
+          print('🌳 Tree completed! Level: $currentTreeLevelVar, Trees: $completedTrees');
         }
 
         // Create water consumption record for tracking
@@ -413,11 +420,15 @@ class GoalProgressService {
         print('💧 Water bucket used successfully. Remaining: $waterBuckets, Growth: ${(treeGrowth * 100).toStringAsFixed(0)}%, WateringCount: $wateringCount');
       });
 
+      // 🎉 NEW: Create 50% milestone notification outside of transaction
+      if (success && reached50Percent) {
+        await _create50PercentMilestoneNotification(currentTreeLevel);
+      }
+
       // 🆕 NEW: Create level up notification outside of transaction
       if (success && levelUpOccurred && newTreeLevel != null && newCompletedTrees != null) {
         await _createTreeLevelUpNotification(newTreeLevel!, newCompletedTrees!);
       }
-
       return success;
     } catch (e) {
       print('❌ Error using water bucket: $e');
@@ -462,7 +473,7 @@ class GoalProgressService {
       }
 
       // Create the level up notification
-      await _firestore
+      await FirebaseFirestore.instance
           .collection('organizations')
           .doc(organizationCode)
           .collection('students')
@@ -473,13 +484,16 @@ class GoalProgressService {
         'body': notificationBody,
         'type': 'NotificationType.achievement',
         'sourceId': 'tree_level_${newTreeLevel}',
-        'sourceType': 'tree_levelup',
+        'sourceType': 'goal_management',
         'achievementType': 'tree_level',
         'treeLevel': newTreeLevel,
         'completedTrees': completedTrees,
         'createdAt': FieldValue.serverTimestamp(),
         'isRead': false,
-        'priority': 'high', // High priority for achievements
+        'priority': 'medium',
+        // ✅ NAVIGATE TO SET GOALS PAGE
+        'navigationTarget': 'set_goals_page',
+        'navigationType': 'goal_management',
       });
 
       print('🎉 Created tree level up notification: $newTreeLevel level unlocked!');
@@ -489,6 +503,71 @@ class GoalProgressService {
 
     } catch (e) {
       print('❌ Error creating tree level up notification: $e');
+    }
+  }
+
+  // 🎉 NEW: Create 50% milestone notification
+  Future<void> _create50PercentMilestoneNotification(String treeLevel) async {
+    try {
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) return;
+
+      // Get user's organization code
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) return;
+
+      final organizationCode = userDoc.data()?['organizationCode'];
+      if (organizationCode == null) return;
+
+      String emoji;
+      String encouragementMessage;
+
+      switch (treeLevel) {
+        case 'bronze':
+          emoji = '🥉';
+          encouragementMessage = 'Your Bronze tree is halfway grown! Keep watering to reach 100%!';
+          break;
+        case 'silver':
+          emoji = '🥈';
+          encouragementMessage = 'Amazing! Your Silver tree is 50% complete. You\'re doing great!';
+          break;
+        case 'gold':
+          emoji = '🥇';
+          encouragementMessage = 'Incredible! Your Gold tree is halfway to completion. You\'re a true achiever!';
+          break;
+        default:
+          emoji = '🌳';
+          encouragementMessage = 'Your tree is 50% grown! Keep up the excellent work!';
+      }
+
+      // Create the 50% milestone notification
+      await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('students')
+          .doc(userId)
+          .collection('notifications')
+          .add({
+        'title': '$emoji Halfway There!',
+        'body': encouragementMessage,
+        'type': 'NotificationType.milestone',
+        'sourceId': 'tree_50_percent_${treeLevel}',
+        'sourceType': 'goal_management',
+        'achievementType': 'tree_milestone',
+        'treeLevel': treeLevel,
+        'milestonePercent': 50,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'priority': 'medium',
+        // ✅ NAVIGATE TO SET GOALS PAGE
+        'navigationTarget': 'set_goals_page',
+        'navigationType': 'goal_management',
+      });
+
+      print('🎉 Created 50% milestone notification for $treeLevel tree');
+
+    } catch (e) {
+      print('❌ Error creating 50% milestone notification: $e');
     }
   }
 

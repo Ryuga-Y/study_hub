@@ -455,6 +455,8 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
     }
   }
 
+
+// Handle notification navigation
   // Handle notification navigation
   void _handleNotificationNavigation(Map<String, dynamic> arguments) {
     if (arguments['assignmentId'] != null) {
@@ -476,6 +478,14 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
           'materialId': arguments['materialId'],
           'courseId': arguments['courseId'],
         },
+      );
+    } else if (arguments['navigationTarget'] == 'goal_page') {
+      // ✅ NEW: Navigate to goal page for tree notifications
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StuGoal(),
+        ),
       );
     }
   }
