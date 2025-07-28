@@ -924,7 +924,7 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
             _navigateToCommunity();
             break;
           case 2:
-// Navigate to chat
+          // Navigate to chat
             Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => ChatContactPage()),

@@ -1242,16 +1242,14 @@ Please try submitting again or contact support.
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.green[300]!),
                         ),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Icon(Icons.check_circle, color: Colors.green[700],
-                                size: 24),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
+                            Row(
+                              children: [
+                                Icon(Icons.check_circle, color: Colors.green[700], size: 24),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
                                     'Assignment Completed',
                                     style: TextStyle(
                                       color: Colors.green[700],
@@ -1259,65 +1257,61 @@ Please try submitting again or contact support.
                                       fontSize: 16,
                                     ),
                                   ),
-                                  SizedBox(height: 4),
-                                  Row(
-                                    children: [
-                                      Text(
-                                        'Grade: ${latestSubmission!['grade']}/${widget
-                                            .assignment['points'] ?? 100}',
-                                        style: TextStyle(
-                                          color: Colors.green[600],
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                      if (latestSubmission!['letterGrade'] !=
-                                          null) ...[
-                                        SizedBox(width: 12),
-                                        Container(
-                                          padding: EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: _getLetterGradeColor(
-                                                latestSubmission!['letterGrade']),
-                                            borderRadius: BorderRadius.circular(
-                                                12),
-                                          ),
-                                          child: Text(
-                                            latestSubmission!['letterGrade'],
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        StudentSubmissionView(
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => StudentSubmissionView(
                                           courseId: widget.courseId,
                                           assignmentId: widget.assignment['id'],
                                           assignmentData: widget.assignment,
-                                          organizationCode: widget
-                                              .organizationCode,
+                                          organizationCode: widget.organizationCode,
                                         ),
+                                      ),
+                                    ).then((_) {
+                                      _loadData();
+                                    });
+                                  },
+                                  child: Text('View Details'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.green[700],
                                   ),
-                                ).then((_) {
-                                  _loadData();
-                                });
-                              },
-                              child: Text('View Details'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: Colors.green[700],
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 8),
+                            Padding(
+                              padding: EdgeInsets.only(left: 36),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    'Grade: ${latestSubmission!['grade']}/${widget.assignment['points'] ?? 100}',
+                                    style: TextStyle(
+                                      color: Colors.green[600],
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  if (latestSubmission!['letterGrade'] != null) ...[
+                                    SizedBox(width: 12),
+                                    Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: _getLetterGradeColor(latestSubmission!['letterGrade']),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        latestSubmission!['letterGrade'],
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
                           ],
