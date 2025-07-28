@@ -960,14 +960,6 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
                 _navigateToReport(); // Navigate to report page
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('Settings'),
-              onTap: () {
-                Navigator.pop(context);
-                // TODO: Navigate to settings page
-              },
-            ),
 
             const Divider(),
             ListTile(

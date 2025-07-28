@@ -84,6 +84,7 @@ class ChatMessage {
   final List<TextOverlay>? textOverlays;
   final int? videoDuration;
   final String? messageType;
+  final Map<String, dynamic>? replyTo;
 
   ChatMessage({
     required this.id,
@@ -96,6 +97,7 @@ class ChatMessage {
     this.textOverlays,
     this.videoDuration,
     this.messageType,
+    this.replyTo,
   });
 
   factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -114,10 +116,10 @@ class ChatMessage {
           ? (data['textOverlays'] as List).map((overlay) => TextOverlay.fromMap(overlay)).toList()
           : null,
       videoDuration: data['videoDuration'],
-      messageType: data['messageType'], // ADD THIS LINE
+      messageType: data['messageType'],
+      replyTo: data['replyTo'] as Map<String, dynamic>?, // Add this line
     );
   }
-
   Map<String, dynamic> toMap() {
     Map<String, dynamic> map = {
       'text': text,
@@ -1679,6 +1681,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
         var messages = snapshot.data!.docs
             .map((doc) => ChatMessage.fromFirestore(doc))
+            .where((message) {
+          // Filter out messages deleted by current user
+          final data = snapshot.data!.docs.firstWhere((d) => d.id == message.id).data() as Map<String, dynamic>;
+          final deletedFor = data['deletedFor'] as List<dynamic>?;
+          return deletedFor == null || !deletedFor.contains(_auth.currentUser?.uid);
+        })
             .toList();
 
         if (_isSearching && _searchQuery.isNotEmpty) {
@@ -1776,6 +1784,8 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Add replied message preview
+              if (message.replyTo != null) _buildRepliedMessage(message.replyTo!, isMe),
               if (message.attachmentType == 'image')
                 _buildImageMessage(message),
               if (message.attachmentType == 'video')
@@ -1817,7 +1827,54 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // ADD THIS METHOD RIGHT AFTER _buildMessageBubble method in _ChatScreenState class
+  Widget _buildRepliedMessage(Map<String, dynamic> replyTo, bool isMe) {
+    final repliedText = replyTo['text'] as String? ?? '';
+    final repliedSenderId = replyTo['senderId'] as String? ?? '';
+    final isRepliedByMe = repliedSenderId == _auth.currentUser?.uid;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: isMe
+            ? Colors.white.withOpacity(0.2)
+            : Colors.grey.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(8),
+        border: Border(
+          left: BorderSide(
+            color: isMe ? Colors.white : Colors.blue,
+            width: 3,
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            isRepliedByMe ? 'You' : widget.contactName,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: isMe ? Colors.white : Colors.blue,
+            ),
+          ),
+          SizedBox(height: 2),
+          Text(
+            repliedText.length > 50
+                ? '${repliedText.substring(0, 50)}...'
+                : repliedText,
+            style: TextStyle(
+              fontSize: 13,
+              color: isMe ? Colors.white70 : Colors.grey[600],
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMessageText(ChatMessage message, bool isMe) {
     // Check if it's a call record by looking for "Video call" pattern
     if (message.text.startsWith('Video call\n') || message.messageType == 'call_record') {
@@ -1914,24 +1971,30 @@ class _ChatScreenState extends State<ChatScreen> {
                 });
               },
             ),
-            if (isMe) ...[
-              ListTile(
-                leading: Icon(Icons.edit, color: Colors.orange),
-                title: Text('Edit'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _editMessage(message);
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.delete, color: Colors.red),
-                title: Text('Delete'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _deleteMessage(message);
-                },
-              ),
-            ],
+            ListTile(
+              leading: Icon(Icons.edit, color: Colors.orange),
+              title: Text('Edit'),
+              onTap: () {
+                Navigator.pop(context);
+                _editMessage(message);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_forever, color: Colors.red),
+              title: Text('Delete for everyone'),
+              onTap: () {
+                Navigator.pop(context);
+                _deleteMessageForEveryone(message);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: Colors.orange),
+              title: Text('Delete for me'),
+              onTap: () {
+                Navigator.pop(context);
+                _deleteMessageForMe(message);
+              },
+            ),
           ],
         ),
       ),
@@ -1956,7 +2019,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _focusNode.requestFocus();
   }
 
-  void _deleteMessage(ChatMessage message) {
+  void _deleteMessageForEveryone(ChatMessage message) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -2015,6 +2078,51 @@ class _ChatScreenState extends State<ChatScreen> {
               }
             },
             child: Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteMessageForMe(ChatMessage message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete for Me'),
+        content: Text('This message will be deleted for you only. The other person will still see it.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                final currentUserId = _auth.currentUser?.uid;
+                if (currentUserId == null) return;
+
+                // Add current user to deletedFor array
+                await _firestore
+                    .collection('chats')
+                    .doc(widget.chatId)
+                    .collection('messages')
+                    .doc(message.id)
+                    .update({
+                  'deletedFor': FieldValue.arrayUnion([currentUserId])
+                });
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Message deleted for you'), backgroundColor: Colors.green),
+                );
+              } catch (e) {
+                print('Error deleting message for me: $e');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to delete message'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            child: Text('Delete', style: TextStyle(color: Colors.orange)),
           ),
         ],
       ),
