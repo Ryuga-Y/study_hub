@@ -274,6 +274,99 @@ class _StudentAssignmentDetailsPageState extends State<StudentAssignmentDetailsP
     // Check due date
     final dueDate = widget.assignment['dueDate'] as Timestamp?;
     final isLate = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
+    final allowLateSubmissions = widget.assignment['allowLateSubmissions'] ?? true;
+
+    // NEW: Check if late submissions are allowed
+    if (isLate && !allowLateSubmissions) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(Icons.block, color: Colors.red, size: 24),
+              SizedBox(width: 8),
+              Text('Submission Closed'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This assignment is past due and no longer accepting submissions.',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              SizedBox(height: 12),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red[300]!),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.calendar_today, color: Colors.red[700], size: 18),
+                        SizedBox(width: 8),
+                        Text(
+                          'Due Date: ${_formatDateTime(dueDate)}',
+                          style: TextStyle(
+                            color: Colors.red[800],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.red[700], size: 18),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Late submissions are not allowed for this assignment.',
+                            style: TextStyle(
+                              color: Colors.red[700],
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Please contact your lecturer if you have any questions.',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
 
     // Show confirmation dialog
     final isResubmit = hasSubmitted && latestSubmission?['grade'] == null;
@@ -906,6 +999,7 @@ Please try submitting again or contact support.
     final dueDate = widget.assignment['dueDate'] as Timestamp?;
     final isOverdue = dueDate != null &&
         dueDate.toDate().isBefore(DateTime.now());
+    final allowLateSubmissions = widget.assignment['allowLateSubmissions'] ?? true;
 
     return Stack(
       children: [
@@ -1092,6 +1186,61 @@ Please try submitting again or contact support.
                     ),
                   ),
 
+                  if (isOverdue)
+                    Container(
+                      margin: EdgeInsets.symmetric(horizontal: 16),
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: allowLateSubmissions ? Colors.orange[50] : Colors.red[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: allowLateSubmissions ? Colors.orange[300]! : Colors.red[300]!,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            allowLateSubmissions ? Icons.warning : Icons.block,
+                            color: allowLateSubmissions ? Colors.orange[700] : Colors.red[700],
+                            size: 24,
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  allowLateSubmissions
+                                      ? 'Assignment Overdue'
+                                      : 'Submission Closed',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: allowLateSubmissions
+                                        ? Colors.orange[800]
+                                        : Colors.red[800],
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  allowLateSubmissions
+                                      ? 'You can still submit, but it will be marked as late.'
+                                      : 'This assignment no longer accepts submissions.',
+                                  style: TextStyle(
+                                    color: allowLateSubmissions
+                                        ? Colors.orange[700]
+                                        : Colors.red[700],
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  SizedBox(height: 16),
+
                   // Quick Actions
                   if (!hasSubmitted || (latestSubmission?['grade'] == null))
                     Container(
@@ -1111,23 +1260,35 @@ Please try submitting again or contact support.
                       child: Column(
                         children: [
                           if (!hasSubmitted) ...[
-                            // Submit button
+                            // Submit button (disabled if late and not allowed)
                             Container(
                               width: double.infinity,
                               child: ElevatedButton.icon(
-                                onPressed: _submitAssignment,
+                                onPressed: (isOverdue && !allowLateSubmissions)
+                                    ? null
+                                    : _submitAssignment,
                                 icon: Icon(
-                                    Icons.upload_file, color: Colors.white),
+                                  Icons.upload_file,
+                                  color: (isOverdue && !allowLateSubmissions)
+                                      ? Colors.grey
+                                      : Colors.white,
+                                ),
                                 label: Text(
-                                  'Submit Assignment',
+                                  (isOverdue && !allowLateSubmissions)
+                                      ? 'Submission Closed'
+                                      : 'Submit Assignment',
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: (isOverdue && !allowLateSubmissions)
+                                        ? Colors.grey
+                                        : Colors.white,
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange[600],
+                                  backgroundColor: (isOverdue && !allowLateSubmissions)
+                                      ? Colors.grey[300]
+                                      : Colors.orange[600],
                                   padding: EdgeInsets.symmetric(vertical: 16),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(8),
@@ -1135,87 +1296,114 @@ Please try submitting again or contact support.
                                 ),
                               ),
                             ),
-                            // Reward info
+                            // Show appropriate info message
                             SizedBox(height: 12),
-                            Container(
-                              padding: EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.orange[50],
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.orange[200]!),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.local_drink,
-                                      color: Colors.orange[600], size: 20),
-                                  SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'Submit this assignment to earn 4 water buckets for your tree!',
-                                      style: TextStyle(
-                                        color: Colors.orange[700],
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ] else
-                            if (latestSubmission?['grade'] == null) ...[
-                              // Submitted but not graded - show resubmit option
+                            if (isOverdue && !allowLateSubmissions)
                               Container(
                                 padding: EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: Colors.blue[50],
+                                  color: Colors.red[50],
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.blue[300]!),
+                                  border: Border.all(color: Colors.red[200]!),
                                 ),
                                 child: Row(
                                   children: [
-                                    Icon(Icons.info_outline,
-                                        color: Colors.blue[700], size: 20),
-                                    SizedBox(width: 12),
+                                    Icon(Icons.block,
+                                        color: Colors.red[600], size: 20),
+                                    SizedBox(width: 8),
                                     Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment
-                                            .start,
-                                        children: [
-                                          Text(
-                                            'Assignment Submitted',
-                                            style: TextStyle(
-                                              color: Colors.blue[700],
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          SizedBox(height: 4),
-                                          Text(
-                                            'You can resubmit until graded',
-                                            style: TextStyle(
-                                              color: Colors.blue[600],
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
+                                      child: Text(
+                                        'The due date has passed and late submissions are not allowed.',
+                                        style: TextStyle(
+                                          color: Colors.red[700],
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
                                       ),
                                     ),
+                                  ],
+                                ),
+                              )
+                            else
+                              Container(
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange[50],
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.orange[200]!),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.local_drink,
+                                        color: Colors.orange[600], size: 20),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Submit this assignment to earn 4 water buckets for your tree!',
+                                        style: TextStyle(
+                                          color: Colors.orange[700],
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ] else if (latestSubmission?['grade'] == null) ...[
+                            // Submitted but not graded - show resubmit option
+                            Container(
+                              padding: EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue[50],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.blue[300]!),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.info_outline,
+                                      color: Colors.blue[700], size: 20),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Assignment Submitted',
+                                          style: TextStyle(
+                                            color: Colors.blue[700],
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        SizedBox(height: 4),
+                                        Text(
+                                          (isOverdue && !allowLateSubmissions)
+                                              ? 'No further submissions allowed'
+                                              : 'You can resubmit until graded',
+                                          style: TextStyle(
+                                            color: Colors.blue[600],
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (!(isOverdue && !allowLateSubmissions))
                                     ElevatedButton(
                                       onPressed: _submitAssignment,
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.blue[600],
                                         shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                              8),
+                                          borderRadius: BorderRadius.circular(8),
                                         ),
                                       ),
-                                      child: Text('Resubmit', style: TextStyle(
-                                          color: Colors.white)),
+                                      child: Text('Resubmit',
+                                          style: TextStyle(color: Colors.white)),
                                     ),
-                                  ],
-                                ),
+                                ],
                               ),
-                            ],
+                            ),
+                          ],
                         ],
                       ),
                     )

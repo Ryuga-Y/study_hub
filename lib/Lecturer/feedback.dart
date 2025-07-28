@@ -268,10 +268,27 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
     }
 
     // Get unique assignments
-    final assignmentSet = feedbackHistory
-        .map((f) => {'id': f['assignmentId'] as String, 'title': f['assignmentTitle'] as String})
-        .toSet();
-    final assignments = assignmentSet.toList();
+    final Map<String, String> assignmentMap = {};
+    for (var feedback in feedbackHistory) {
+      final id = feedback['assignmentId'] as String;
+      final title = feedback['assignmentTitle'] as String;
+      assignmentMap[id] = title;
+    }
+
+    final assignments = assignmentMap.entries
+        .map((entry) => {'id': entry.key, 'title': entry.value})
+        .toList()
+      ..sort((a, b) => (a['title'] as String).compareTo(b['title'] as String));
+
+    // Validate selectedAssignmentId
+    if (selectedAssignmentId != null && !assignmentMap.containsKey(selectedAssignmentId)) {
+      // Reset in next frame to avoid setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() {
+          selectedAssignmentId = null;
+        });
+      });
+    }
 
     // Filter feedback by assignment only
     var filteredFeedback = feedbackHistory;
@@ -351,7 +368,10 @@ class _FeedbackHistoryPageState extends State<FeedbackHistoryPage> {
                       ...assignments.map((assignment) {
                         return DropdownMenuItem<String>(
                           value: assignment['id'] as String,
-                          child: Text(assignment['title'] as String),
+                          child: Text(
+                            assignment['title'] as String,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         );
                       }).toList(),
                     ],

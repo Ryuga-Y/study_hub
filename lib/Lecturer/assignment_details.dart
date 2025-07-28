@@ -99,6 +99,155 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     }
   }
 
+  Future<void> _toggleLateSubmissions() async {
+    final currentValue = assignmentData['allowLateSubmissions'] ?? true;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Row(
+          children: [
+            Icon(
+              currentValue ? Icons.cancel : Icons.check_circle,
+              color: currentValue ? Colors.red[600] : Colors.green[600],
+              size: 24,
+            ),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                currentValue ? 'Disable Late Submissions' : 'Enable Late Submissions',
+                style: TextStyle(fontWeight: FontWeight.w500), // Optional: add styling
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              currentValue
+                  ? 'Are you sure you want to disable late submissions?'
+                  : 'Are you sure you want to enable late submissions?',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: currentValue ? Colors.red[50] : Colors.green[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: currentValue ? Colors.red[200]! : Colors.green[200]!,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: currentValue ? Colors.red[700] : Colors.green[700],
+                    size: 20,
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      currentValue
+                          ? 'Students will NOT be able to submit after the due date'
+                          : 'Students will be able to submit after the due date',
+                      style: TextStyle(
+                        color: currentValue ? Colors.red[700] : Colors.green[700],
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: currentValue ? Colors.red : Colors.green,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text(
+              currentValue ? 'Disable' : 'Enable',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && organizationCode != null) {
+      setState(() {
+        isLoading = true;
+      });
+
+      try {
+        await FirebaseFirestore.instance
+            .collection('organizations')
+            .doc(organizationCode)
+            .collection('courses')
+            .doc(widget.courseId)
+            .collection('assignments')
+            .doc(assignmentData['id'])
+            .update({
+          'allowLateSubmissions': !currentValue,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Update local state
+        setState(() {
+          assignmentData['allowLateSubmissions'] = !currentValue;
+          isLoading = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(
+                  !currentValue ? Icons.check_circle : Icons.cancel,
+                  color: Colors.white,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  !currentValue
+                      ? 'Late submissions enabled'
+                      : 'Late submissions disabled',
+                ),
+              ],
+            ),
+            backgroundColor: !currentValue ? Colors.green : Colors.red,
+          ),
+        );
+      } catch (e) {
+        setState(() {
+          isLoading = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating late submission setting: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _checkRubric() async {
     if (organizationCode == null) return;
 
@@ -522,6 +671,9 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                   case 'rubric':
                     _navigateToRubric();
                     break;
+                  case 'late_submissions': // ADD THIS CASE
+                    _toggleLateSubmissions();
+                    break;
                   case 'feedback_history':
                     _navigateToFeedbackHistory();
                     break;
@@ -548,6 +700,29 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                       Icon(Icons.rule, size: 20),
                       SizedBox(width: 8),
                       Text(hasRubric ? 'Edit Rubric' : 'Create Rubric'),
+                    ],
+                  ),
+                ),
+                // ADD THIS MENU ITEM
+                PopupMenuItem(
+                  value: 'late_submissions',
+                  child: Row(
+                    children: [
+                      Icon(
+                        assignmentData['allowLateSubmissions'] ?? true
+                            ? Icons.check_circle
+                            : Icons.cancel,
+                        size: 20,
+                        color: assignmentData['allowLateSubmissions'] ?? true
+                            ? Colors.green
+                            : Colors.red,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        assignmentData['allowLateSubmissions'] ?? true
+                            ? 'Disable Late Submissions'
+                            : 'Enable Late Submissions',
+                      ),
                     ],
                   ),
                 ),
@@ -767,6 +942,74 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Late Submission Status Card
+          Container(
+            margin: EdgeInsets.only(bottom: 16),
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: (assignmentData['allowLateSubmissions'] ?? true)
+                  ? Colors.green[50]
+                  : Colors.red[50],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: (assignmentData['allowLateSubmissions'] ?? true)
+                    ? Colors.green[300]!
+                    : Colors.red[300]!,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  (assignmentData['allowLateSubmissions'] ?? true)
+                      ? Icons.check_circle
+                      : Icons.cancel,
+                  color: (assignmentData['allowLateSubmissions'] ?? true)
+                      ? Colors.green[700]
+                      : Colors.red[700],
+                  size: 24,
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Late Submission Policy',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.grey[800],
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        (assignmentData['allowLateSubmissions'] ?? true)
+                            ? 'Students can submit after the due date'
+                            : 'No submissions accepted after due date',
+                        style: TextStyle(
+                          color: (assignmentData['allowLateSubmissions'] ?? true)
+                              ? Colors.green[700]
+                              : Colors.red[700],
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (widget.isLecturer)
+                  TextButton(
+                    onPressed: _toggleLateSubmissions,
+                    child: Text(
+                      'Change',
+                      style: TextStyle(
+                        color: Colors.blue[600],
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           // Assignment Info Card
           Container(
             padding: EdgeInsets.all(20),
