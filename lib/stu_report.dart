@@ -646,7 +646,9 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
               SizedBox(height: 12),
 
               // Submission Info
+              // Submission Info
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
                   SizedBox(width: 4),
@@ -658,33 +660,43 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
                     ),
                   ),
                   SizedBox(width: 16),
-                  Icon(Icons.upload_file, size: 14, color: Colors.grey[600]),
-                  SizedBox(width: 4),
-                  Text(
-                    'Submitted: ${_formatDate(result['submittedAt'])}',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
-                  if (result['isLate'] == true) ...[
-                    SizedBox(width: 8),
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.red[100],
-                        borderRadius: BorderRadius.circular(8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.upload_file, size: 14, color: Colors.grey[600]),
+                          SizedBox(width: 4),
+                          Text(
+                            'Submitted: ${_formatDate(result['submittedAt'])}',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
-                      child: Text(
-                        'LATE',
-                        style: TextStyle(
-                          color: Colors.red[700],
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                      if (result['isLate'] == true) ...[
+                        SizedBox(height: 2),
+                        Container(
+                          margin: EdgeInsets.only(left: 18), // Align with submitted text
+                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.red[100],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'LATE',
+                            style: TextStyle(
+                              color: Colors.red[700],
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
+                      ],
+                    ],
+                  ),
                 ],
               ),
 

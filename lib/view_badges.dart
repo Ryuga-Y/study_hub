@@ -437,16 +437,18 @@ class _ViewBadgesPageState extends State<ViewBadgesPage> with TickerProviderStat
       child: Column(
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.start,
             children: [
               Icon(Icons.star, color: Colors.amber[300], size: 32),
-              SizedBox(width: 12),
-              Text(
-                'Achievement Summary',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
+              SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'Achievement Summary',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ],

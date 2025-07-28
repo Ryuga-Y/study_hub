@@ -9,6 +9,7 @@ import '../community/models.dart';
 import '../profile_page.dart';
 import 'course_page.dart';
 import 'create_course.dart';
+import '../chat_integrated.dart';
 
 class LecturerHomePage extends StatefulWidget {
   @override
@@ -923,7 +924,16 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
             _navigateToCommunity();
             break;
           case 2:
-          // TODO: Navigate to chat
+// Navigate to chat
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => ChatContactPage()),
+            ).then((_) {
+              // Reset bottom navigation to Courses tab when returning from chat
+              setState(() {
+                _currentIndex = 0;
+              });
+            });
             break;
           case 3:
           // Navigate to profile
