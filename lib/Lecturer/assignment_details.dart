@@ -280,9 +280,23 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     if (organizationCode == null) return;
 
     try {
-      print('Loading submissions from path: organizations/$organizationCode/courses/${widget.courseId}/assignments/${assignmentData['id']}/submissions');
+      print('Loading all enrolled students and their submission status');
+      print('Path: organizations/$organizationCode/courses/${widget.courseId}/enrollments');
 
-      // First try without orderBy to avoid index issues
+      // First, load all enrolled students
+      final enrollmentsSnapshot = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationCode)
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('enrollments')
+          .get();
+
+      print('Found ${enrollmentsSnapshot.docs.length} enrolled students');
+
+      List<Map<String, dynamic>> allStudentsWithStatus = [];
+
+      // Load all submissions for this assignment
       QuerySnapshot submissionsSnapshot;
       try {
         submissionsSnapshot = await FirebaseFirestore.instance
@@ -297,7 +311,6 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
             .get();
       } catch (e) {
         print('OrderBy failed, trying without ordering: $e');
-        // If orderBy fails, get all documents and sort manually
         submissionsSnapshot = await FirebaseFirestore.instance
             .collection('organizations')
             .doc(organizationCode)
@@ -309,13 +322,27 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
             .get();
       }
 
-      print('Found ${submissionsSnapshot.docs.length} submissions');
-
-      List<Map<String, dynamic>> loadedSubmissions = [];
-
+      // Create a map of submissions by studentId for quick lookup
+      Map<String, Map<String, dynamic>> submissionsByStudent = {};
       for (var doc in submissionsSnapshot.docs) {
         final submissionData = doc.data() as Map<String, dynamic>;
-        print('Processing submission: ${doc.id} from student: ${submissionData['studentId']}');
+        final studentId = submissionData['studentId'];
+        if (studentId != null) {
+          submissionsByStudent[studentId] = {
+            'id': doc.id,
+            ...submissionData,
+          };
+        }
+      }
+
+      // Process each enrolled student
+      for (var enrollmentDoc in enrollmentsSnapshot.docs) {
+        final enrollmentData = enrollmentDoc.data() as Map<String, dynamic>;
+        final studentId = enrollmentData['studentId'];
+
+        if (studentId == null) continue;
+
+        print('Processing student: $studentId');
 
         // Get student details
         String studentName = 'Unknown Student';
@@ -325,7 +352,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
         try {
           final studentDoc = await FirebaseFirestore.instance
               .collection('users')
-              .doc(submissionData['studentId'])
+              .doc(studentId)
               .get();
 
           if (studentDoc.exists) {
@@ -335,67 +362,118 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
             studentIdNumber = studentData['studentId'] ?? '';
           }
         } catch (e) {
-          print('Error fetching student data: $e');
+          print('Error fetching student data for $studentId: $e');
         }
 
-        // Check if evaluation exists
-        Map<String, dynamic>? evaluationData;
+        // Check if student has a submission
+        final submission = submissionsByStudent[studentId];
+        bool hasSubmission = submission != null;
         bool hasEvaluation = false;
+        Map<String, dynamic>? evaluationData;
 
-        try {
-          final evalDoc = await FirebaseFirestore.instance
-              .collection('organizations')
-              .doc(organizationCode)
-              .collection('courses')
-              .doc(widget.courseId)
-              .collection('assignments')
-              .doc(assignmentData['id'])
-              .collection('submissions')
-              .doc(doc.id)
-              .collection('evaluations')
-              .doc('current')
-              .get();
+        if (hasSubmission) {
+          // Check if evaluation exists for this submission
+          try {
+            final evalDoc = await FirebaseFirestore.instance
+                .collection('organizations')
+                .doc(organizationCode)
+                .collection('courses')
+                .doc(widget.courseId)
+                .collection('assignments')
+                .doc(assignmentData['id'])
+                .collection('submissions')
+                .doc(submission['id'])
+                .collection('evaluations')
+                .doc('current')
+                .get();
 
-          hasEvaluation = evalDoc.exists;
-          if (evalDoc.exists) {
-            evaluationData = evalDoc.data();
+            hasEvaluation = evalDoc.exists;
+            if (evalDoc.exists) {
+              evaluationData = evalDoc.data();
+            }
+          } catch (e) {
+            print('Error checking evaluation for ${submission['id']}: $e');
           }
-        } catch (e) {
-          print('Error checking evaluation: $e');
         }
 
-        loadedSubmissions.add({
-          'id': doc.id,
-          ...submissionData,
+        // Create student record with submission status
+        Map<String, dynamic> studentRecord = {
+          'studentId': studentId,
           'studentName': studentName,
           'studentEmail': studentEmail,
-          'studentId': studentIdNumber,
+          'studentIdNumber': studentIdNumber,
+          'hasSubmission': hasSubmission,
+          'submissionStatus': hasSubmission ? 'submitted' : 'not_submitted',
           'hasEvaluation': hasEvaluation,
           'evaluationData': evaluationData,
-        });
+        };
+
+        // Add submission data if exists
+        if (hasSubmission) {
+          studentRecord.addAll(submission);
+        } else {
+          // Add default values for non-submitted students
+          studentRecord.addAll({
+            'id': null,
+            'submittedAt': null,
+            'fileName': null,
+            'fileUrl': null,
+            'grade': null,
+            'letterGrade': null,
+            'percentage': null,
+            'feedback': null,
+            'status': 'not_submitted',
+            'isLate': null,
+            'evaluationIsDraft': false,
+            'isReleased': false,
+          });
+        }
+
+        allStudentsWithStatus.add(studentRecord);
       }
 
-      // Sort manually if we couldn't use orderBy
-      loadedSubmissions.sort((a, b) {
-        final aTime = a['submittedAt'] as Timestamp?;
-        final bTime = b['submittedAt'] as Timestamp?;
-        if (aTime == null || bTime == null) return 0;
-        return bTime.compareTo(aTime);
+      // Sort students: submitted first, then by submission time (latest first) for submitted,
+      // and alphabetically by name for non-submitted
+      allStudentsWithStatus.sort((a, b) {
+        // First priority: submission status (submitted first)
+        if (a['hasSubmission'] && !b['hasSubmission']) return -1;
+        if (!a['hasSubmission'] && b['hasSubmission']) return 1;
+
+        // If both have submitted, sort by submission time (latest first)
+        if (a['hasSubmission'] && b['hasSubmission']) {
+          final aTime = a['submittedAt'] as Timestamp?;
+          final bTime = b['submittedAt'] as Timestamp?;
+          if (aTime != null && bTime != null) {
+            return bTime.compareTo(aTime);
+          }
+        }
+
+        // If both haven't submitted, sort alphabetically by name
+        if (!a['hasSubmission'] && !b['hasSubmission']) {
+          return (a['studentName'] ?? '').compareTo(b['studentName'] ?? '');
+        }
+
+        return 0;
       });
 
       if (mounted) {
         setState(() {
-          submissions = loadedSubmissions;
+          submissions = allStudentsWithStatus;
         });
       }
+
+      print('Processed ${allStudentsWithStatus.length} students total');
+      print('Submitted: ${allStudentsWithStatus.where((s) => s['hasSubmission']).length}');
+      print('Not submitted: ${allStudentsWithStatus.where((s) => !s['hasSubmission']).length}');
+
     } catch (e) {
-      print('Error loading submissions: $e');
+      print('Error loading submissions and student status: $e');
       print('Stack trace: ${StackTrace.current}');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error loading submissions: ${e.toString()}'),
+            content: Text('Error loading student submissions: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1380,7 +1458,9 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
 
   // Update _buildSubmissionsTab to add batch return button
   Widget _buildSubmissionsTab() {
-    // Count draft evaluations
+    // Count different statuses
+    final submittedCount = submissions.where((s) => s['hasSubmission'] == true).length;
+    final notSubmittedCount = submissions.where((s) => s['hasSubmission'] == false).length;
     final draftCount = submissions.where((s) =>
     s['evaluationIsDraft'] == true && s['hasEvaluation'] == true
     ).length;
@@ -1391,13 +1471,13 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              Icons.inbox_outlined,
+              Icons.people_outline,
               size: 64,
               color: Colors.grey[400],
             ),
             SizedBox(height: 16),
             Text(
-              'No submissions yet',
+              'No students enrolled',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -1406,7 +1486,7 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
             ),
             SizedBox(height: 8),
             Text(
-              'Students haven\'t submitted their work',
+              'No students are enrolled in this course',
               style: TextStyle(
                 color: Colors.grey[600],
               ),
@@ -1433,51 +1513,162 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
       color: Colors.purple[400],
       child: Column(
         children: [
-          // Add batch return button if there are drafts
-          if (draftCount > 0)
-            Container(
-              padding: EdgeInsets.all(16),
-              child: Container(
-                padding: EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.orange[300]!),
-                ),
-                child: Row(
+          // Compact Statistics Header
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12), // Reduced padding
+            child: Column(
+              children: [
+                // Compact Statistics Cards Row
+                Row(
                   children: [
-                    Icon(Icons.drafts, color: Colors.orange[700], size: 24),
-                    SizedBox(width: 12),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: _buildCompactStatCard(
+                        'Submitted',
+                        submittedCount.toString(),
+                        Colors.green,
+                        Icons.check_circle,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: _buildCompactStatCard(
+                        'Pending',
+                        notSubmittedCount.toString(),
+                        Colors.orange,
+                        Icons.pending,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: _buildCompactStatCard(
+                        'Total',
+                        submissions.length.toString(),
+                        Colors.blue,
+                        Icons.people,
+                      ),
+                    ),
+                  ],
+                ),
+
+                // Compact Progress Bar
+                SizedBox(height: 12),
+                Container(
+                  padding: EdgeInsets.all(12), // Reduced padding
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.08),
+                        blurRadius: 3,
+                        offset: Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            '$draftCount draft evaluation${draftCount > 1 ? 's' : ''} pending',
+                            'Progress',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              color: Colors.orange[800],
-                              fontSize: 16,
+                              fontSize: 14, // Smaller font
                             ),
                           ),
                           Text(
-                            'Return evaluations to make them visible to students',
+                            '${submittedCount}/${submissions.length}',
                             style: TextStyle(
-                              color: Colors.orange[700],
+                              fontWeight: FontWeight.bold,
+                              color: Colors.purple[600],
                               fontSize: 14,
                             ),
                           ),
                         ],
                       ),
+                      SizedBox(height: 6),
+                      LinearProgressIndicator(
+                        value: submissions.isNotEmpty ? submittedCount / submissions.length : 0,
+                        backgroundColor: Colors.grey[200],
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.green[500]!),
+                        minHeight: 6, // Thinner progress bar
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        '${(submissions.isNotEmpty ? (submittedCount / submissions.length * 100) : 0).toStringAsFixed(1)}% complete',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Compact batch return button if there are drafts
+          if (draftCount > 0)
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              margin: EdgeInsets.only(bottom: 8),
+              child: Container(
+                padding: EdgeInsets.all(12), // Reduced padding
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.orange[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.drafts, color: Colors.orange[700], size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$draftCount draft${draftCount > 1 ? 's' : ''} pending',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange[800],
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            'Return to students',
+                            style: TextStyle(
+                              color: Colors.orange[700],
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    ElevatedButton.icon(
-                      onPressed: _returnAllDrafts,
-                      icon: Icon(Icons.send, color: Colors.white, size: 16),
-                      label: Text('Return All', style: TextStyle(color: Colors.white)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green[600],
-                        shape: RoundedRectangleBorder(
+                    GestureDetector(
+                      onTap: _returnAllDrafts,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.green[600],
                           borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.send, color: Colors.white, size: 14),
+                            SizedBox(width: 4),
+                            Text(
+                              'Return All',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -1485,14 +1676,17 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
                 ),
               ),
             ),
+
+          // Optimized Students List
           Expanded(
             child: ListView.builder(
               physics: AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Reduced padding
               itemCount: submissions.length,
+              itemExtent: null, // Let Flutter calculate optimal height
               itemBuilder: (context, index) {
-                final submission = submissions[index];
-                return _buildSubmissionCard(submission);
+                final student = submissions[index];
+                return _buildStudentSubmissionCard(student);
               },
             ),
           ),
@@ -1501,292 +1695,346 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
     );
   }
 
-  Widget _buildSubmissionCard(Map<String, dynamic> submission) {
-    final submittedAt = submission['submittedAt'] as Timestamp?;
-    final isGraded = submission['grade'] != null;
-    final hasDetailedEvaluation = submission['hasEvaluation'] == true;
-    final letterGrade = submission['letterGrade'];
-    final percentage = submission['percentage'];
-    final isDraft = submission['evaluationIsDraft'] == true;
-    final isReleased = submission['isReleased'] == true;
-
+// Compact statistics card
+  Widget _buildCompactStatCard(String title, String value, Color color, IconData icon) {
     return Container(
-      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(10), // Reduced padding
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 5,
-            offset: Offset(0, 2),
+            color: Colors.grey.withValues(alpha: 0.08),
+            blurRadius: 3,
+            offset: Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 20), // Smaller icon
+          SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18, // Smaller font
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          SizedBox(height: 2),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 10, // Smaller font
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  Widget _buildStudentSubmissionCard(Map<String, dynamic> student) {
+    final hasSubmission = student['hasSubmission'] == true;
+    final submittedAt = student['submittedAt'] as Timestamp?;
+    final isGraded = student['grade'] != null;
+    final hasDetailedEvaluation = student['hasEvaluation'] == true;
+    final letterGrade = student['letterGrade'];
+    final percentage = student['percentage'];
+    final isDraft = student['evaluationIsDraft'] == true;
+    final isReleased = student['isReleased'] == true;
+    final studentName = student['studentName'] ?? 'Unknown Student';
+    final studentEmail = student['studentEmail'] ?? 'No email';
+
+    // Determine card colors based on submission status
+    Color borderColor;
+    Color backgroundColor;
+    if (!hasSubmission) {
+      borderColor = Colors.orange[300]!;
+      backgroundColor = Colors.orange[50]!;
+    } else if (isGraded && isReleased) {
+      borderColor = Colors.green[300]!;
+      backgroundColor = Colors.green[50]!;
+    } else {
+      borderColor = Colors.grey[300]!;
+      backgroundColor = Colors.white;
+    }
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 8), // Reduced margin
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(10), // Slightly smaller radius
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.08),
+            blurRadius: 3,
+            offset: Offset(0, 1),
           ),
         ],
       ),
       child: InkWell(
-        onTap: () => _navigateToEvaluation(submission),
-        borderRadius: BorderRadius.circular(12),
+        onTap: hasSubmission ? () => _navigateToEvaluation(student) : null,
+        borderRadius: BorderRadius.circular(10),
         child: Padding(
-          padding: EdgeInsets.all(16),
+          padding: EdgeInsets.all(12), // Reduced padding
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Main row with student info and status
               Row(
                 children: [
+                  // Smaller avatar
                   CircleAvatar(
-                    backgroundColor: Colors.purple[100],
+                    radius: 18, // Smaller avatar
+                    backgroundColor: hasSubmission ? Colors.purple[100] : Colors.orange[100],
                     child: Text(
-                      (submission['studentName'] ?? 'S').substring(0, 1).toUpperCase(),
+                      studentName.substring(0, 1).toUpperCase(),
                       style: TextStyle(
-                        color: Colors.purple[600],
+                        color: hasSubmission ? Colors.purple[600] : Colors.orange[600],
                         fontWeight: FontWeight.bold,
+                        fontSize: 14,
                       ),
                     ),
                   ),
-                  SizedBox(width: 12),
+                  SizedBox(width: 10),
+
+                  // Student info - more compact
                   Expanded(
+                    flex: 3,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          submission['studentName'] ?? 'Unknown Student',
+                          studentName,
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                            fontSize: 14, // Smaller font
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
+                        SizedBox(height: 2),
                         Text(
-                          submission['studentEmail'] ?? 'No email',
+                          studentEmail,
                           style: TextStyle(
                             color: Colors.grey[600],
-                            fontSize: 14,
+                            fontSize: 11, // Smaller font
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
-                  if (hasDetailedEvaluation)
-                    Container(
-                      margin: EdgeInsets.only(right: 8),
-                      padding: EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.purple[50],
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.rule,
-                        size: 20,
-                        color: Colors.purple[600],
-                      ),
-                    ),
-                  // Show evaluation status
-                  if (hasDetailedEvaluation && isDraft) ...[
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.orange[50],
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.orange[300]!),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.drafts, size: 14, color: Colors.orange[700]),
-                          SizedBox(width: 4),
-                          Text(
-                            'Draft',
-                            style: TextStyle(
-                              color: Colors.orange[700],
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
+
+                  SizedBox(width: 8),
+
+                  // Status and actions - more compact
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (!hasSubmission) ...[
+                          // Not submitted status
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.orange[100],
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange[300]!),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: () => _returnSingleEvaluation(submission),
-                      icon: Icon(Icons.send, size: 16, color: Colors.white),
-                      label: Text('Return', style: TextStyle(color: Colors.white, fontSize: 14)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green[600],
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ] else if (isGraded && isReleased) ...[
-                    // Show letter grade if available and released
-                    if (letterGrade != null)
-                      Container(
-                        margin: EdgeInsets.only(right: 8),
-                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _getLetterGradeColor(letterGrade),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          letterGrade,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    // Show points and percentage
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.green[50],
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.green[300]!),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            '${submission['grade']}/${assignmentData['points'] ?? 100}',
-                            style: TextStyle(
-                              color: Colors.green[700],
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          if (percentage != null)
-                            Text(
-                              '${percentage.toStringAsFixed(1)}%',
+                            child: Text(
+                              'Not Submitted',
                               style: TextStyle(
-                                color: Colors.green[600],
+                                color: Colors.orange[700],
+                                fontWeight: FontWeight.bold,
                                 fontSize: 10,
                               ),
                             ),
-                        ],
-                      ),
-                    ),
-                  ] else
-                    ElevatedButton(
-                      onPressed: () => _navigateToEvaluation(submission),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: Text('Evaluate', style: TextStyle(color: Colors.white)),
-                    ),
-                ],
-              ),
-              SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
-                  SizedBox(width: 4),
-                  Text(
-                    'Submitted: ${_formatDateTime(submittedAt)}',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
-                  if (submission['status'] == 'completed') ...[
-                    SizedBox(width: 12),
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.green[100],
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'Completed',
-                        style: TextStyle(
-                          color: Colors.green[700],
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ] else if (submission['status'] == 'evaluated_draft') ...[
-                    SizedBox(width: 12),
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.orange[100],
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'Evaluated (Draft)',
-                        style: TextStyle(
-                          color: Colors.orange[700],
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              // File attachment display
-              if (submission['fileName'] != null) ...[
-                SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(Icons.attachment, size: 16, color: Colors.grey[600]),
-                    SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        submission['fileName'],
-                        style: TextStyle(
-                          color: Colors.blue[600],
-                          fontSize: 12,
-                          decoration: TextDecoration.underline,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              // Detailed evaluation feedback
-              if (hasDetailedEvaluation && submission['evaluationData'] != null) ...[
-                SizedBox(height: 8),
-                Container(
-                  padding: EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.feedback, size: 14, color: Colors.grey[600]),
-                      SizedBox(width: 4),
-                      Text(
-                        isDraft ? 'Evaluated with rubric (Draft)' : 'Evaluated with rubric',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 12,
-                        ),
-                      ),
-                      if (submission['evaluationData']['allowResubmission'] == true) ...[
-                        SizedBox(width: 8),
-                        Container(
-                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.green[100],
-                            borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Text(
-                            'Resubmission allowed',
-                            style: TextStyle(
-                              color: Colors.green[700],
-                              fontSize: 10,
+                        ] else if (hasDetailedEvaluation && isDraft) ...[
+                          // Draft evaluation
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange[100],
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  'Draft',
+                                  style: TextStyle(
+                                    color: Colors.orange[700],
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 9,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: 4),
+                              GestureDetector(
+                                onTap: () => _returnSingleEvaluation(student),
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green[600],
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.send, size: 10, color: Colors.white),
+                                      SizedBox(width: 2),
+                                      Text(
+                                        'Return',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ] else if (isGraded && isReleased) ...[
+                          // Graded and released
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (letterGrade != null)
+                                Container(
+                                  margin: EdgeInsets.only(right: 4),
+                                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: _getLetterGradeColor(letterGrade),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    letterGrade,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ),
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.green[100],
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.green[300]!),
+                                ),
+                                child: Text(
+                                  '${student['grade']}/${assignmentData['points'] ?? 100}',
+                                  style: TextStyle(
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ] else if (hasSubmission) ...[
+                          // Submitted but not evaluated
+                          GestureDetector(
+                            onTap: () => _navigateToEvaluation(student),
+                            child: Container(
+                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[600],
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                'Evaluate',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
+                          ),
+                        ],
+
+                        // Submission time or due date
+                        SizedBox(height: 4),
+                        Text(
+                          hasSubmission
+                              ? _formatCompactDateTime(submittedAt)
+                              : 'Due: ${_formatCompactDateTime(assignmentData['dueDate'])}',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 9,
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
+                ],
+              ),
+
+              // Additional info row (compact)
+              if (hasSubmission) ...[
+                SizedBox(height: 8),
+                Row(
+                  children: [
+                    // Status indicators
+                    if (student['status'] == 'completed')
+                      _buildCompactBadge('Completed', Colors.green[600]!, Icons.check_circle),
+                    if (student['status'] == 'evaluated_draft')
+                      _buildCompactBadge('Draft', Colors.orange[600]!, Icons.drafts),
+                    if (student['isLate'] == true)
+                      _buildCompactBadge('Late', Colors.red[600]!, Icons.warning),
+                    if (hasDetailedEvaluation)
+                      _buildCompactBadge('Rubric', Colors.purple[600]!, Icons.rule),
+
+                    Spacer(),
+
+                    // File indicator
+                    if (student['fileName'] != null)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.attachment, size: 12, color: Colors.blue[600]),
+                          SizedBox(width: 2),
+                          Text(
+                            'File',
+                            style: TextStyle(
+                              color: Colors.blue[600],
+                              fontSize: 9,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ] else if (!hasSubmission) ...[
+                SizedBox(height: 6),
+                Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 12, color: Colors.orange[600]),
+                    SizedBox(width: 4),
+                    Text(
+                      'Awaiting submission',
+                      style: TextStyle(
+                        color: Colors.orange[600],
+                        fontSize: 10,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],
@@ -1794,6 +2042,60 @@ class _AssignmentDetailPageState extends State<AssignmentDetailPage> with Single
         ),
       ),
     );
+  }
+
+  Widget _buildCompactBadge(String text, Color color, IconData icon) {
+    return Container(
+      margin: EdgeInsets.only(right: 6),
+      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: color),
+          SizedBox(width: 2),
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+// Helper method for compact date formatting
+  String _formatCompactDateTime(dynamic timestamp) {
+    if (timestamp == null) return 'N/A';
+
+    DateTime date;
+    if (timestamp is Timestamp) {
+      date = timestamp.toDate();
+    } else if (timestamp is DateTime) {
+      date = timestamp;
+    } else {
+      return 'N/A';
+    }
+
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays == 0) {
+      return 'Today ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    } else if (difference.inDays == 1) {
+      return 'Yesterday';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays}d ago';
+    } else {
+      return '${date.day}/${date.month}';
+    }
   }
 
   // Add batch return functionality:

@@ -806,8 +806,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   }
 
   Future<void> _changeAvatar() async {
-    final picker = ImagePicker();
-    final result = await showModalBottomSheet<XFile?>(
+    showModalBottomSheet(
       context: context,
       builder: (context) => Column(
         mainAxisSize: MainAxisSize.min,
@@ -815,33 +814,71 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           ListTile(
             leading: Icon(Icons.camera_alt),
             title: Text('Take Photo'),
-            onTap: () async {
-              final image = await picker.pickImage(source: ImageSource.camera);
-              Navigator.pop(context, image);
+            onTap: () {
+              Navigator.pop(context);  // Pop first
+              _pickAvatarImage(ImageSource.camera);  // Then do async operation
             },
           ),
           ListTile(
             leading: Icon(Icons.photo_library),
             title: Text('Choose from Gallery'),
-            onTap: () async {
-              final image = await picker.pickImage(source: ImageSource.gallery);
-              Navigator.pop(context, image);
+            onTap: () {
+              Navigator.pop(context);  // Pop first
+              _pickAvatarImage(ImageSource.gallery);  // Then do async operation
             },
           ),
           ListTile(
             leading: Icon(Icons.delete, color: Colors.red),
             title: Text('Remove Photo', style: TextStyle(color: Colors.red)),
-            onTap: () => Navigator.pop(context, null),
+            onTap: () {
+              Navigator.pop(context);  // Pop first
+              _removeAvatar();  // Then remove avatar
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.cancel),
+            title: Text('Cancel'),
+            onTap: () => Navigator.pop(context),
           ),
         ],
       ),
     );
+  }
 
-    if (result != null) {
-      context.read<CommunityBloc>().add(
-        UpdateUserProfile(avatarFile: File(result.path)),
+  Future<void> _pickAvatarImage(ImageSource source) async {
+    final picker = ImagePicker();
+
+    try {
+      final XFile? imageFile = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
       );
+
+      if (imageFile != null) {
+        context.read<CommunityBloc>().add(
+          UpdateUserProfile(avatarFile: File(imageFile.path)),
+        );
+      }
+    } catch (e) {
+      print('Error picking image: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to select image. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
+  }
+
+  void _removeAvatar() {
+    context.read<CommunityBloc>().add(
+      UpdateUserProfile(removeAvatar: true),
+    );
   }
 
   void _showEditProfileDialog() {

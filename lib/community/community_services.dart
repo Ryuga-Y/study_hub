@@ -1545,7 +1545,8 @@ class CommunityService {
   Future<void> updateUserProfile({
     String? bio,
     File? avatarFile,
-    FriendsListPrivacy? friendsListPrivacy, // Add this parameter
+    FriendsListPrivacy? friendsListPrivacy,
+    bool removeAvatar = false, // Add this parameter
   }) async {
     try {
       final userId = currentUserId;
@@ -1561,19 +1562,75 @@ class CommunityService {
         updates['friendsListPrivacy'] = friendsListPrivacy.toString().split('.').last;
       }
 
-      if (avatarFile != null) {
-        // Upload avatar
-        final ref = _storage.ref().child('avatars/$userId');
-        final uploadTask = await ref.putFile(avatarFile);
-        final avatarUrl = await uploadTask.ref.getDownloadURL();
-        updates['avatarUrl'] = avatarUrl;
+      // Handle avatar removal
+      if (removeAvatar) {
+        try {
+          // Try to delete the existing avatar from storage
+          final userDoc = await _firestore.collection('users').doc(userId).get();
+          final existingAvatarUrl = userDoc.data()?['avatarUrl'];
+
+          if (existingAvatarUrl != null && existingAvatarUrl.isNotEmpty) {
+            try {
+              final ref = _storage.refFromURL(existingAvatarUrl);
+              await ref.delete();
+              print('✅ Existing avatar deleted from storage');
+            } catch (e) {
+              print('⚠️ Could not delete existing avatar: $e');
+              // Continue anyway, as the important part is removing from user profile
+            }
+          }
+        } catch (e) {
+          print('⚠️ Error checking existing avatar: $e');
+        }
+
+        // Remove avatar URL from user profile
+        updates['avatarUrl'] = FieldValue.delete();
+        print('🗑️ Avatar removed from user profile');
+      }
+      // Handle avatar upload (only if not removing)
+      else if (avatarFile != null) {
+        try {
+          // Delete existing avatar first if it exists
+          final userDoc = await _firestore.collection('users').doc(userId).get();
+          final existingAvatarUrl = userDoc.data()?['avatarUrl'];
+
+          if (existingAvatarUrl != null && existingAvatarUrl.isNotEmpty) {
+            try {
+              final oldRef = _storage.refFromURL(existingAvatarUrl);
+              await oldRef.delete();
+              print('✅ Old avatar deleted before uploading new one');
+            } catch (e) {
+              print('⚠️ Could not delete old avatar: $e');
+            }
+          }
+
+          // Upload new avatar
+          final ref = _storage.ref().child('avatars/$userId');
+          final metadata = SettableMetadata(
+            contentType: 'image/jpeg',
+            customMetadata: {
+              'uploadedBy': userId,
+              'uploadedAt': DateTime.now().toIso8601String(),
+            },
+          );
+
+          final uploadTask = await ref.putFile(avatarFile, metadata);
+          final avatarUrl = await uploadTask.ref.getDownloadURL();
+          updates['avatarUrl'] = avatarUrl;
+          print('✅ New avatar uploaded successfully');
+        } catch (e) {
+          print('❌ Error uploading avatar: $e');
+          throw Exception('Failed to upload avatar: $e');
+        }
       }
 
       if (updates.isNotEmpty) {
         updates['updatedAt'] = Timestamp.now();
         await _firestore.collection('users').doc(userId).update(updates);
+        print('✅ User profile updated successfully');
       }
     } catch (e) {
+      print('❌ Error updating user profile: $e');
       throw Exception('Failed to update profile: $e');
     }
   }
