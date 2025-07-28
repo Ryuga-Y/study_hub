@@ -270,16 +270,16 @@ class NotificationService {
   }
 
   // Change the return type from Object to int
-  int _getCalendarEventColor(String itemType) {  // Change Object to int
+  int _getCalendarEventColor(String itemType) {
     switch (itemType.toLowerCase()) {
       case 'assignment':
-        return Colors.red.value;     // Add .value
+        return Colors.red.toARGB32();
       case 'tutorial':
-        return Colors.red.value;     // Add .value
+        return Colors.red.toARGB32();
       case 'goal':
-        return Colors.green.value;   // Add .value
+        return Colors.green.toARGB32();
       default:
-        return Colors.purple.value;  // Add .value
+        return Colors.purple.toARGB32();
     }
   }
 
@@ -322,6 +322,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _pointsController = TextEditingController();
+  bool _allowLateSubmissions = true;
 
   DateTime? _dueDate;
   TimeOfDay? _dueTime;
@@ -345,6 +346,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       _titleController.text = widget.assignmentData!['title'] ?? '';
       _descriptionController.text = widget.assignmentData!['description'] ?? '';
       _pointsController.text = (widget.assignmentData!['points'] ?? 0).toString();
+      _allowLateSubmissions = widget.assignmentData!['allowLateSubmissions'] ?? true;
 
       // Set due date if exists
       if (widget.assignmentData!['dueDate'] != null) {
@@ -640,6 +642,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
   }
 
   // MERGED: Simplified save assignment method using NotificationService
+  // FIXED: Combine both assignmentData declarations into one
   Future<void> _saveAssignment() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -688,12 +691,13 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         throw Exception('Organization code not found in course data');
       }
 
-      // Prepare assignment data
+      // FIXED: Single assignmentData declaration with all required fields
       final assignmentData = {
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'points': int.tryParse(_pointsController.text.trim()) ?? 0,
         'dueDate': Timestamp.fromDate(dueDateTime),
+        'allowLateSubmissions': _allowLateSubmissions, // Include late submission setting
         'courseId': widget.courseId,
         'courseName': widget.courseData['title'] ?? widget.courseData['name'],
         'courseCode': widget.courseData['code'] ?? '',
@@ -759,10 +763,9 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
         }
       }
 
-      // MERGED: Use NotificationService for both notifications and calendar events
-      // This single call handles everything: notifications + calendar events with RED color for assignments
+      // Use NotificationService for both notifications and calendar events
       await _notificationService.createNewItemNotification(
-        itemType: 'assignment', // or 'tutorial'
+        itemType: 'assignment',
         itemTitle: _titleController.text.trim(),
         dueDate: dueDateTime,
         sourceId: assignmentId!,
@@ -777,6 +780,7 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
       if (mounted) {
         Navigator.pop(context, true);
       }
+
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1104,6 +1108,63 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                         ),
                       ],
                     ),
+
+                    SizedBox(height: 16),
+
+                    // Late Submission Toggle
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.orange[200]!),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _allowLateSubmissions ? Icons.check_circle : Icons.cancel,
+                            color: _allowLateSubmissions ? Colors.green[600] : Colors.red[600],
+                            size: 24,
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Late Submissions',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.grey[800],
+                                  ),
+                                ),
+                                Text(
+                                  _allowLateSubmissions
+                                      ? 'Students can submit after the due date'
+                                      : 'No submissions accepted after due date',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch(
+                            value: _allowLateSubmissions,
+                            onChanged: (value) {
+                              setState(() {
+                                _allowLateSubmissions = value;
+                              });
+                            },
+                            activeColor: Colors.green[600],
+                            inactiveThumbColor: Colors.red[600],
+                            inactiveTrackColor: Colors.red[200],
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1129,20 +1190,25 @@ class _CreateAssignmentPageState extends State<CreateAssignmentPage> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Reference Materials',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.purple[600],
+                        Expanded(
+                          child: Text(
+                            'Reference Materials',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.purple[600],
+                            ),
+                            overflow: TextOverflow.ellipsis, // Handle text overflow gracefully
                           ),
                         ),
+                        SizedBox(width: 8), // Add small spacing
                         TextButton.icon(
                           onPressed: _isLoading ? null : _selectFiles,
-                          icon: Icon(Icons.attach_file),
+                          icon: Icon(Icons.attach_file, size: 18), // Slightly smaller icon
                           label: Text('Add Files'),
                           style: TextButton.styleFrom(
                             foregroundColor: Colors.purple[600],
+                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8), // Compact padding
                           ),
                         ),
                       ],
