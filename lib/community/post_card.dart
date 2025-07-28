@@ -792,6 +792,7 @@ class _PostCardState extends State<PostCard> {
                 // Reason dropdown
                 DropdownButtonFormField<String>(
                   value: selectedReason,
+                  isExpanded: true, // Add this line
                   decoration: InputDecoration(
                     labelText: 'Reason',
                     border: OutlineInputBorder(
@@ -913,7 +914,9 @@ class _PostCardState extends State<PostCard> {
           children: [
             Icon(Icons.check_circle, color: Colors.white),
             SizedBox(width: 8),
-            Text('Report submitted. Thank you for helping keep our community safe.'),
+            Expanded(
+              child: Text('Report submitted. Thank you for helping keep our community safe.'),
+            ),
           ],
         ),
         backgroundColor: Colors.green,
