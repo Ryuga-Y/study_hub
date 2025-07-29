@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -6,6 +9,7 @@ import '../Authentication/custom_widgets.dart';
 import '../community/bloc.dart';
 import '../community/feed_screen.dart';
 import '../community/models.dart';
+import '../community/profile_change_notifier.dart';
 import '../profile_page.dart';
 import 'course_page.dart';
 import 'create_course.dart';
@@ -27,6 +31,8 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
   bool _isLoading = true;
   String? _errorMessage;
 
+  StreamSubscription? _profileChangeSubscription;
+
   // Navigation
   int _currentIndex = 0;
 
@@ -34,6 +40,32 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
   void initState() {
     super.initState();
     _loadData();
+
+    // ADD THIS BLOCK - Listen for profile changes
+    _profileChangeSubscription = ProfileChangeNotifier().profileChangeStream.listen((updatedData) {
+      if (mounted) {
+        setState(() {
+          if (_userData != null) {
+            if (updatedData['fullName'] != null) {
+              _userData!['fullName'] = updatedData['fullName'];
+            }
+            if (updatedData['bio'] != null) {
+              _userData!['bio'] = updatedData['bio'];
+            }
+            if (updatedData['avatarUrl'] != null) {
+              _userData!['avatarUrl'] = updatedData['avatarUrl'];
+            }
+          }
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _profileChangeSubscription?.cancel(); // ADD THIS LINE
+    // Add any other existing dispose code here
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -562,48 +594,78 @@ class _LecturerHomePageState extends State<LecturerHomePage> {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            DrawerHeader(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.purple[600]!, Colors.purple[400]!],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 35,
-                    backgroundColor: Colors.white,
-                    child: Text(
-                      _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'L',
-                      style: TextStyle(
-                        color: Colors.purple[600],
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
+
+            StreamBuilder<Map<String, dynamic>>(
+              stream: ProfileChangeNotifier().profileChangeStream,
+              builder: (context, snapshot) {
+                // Use updated data if available, otherwise use cached data
+                final displayName = snapshot.data?['fullName'] ?? _userData?['fullName'] ?? 'User';
+                final displayEmail = _userData?['email'] ?? '';
+                final displayAvatar = snapshot.data?['avatarUrl'] ?? _userData?['avatarUrl'];
+
+                return DrawerHeader(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.purple[600]!, Colors.purple[400]!],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => ProfilePage()),
+                          );
+                        },
+                        child: CircleAvatar(
+                          radius: 35,
+                          backgroundColor: Colors.white,
+                          backgroundImage: displayAvatar != null
+                              ? CachedNetworkImageProvider(displayAvatar)
+                              : null,
+                          child: displayAvatar == null
+                              ? Text(
+                            displayName.substring(0, 1).toUpperCase(),
+                            style: TextStyle(
+                              color: Colors.purple[600],
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                              : null,
+                        ),
                       ),
-                    ),
+                      SizedBox(height: 12),
+                      Text(
+                        displayName,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        displayEmail,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                  SizedBox(height: 12),
-                  Text(
-                    _userData?['fullName'] ?? 'Lecturer',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    _userData?['email'] ?? '',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.9),
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
+
             ListTile(
               leading: Icon(Icons.person_outline),
               title: Text('Profile'),

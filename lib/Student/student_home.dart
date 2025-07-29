@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -7,6 +8,7 @@ import '../Authentication/custom_widgets.dart';
 import '../community/bloc.dart';
 import '../community/feed_screen.dart';
 import '../community/models.dart';
+import '../community/profile_change_notifier.dart';
 import '../profile_page.dart';
 import 'student_course.dart';
 import 'calendar.dart'; // Import the calendar page
@@ -28,6 +30,8 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
   final GoalProgressService _goalService = GoalProgressService();
   final NotificationService _notificationService = NotificationService();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  StreamSubscription? _profileChangeSubscription;
 
   // Data
   Map<String, dynamic>? _userData;
@@ -98,10 +102,29 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
         _checkForMissedRewards();
       }
     });
+
+    _profileChangeSubscription = ProfileChangeNotifier().profileChangeStream.listen((updatedData) {
+      if (mounted) {
+        setState(() {
+          if (_userData != null) {
+            if (updatedData['fullName'] != null) {
+              _userData!['fullName'] = updatedData['fullName'];
+            }
+            if (updatedData['bio'] != null) {
+              _userData!['bio'] = updatedData['bio'];
+            }
+            if (updatedData['avatarUrl'] != null) {
+              _userData!['avatarUrl'] = updatedData['avatarUrl'];
+            }
+          }
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _profileChangeSubscription?.cancel();
     // Remove app lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
 
@@ -889,47 +912,81 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            DrawerHeader(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.purple[600]!, Colors.purple[400]!],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 35,
-                    backgroundColor: Colors.white,
-                    child: Text(
-                      _userData?['fullName']?.substring(0, 1).toUpperCase() ?? 'S',
-                      style: TextStyle(
-                        color: Colors.purple[600],
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
+            // ENHANCED DrawerHeader with StreamBuilder for real-time updates
+            StreamBuilder<Map<String, dynamic>>(
+              stream: ProfileChangeNotifier().profileChangeStream,
+              builder: (context, snapshot) {
+                // Use updated data if available, otherwise use cached data
+                final displayName = snapshot.data?['fullName'] ??
+                    _userData?['fullName'] ??
+                    'User'; // Change to 'Lecturer' or 'Student' as appropriate
+                final displayEmail = _userData?['email'] ?? '';
+                final displayAvatar = snapshot.data?['avatarUrl'] ?? _userData?['avatarUrl'];
+
+                return DrawerHeader(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.purple[600]!, Colors.purple[400]!],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Enhanced CircleAvatar with tap to navigate to profile
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => ProfilePage()),
+                          );
+                        },
+                        child: CircleAvatar(
+                          radius: 35,
+                          backgroundColor: Colors.white,
+                          backgroundImage: displayAvatar != null
+                              ? CachedNetworkImageProvider(displayAvatar)
+                              : null,
+                          child: displayAvatar == null
+                              ? Text(
+                            displayName.substring(0, 1).toUpperCase(),
+                            style: TextStyle(
+                              color: Colors.purple[600],
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                              : null,
+                        ),
                       ),
-                    ),
+                      SizedBox(height: 12),
+                      // Name with overflow handling
+                      Text(
+                        displayName,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      // Email with overflow handling
+                      Text(
+                        displayEmail,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 14,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _userData?['fullName'] ?? 'Student',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    _userData?['email'] ?? '',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
             // In the _buildDrawer() method, replace the existing ListTile widgets with this updated version:
 
@@ -1004,7 +1061,7 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.purple.withOpacity(0.3),
+                  color: Colors.purple.withValues(alpha: 0.3),
                   blurRadius: 10,
                   offset: const Offset(0, 5),
                 ),
@@ -1026,7 +1083,7 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
                   'You have ${_enrolledCourses.length} enrolled course${_enrolledCourses.length == 1 ? '' : 's'}',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                   ),
                 ),
               ],
@@ -1049,7 +1106,7 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.green.withOpacity(0.3),
+                    color: Colors.green.withValues(alpha: 0.3),
                     blurRadius: 10,
                     offset: const Offset(0, 5),
                   ),
@@ -1081,7 +1138,7 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
                                 : 'Complete assignments to earn water buckets!',
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.white.withOpacity(0.9),
+                              color: Colors.white.withValues(alpha: 0.9),
                             ),
                           ),
                         ],
@@ -1182,7 +1239,7 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 5,
             offset: const Offset(0, 2),
           ),

@@ -1544,9 +1544,10 @@ class CommunityService {
 
   Future<void> updateUserProfile({
     String? bio,
+    String? fullName, // Add full name update support
     File? avatarFile,
     FriendsListPrivacy? friendsListPrivacy,
-    bool removeAvatar = false, // Add this parameter
+    bool removeAvatar = false,
   }) async {
     try {
       final userId = currentUserId;
@@ -1558,6 +1559,11 @@ class CommunityService {
         updates['bio'] = bio;
       }
 
+      // NEW: Support for updating full name
+      if (fullName != null && fullName.trim().isNotEmpty) {
+        updates['fullName'] = fullName.trim();
+      }
+
       if (friendsListPrivacy != null) {
         updates['friendsListPrivacy'] = friendsListPrivacy.toString().split('.').last;
       }
@@ -1565,7 +1571,6 @@ class CommunityService {
       // Handle avatar removal
       if (removeAvatar) {
         try {
-          // Try to delete the existing avatar from storage
           final userDoc = await _firestore.collection('users').doc(userId).get();
           final existingAvatarUrl = userDoc.data()?['avatarUrl'];
 
@@ -1576,21 +1581,18 @@ class CommunityService {
               print('✅ Existing avatar deleted from storage');
             } catch (e) {
               print('⚠️ Could not delete existing avatar: $e');
-              // Continue anyway, as the important part is removing from user profile
             }
           }
         } catch (e) {
           print('⚠️ Error checking existing avatar: $e');
         }
 
-        // Remove avatar URL from user profile
         updates['avatarUrl'] = FieldValue.delete();
         print('🗑️ Avatar removed from user profile');
       }
-      // Handle avatar upload (only if not removing)
+      // Handle avatar upload
       else if (avatarFile != null) {
         try {
-          // Delete existing avatar first if it exists
           final userDoc = await _firestore.collection('users').doc(userId).get();
           final existingAvatarUrl = userDoc.data()?['avatarUrl'];
 
@@ -1604,7 +1606,6 @@ class CommunityService {
             }
           }
 
-          // Upload new avatar
           final ref = _storage.ref().child('avatars/$userId');
           final metadata = SettableMetadata(
             contentType: 'image/jpeg',
@@ -1628,10 +1629,71 @@ class CommunityService {
         updates['updatedAt'] = Timestamp.now();
         await _firestore.collection('users').doc(userId).update(updates);
         print('✅ User profile updated successfully');
+
+        // NEW: Update profile in all posts and comments for consistency
+        await _updateUserProfileInContent(userId, updates);
       }
     } catch (e) {
       print('❌ Error updating user profile: $e');
       throw Exception('Failed to update profile: $e');
+    }
+  }
+  Future<void> _updateUserProfileInContent(String userId, Map<String, dynamic> updates) async {
+    try {
+      final batch = _firestore.batch();
+
+      // Update posts
+      if (updates.containsKey('fullName') || updates.containsKey('avatarUrl')) {
+        final postsQuery = await _firestore
+            .collection('posts')
+            .where('userId', isEqualTo: userId)
+            .get();
+
+        for (final doc in postsQuery.docs) {
+          Map<String, dynamic> postUpdates = {};
+          if (updates.containsKey('fullName')) {
+            postUpdates['userName'] = updates['fullName'];
+          }
+          if (updates.containsKey('avatarUrl')) {
+            if (updates['avatarUrl'] is FieldValue) {
+              postUpdates['userAvatar'] = null;
+            } else {
+              postUpdates['userAvatar'] = updates['avatarUrl'];
+            }
+          }
+          if (postUpdates.isNotEmpty) {
+            batch.update(doc.reference, postUpdates);
+          }
+        }
+
+        // Update comments
+        final commentsQuery = await _firestore
+            .collection('comments')
+            .where('userId', isEqualTo: userId)
+            .get();
+
+        for (final doc in commentsQuery.docs) {
+          Map<String, dynamic> commentUpdates = {};
+          if (updates.containsKey('fullName')) {
+            commentUpdates['userName'] = updates['fullName'];
+          }
+          if (updates.containsKey('avatarUrl')) {
+            if (updates['avatarUrl'] is FieldValue) {
+              commentUpdates['userAvatar'] = null;
+            } else {
+              commentUpdates['userAvatar'] = updates['avatarUrl'];
+            }
+          }
+          if (commentUpdates.isNotEmpty) {
+            batch.update(doc.reference, commentUpdates);
+          }
+        }
+      }
+
+      await batch.commit();
+      print('✅ User profile updated in all content');
+    } catch (e) {
+      print('⚠️ Error updating user profile in content: $e');
     }
   }
 
