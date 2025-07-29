@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:study_hub/community/profile_change_notifier.dart';
 import 'package:study_hub/community/search_screen.dart';
 import 'bloc.dart';
 import 'community_services.dart';
@@ -857,9 +859,52 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       );
 
       if (imageFile != null) {
+        // Show loading indicator
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text(
+                  'Updating profile picture...',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        );
+
         context.read<CommunityBloc>().add(
           UpdateUserProfile(avatarFile: File(imageFile.path)),
         );
+
+        // Listen for the update completion
+        final subscription = context.read<CommunityBloc>().stream.listen((state) {
+          if (state.successMessage != null || state.error != null) {
+            Navigator.pop(context); // Close loading dialog
+
+            if (state.successMessage != null) {
+              // Notify other parts of the app about the avatar change
+              final user = state.currentUserProfile;
+              if (user != null) {
+                ProfileChangeNotifier().notifyProfileUpdate({
+                  'fullName': user.fullName,
+                  'bio': user.bio,
+                  'avatarUrl': user.avatarUrl,
+                });
+              }
+            }
+          }
+        });
+
+        // Cancel subscription after 10 seconds to prevent memory leaks
+        Timer(Duration(seconds: 10), () {
+          subscription.cancel();
+        });
       }
     } catch (e) {
       print('Error picking image: $e');
@@ -885,19 +930,39 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     final user = context.read<CommunityBloc>().state.currentUserProfile;
     if (user == null) return;
 
+    final nameController = TextEditingController(text: user.fullName);
     final bioController = TextEditingController(text: user.bio);
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Edit Profile'),
-        content: TextField(
-          controller: bioController,
-          maxLines: 3,
-          decoration: InputDecoration(
-            labelText: 'Bio',
-            hintText: 'Tell us about yourself...',
-            border: OutlineInputBorder(),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: 'Full Name',
+                  hintText: 'Enter your full name',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.person),
+                ),
+                textCapitalization: TextCapitalization.words,
+              ),
+              SizedBox(height: 16),
+              TextField(
+                controller: bioController,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  labelText: 'Bio',
+                  hintText: 'Tell us about yourself...',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.edit),
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -907,12 +972,42 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           ),
           ElevatedButton(
             onPressed: () {
-              context.read<CommunityBloc>().add(
-                UpdateUserProfile(bio: bioController.text),
-              );
+              final newName = nameController.text.trim();
+              final newBio = bioController.text.trim();
+
+              // Only update if there are changes
+              bool hasChanges = false;
+
+              if (newName != user.fullName && newName.isNotEmpty) {
+                hasChanges = true;
+              }
+
+              if (newBio != (user.bio ?? '')) {
+                hasChanges = true;
+              }
+
+              if (hasChanges) {
+                context.read<CommunityBloc>().add(
+                  UpdateUserProfile(
+                    fullName: newName.isNotEmpty ? newName : null,
+                    bio: newBio.isNotEmpty ? newBio : null,
+                  ),
+                );
+
+                // Notify other parts of the app about the profile change
+                ProfileChangeNotifier().notifyProfileUpdate({
+                  'fullName': newName,
+                  'bio': newBio,
+                  'avatarUrl': user.avatarUrl,
+                });
+              }
+
               Navigator.pop(context);
             },
-            child: Text('Save'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.purple[600],
+            ),
+            child: Text('Save', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),

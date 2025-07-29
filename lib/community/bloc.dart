@@ -409,19 +409,21 @@ class LoadUserProfile extends CommunityEvent {
 
 class UpdateUserProfile extends CommunityEvent {
   final String? bio;
+  final String? fullName; // Add full name support
   final File? avatarFile;
   final FriendsListPrivacy? friendsListPrivacy;
-  final bool removeAvatar; // Add this parameter
+  final bool removeAvatar;
 
   UpdateUserProfile({
     this.bio,
+    this.fullName, // Add this parameter
     this.avatarFile,
     this.friendsListPrivacy,
-    this.removeAvatar = false, // Default to false
+    this.removeAvatar = false,
   });
 
   @override
-  List<Object?> get props => [bio, avatarFile, friendsListPrivacy, removeAvatar]; // Update props
+  List<Object?> get props => [bio, fullName, avatarFile, friendsListPrivacy, removeAvatar];
 }
 
 class SyncFriendCount extends CommunityEvent {
@@ -1541,12 +1543,18 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     try {
       await _service.updateUserProfile(
         bio: event.bio,
+        fullName: event.fullName, // Add this parameter
         avatarFile: event.avatarFile,
         friendsListPrivacy: event.friendsListPrivacy,
-        removeAvatar: event.removeAvatar, // Pass the removeAvatar parameter
+        removeAvatar: event.removeAvatar,
       );
 
       emit(state.copyWith(successMessage: 'Profile updated successfully!'));
+
+      // Reload current user profile to reflect changes
+      if (_service.currentUserId != null) {
+        add(LoadUserProfile(_service.currentUserId!));
+      }
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
     }
