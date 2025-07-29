@@ -13,6 +13,39 @@ import '../notification.dart';
 enum EventType { normal, recurring, holiday }
 enum RecurrenceType { none, daily, weekly, monthly, yearly }
 
+// Quiz Question Model
+class QuizQuestion {
+  String question;
+  List<String> options;
+  int correctAnswerIndex;
+  int points;
+
+  QuizQuestion({
+    required this.question,
+    required this.options,
+    required this.correctAnswerIndex,
+    this.points = 1,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'question': question,
+      'options': options,
+      'correctAnswerIndex': correctAnswerIndex,
+      'points': points,
+    };
+  }
+
+  factory QuizQuestion.fromMap(Map<String, dynamic> map) {
+    return QuizQuestion(
+      question: map['question'] ?? '',
+      options: List<String>.from(map['options'] ?? []),
+      correctAnswerIndex: map['correctAnswerIndex'] ?? 0,
+      points: map['points'] ?? 1,
+    );
+  }
+}
+
 // NotificationService class for centralized notification management
 class NotificationService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -137,6 +170,12 @@ class NotificationService {
         notificationBody = courseName != null
             ? '$itemTitle has been posted in $courseName'
             : '$itemTitle tutorial has been posted';
+        break;
+      case 'quiz':
+        notificationTitle = '🧠 New Quiz Posted';
+        notificationBody = courseName != null
+            ? '$itemTitle has been posted in $courseName'
+            : '$itemTitle quiz has been posted';
         break;
       case 'learning':
         notificationTitle = '📖 New Learning Material Posted';
@@ -272,6 +311,8 @@ class NotificationService {
         return itemTitle; // Changed from '📝 Assignment: $itemTitle Due'
       case 'tutorial':
         return itemTitle; // Changed from '📚 Tutorial: $itemTitle Due'
+      case 'quiz':
+        return itemTitle; // Added quiz support
       case 'goal':
         return itemTitle; // Changed from '🎯 Goal: $itemTitle Due'
       default:
@@ -285,6 +326,8 @@ class NotificationService {
         return 'Assignment deadline';
       case 'tutorial':
         return 'Tutorial deadline';
+      case 'quiz':
+        return 'Quiz deadline';
       case 'goal':
         return 'Goal deadline';
       default:
@@ -296,13 +339,15 @@ class NotificationService {
   int _getCalendarEventColor(String itemType) {  // Change Object to int
     switch (itemType.toLowerCase()) {
       case 'assignment':
-        return Colors.orange.value;  // Add .value
+        return Colors.orange.toARGB32();  // Add .value
       case 'tutorial':
-        return Colors.red.value;     // Add .value
+        return Colors.red.toARGB32();     // Add .value
+      case 'quiz':
+        return Colors.purple.toARGB32();  // Add .value for quiz
       case 'goal':
-        return Colors.green.value;   // Add .value (was purple)
+        return Colors.green.toARGB32();   // Add .value (was purple)
       default:
-        return Colors.grey.value;    // Add .value
+        return Colors.grey.toARGB32();    // Add .value
     }
   }
 
@@ -312,6 +357,8 @@ class NotificationService {
         return 'assignments';
       case 'tutorial':
         return 'tutorials';
+      case 'quiz':
+        return 'quizzes';
       case 'goal':
         return 'goals';
       default:
@@ -345,15 +392,22 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
 
-  String _materialType = 'learning'; // 'learning' or 'tutorial'
-  DateTime? _dueDate; // Only for tutorials
-  TimeOfDay? _dueTime; // Only for tutorials
+  String _materialType = 'learning'; // 'learning', 'tutorial', or 'quiz'
+  DateTime? _dueDate; // For tutorials and quizzes
+  TimeOfDay? _dueTime; // For tutorials and quizzes
   bool _isLoading = false;
   List<PlatformFile> _selectedFiles = [];
   List<Map<String, dynamic>> _existingFiles = [];
   double _uploadProgress = 0;
   String _uploadStatus = '';
   StreamSubscription? _uploadSubscription;
+
+  // Quiz-specific fields
+  List<QuizQuestion> _quizQuestions = [];
+  bool _allowLateSubmission = false;
+  int _quizTimeLimit = 30; // minutes
+  bool _showResultsImmediately = true;
+  int _maxAttempts = 1;
 
   // Initialize NotificationService
   final NotificationService _notificationService = NotificationService();
@@ -372,12 +426,28 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       _descriptionController.text = widget.materialData!['description'] ?? '';
       _materialType = widget.materialData!['materialType'] ?? 'learning';
 
-      // Set due date if exists (for tutorials)
+      // Set due date if exists (for tutorials and quizzes)
       if (widget.materialData!['dueDate'] != null) {
         final dueDateTime = (widget.materialData!['dueDate'] as Timestamp).toDate();
         _dueDate = DateTime(dueDateTime.year, dueDateTime.month, dueDateTime.day);
         _dueTime = TimeOfDay(hour: dueDateTime.hour, minute: dueDateTime.minute);
         print('📅 Loaded due date: $_dueDate at $_dueTime');
+      }
+
+      // Load quiz-specific data
+      if (_materialType == 'quiz') {
+        _allowLateSubmission = widget.materialData!['allowLateSubmission'] ?? false;
+        _quizTimeLimit = widget.materialData!['timeLimit'] ?? 30;
+        _showResultsImmediately = widget.materialData!['showResultsImmediately'] ?? true;
+        _maxAttempts = widget.materialData!['maxAttempts'] ?? 1;
+
+        // Load quiz questions
+        if (widget.materialData!['questions'] != null) {
+          _quizQuestions = (widget.materialData!['questions'] as List)
+              .map((q) => QuizQuestion.fromMap(q))
+              .toList();
+        }
+        print('🧠 Loaded ${_quizQuestions.length} quiz questions');
       }
 
       // Handle existing files
@@ -405,6 +475,164 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
     _descriptionController.dispose();
     _uploadSubscription?.cancel();
     super.dispose();
+  }
+
+  // Quiz Question Management Methods
+  void _addQuizQuestion() {
+    setState(() {
+      _quizQuestions.add(QuizQuestion(
+        question: '',
+        options: ['', '', '', ''],
+        correctAnswerIndex: 0,
+        points: 1,
+      ));
+    });
+  }
+
+  void _removeQuizQuestion(int index) {
+    setState(() {
+      _quizQuestions.removeAt(index);
+    });
+  }
+
+  void _showQuizQuestionDialog([int? editIndex]) {
+    final isEditing = editIndex != null;
+    final question = isEditing ? _quizQuestions[editIndex] : QuizQuestion(
+      question: '',
+      options: ['', '', '', ''],
+      correctAnswerIndex: 0,
+      points: 1,
+    );
+
+    final questionController = TextEditingController(text: question.question);
+    final optionControllers = question.options.map((option) => TextEditingController(text: option)).toList();
+    int selectedCorrectAnswer = question.correctAnswerIndex;
+    int points = question.points;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(isEditing ? 'Edit Question' : 'Add Question'),
+          content: Container(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Question text
+                  TextField(
+                    controller: questionController,
+                    decoration: InputDecoration(
+                      labelText: 'Question',
+                      border: OutlineInputBorder(),
+                    ),
+                    maxLines: 2,
+                  ),
+                  SizedBox(height: 16),
+
+                  // Options
+                  Text('Options:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  for (int i = 0; i < optionControllers.length; i++)
+                    Padding(
+                      padding: EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          Radio<int>(
+                            value: i,
+                            groupValue: selectedCorrectAnswer,
+                            onChanged: (value) {
+                              setDialogState(() {
+                                selectedCorrectAnswer = value!;
+                              });
+                            },
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: optionControllers[i],
+                              decoration: InputDecoration(
+                                labelText: 'Option ${String.fromCharCode(65 + i)}',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  SizedBox(height: 16),
+
+                  // Points
+                  Row(
+                    children: [
+                      Text('Points: '),
+                      Expanded(
+                        child: Slider(
+                          value: points.toDouble(),
+                          min: 1,
+                          max: 10,
+                          divisions: 9,
+                          label: points.toString(),
+                          onChanged: (value) {
+                            setDialogState(() {
+                              points = value.toInt();
+                            });
+                          },
+                        ),
+                      ),
+                      Text('$points'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (questionController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Please enter a question')),
+                  );
+                  return;
+                }
+
+                final hasEmptyOptions = optionControllers.any((controller) => controller.text.trim().isEmpty);
+                if (hasEmptyOptions) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Please fill in all options')),
+                  );
+                  return;
+                }
+
+                final newQuestion = QuizQuestion(
+                  question: questionController.text.trim(),
+                  options: optionControllers.map((controller) => controller.text.trim()).toList(),
+                  correctAnswerIndex: selectedCorrectAnswer,
+                  points: points,
+                );
+
+                setState(() {
+                  if (isEditing) {
+                    _quizQuestions[editIndex] = newQuestion;
+                  } else {
+                    _quizQuestions.add(newQuestion);
+                  }
+                });
+
+                Navigator.pop(context);
+              },
+              child: Text(isEditing ? 'Update' : 'Add'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _selectFiles() async {
@@ -636,12 +864,23 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       return;
     }
 
-    // Validate tutorial specific requirements
-    if (_materialType == 'tutorial' && _dueDate == null) {
-      print('❌ Tutorial due date validation failed');
+    // Validate tutorial and quiz specific requirements
+    if ((_materialType == 'tutorial' || _materialType == 'quiz') && _dueDate == null) {
+      print('❌ Due date validation failed for $_materialType');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Please select a due date for the tutorial'),
+          content: Text('Please select a due date for the $_materialType'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Validate quiz questions
+    if (_materialType == 'quiz' && _quizQuestions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please add at least one question to the quiz'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -674,9 +913,9 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
 
       print('📁 Total files after upload: ${allFiles.length}');
 
-      // Prepare due date time for tutorials
+      // Prepare due date time for tutorials and quizzes
       DateTime? dueDateTime;
-      if (_materialType == 'tutorial') {
+      if (_materialType == 'tutorial' || _materialType == 'quiz') {
         dueDateTime = DateTime(
           _dueDate!.year,
           _dueDate!.month,
@@ -684,7 +923,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           _dueTime?.hour ?? 23,
           _dueTime?.minute ?? 59,
         );
-        print('📅 Tutorial due date set to: $dueDateTime');
+        print('📅 $_materialType due date set to: $dueDateTime');
       }
 
       // Prepare material data
@@ -711,11 +950,31 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       if (_materialType == 'tutorial') {
         materialData['dueDate'] = Timestamp.fromDate(dueDateTime!);
         materialData['requiresSubmission'] = true;
-      } else {
+      }
+      // Add quiz-specific fields
+      else if (_materialType == 'quiz') {
+        materialData['dueDate'] = Timestamp.fromDate(dueDateTime!);
+        materialData['requiresSubmission'] = true;
+        materialData['allowLateSubmission'] = _allowLateSubmission;
+        materialData['timeLimit'] = _quizTimeLimit;
+        materialData['showResultsImmediately'] = _showResultsImmediately;
+        materialData['maxAttempts'] = _maxAttempts;
+        materialData['questions'] = _quizQuestions.map((q) => q.toMap()).toList();
+        materialData['totalPoints'] = _quizQuestions.fold(0, (sum, q) => sum + q.points);
+      }
+      // Learning materials
+      else {
         materialData['requiresSubmission'] = false;
-        // Remove tutorial fields if changing from tutorial to learning
+        // Remove tutorial/quiz fields if changing type
         if (widget.editMode) {
           materialData['dueDate'] = FieldValue.delete();
+          materialData['allowLateSubmission'] = FieldValue.delete();
+          materialData['timeLimit'] = FieldValue.delete();
+          materialData['showResultsImmediately'] = FieldValue.delete();
+          materialData['shuffleQuestions'] = FieldValue.delete();
+          materialData['maxAttempts'] = FieldValue.delete();
+          materialData['questions'] = FieldValue.delete();
+          materialData['totalPoints'] = FieldValue.delete();
         }
       }
 
@@ -787,13 +1046,11 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         }
       }
 
-      // MERGED: Create notifications and calendar events using NotificationService
-      // This now handles both notifications and calendar events in one call
-      if (_materialType == 'tutorial') {
-        print('📚 Creating notifications and calendar events for tutorial');
-        // Create notifications and calendar events using NotificationService
+      // Create notifications and calendar events using NotificationService
+      if (_materialType == 'tutorial' || _materialType == 'quiz') {
+        print('📚 Creating notifications and calendar events for $_materialType');
         await _notificationService.createNewItemNotification(
-          itemType: 'tutorial',
+          itemType: _materialType,
           itemTitle: _titleController.text.trim(),
           dueDate: dueDateTime!,
           sourceId: materialId!,
@@ -803,7 +1060,6 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         );
       } else {
         print('📖 Creating notifications for learning material');
-        // For learning materials, only send notifications (no calendar events)
         await _notificationService.createNewItemNotification(
           itemType: 'learning',
           itemTitle: _titleController.text.trim(),
@@ -853,7 +1109,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           ? _dueDate!
           : DateTime.now().subtract(Duration(days: 365));
     } else {
-      // For new tutorials, only allow future dates
+      // For new tutorials/quizzes, only allow future dates
       firstSelectableDate = DateTime.now();
     }
 
@@ -988,88 +1244,142 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                 ),
               ],
               SizedBox(height: 12),
-              Row(
+
+              // Material Type Selection Cards
+              Column(
                 children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: widget.editMode ? null : () => setState(() => _materialType = 'learning'),
-                      child: Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: _materialType == 'learning' ? Colors.green[50] : Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: _materialType == 'learning' ? Colors.green : Colors.grey[300]!,
-                            width: _materialType == 'learning' ? 2 : 1,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: widget.editMode ? null : () => setState(() => _materialType = 'learning'),
+                          child: Container(
+                            padding: EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: _materialType == 'learning' ? Colors.green[50] : Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _materialType == 'learning' ? Colors.green : Colors.grey[300]!,
+                                width: _materialType == 'learning' ? 2 : 1,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.menu_book,
+                                  color: _materialType == 'learning' ? Colors.green : Colors.grey[600],
+                                  size: 32,
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Learning Material',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: _materialType == 'learning' ? Colors.green : Colors.grey[700],
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'No submission required',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(
-                              Icons.menu_book,
-                              color: _materialType == 'learning' ? Colors.green : Colors.grey[600],
-                              size: 32,
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'Learning Material',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: _materialType == 'learning' ? Colors.green : Colors.grey[700],
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'No submission required',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
                         ),
                       ),
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: InkWell(
-                      onTap: widget.editMode ? null : () => setState(() => _materialType = 'tutorial'),
-                      child: Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: _materialType == 'tutorial' ? Colors.blue[50] : Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: _materialType == 'tutorial' ? Colors.blue : Colors.grey[300]!,
-                            width: _materialType == 'tutorial' ? 2 : 1,
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: InkWell(
+                          onTap: widget.editMode ? null : () => setState(() => _materialType = 'tutorial'),
+                          child: Container(
+                            padding: EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: _materialType == 'tutorial' ? Colors.blue[50] : Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _materialType == 'tutorial' ? Colors.blue : Colors.grey[300]!,
+                                width: _materialType == 'tutorial' ? 2 : 1,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.quiz,
+                                  color: _materialType == 'tutorial' ? Colors.blue : Colors.grey[600],
+                                  size: 32,
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Tutorial',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: _materialType == 'tutorial' ? Colors.blue : Colors.grey[700],
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Requires submission',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                        child: Column(
-                          children: [
-                            Icon(
-                              Icons.quiz,
-                              color: _materialType == 'tutorial' ? Colors.blue : Colors.grey[600],
-                              size: 32,
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'Tutorial',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: _materialType == 'tutorial' ? Colors.blue : Colors.grey[700],
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Requires submission',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 12),
+                  // Quiz option in its own row
+                  InkWell(
+                    onTap: widget.editMode ? null : () => setState(() => _materialType = 'quiz'),
+                    child: Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _materialType == 'quiz' ? Colors.purple[50] : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _materialType == 'quiz' ? Colors.purple : Colors.grey[300]!,
+                          width: _materialType == 'quiz' ? 2 : 1,
                         ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.psychology,
+                                  color: _materialType == 'quiz' ? Colors.purple : Colors.grey[600],
+                                  size: 32,
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Quiz',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: _materialType == 'quiz' ? Colors.purple : Colors.grey[700],
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Multiple choice questions',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -1111,6 +1421,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                         labelText: 'Title',
                         hintText: _materialType == 'tutorial'
                             ? 'e.g., Tutorial 1: Basic Concepts'
+                            : _materialType == 'quiz'
+                            ? 'e.g., Quiz 1: Chapter Review'
                             : 'e.g., Chapter 1: Introduction',
                         prefixIcon: Icon(Icons.title, color: Colors.purple[400]),
                         border: OutlineInputBorder(
@@ -1158,8 +1470,8 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                       },
                     ),
 
-                    // Tutorial-specific fields (Due Date and Time only)
-                    if (_materialType == 'tutorial') ...[
+                    // Tutorial and Quiz specific fields (Due Date and Time)
+                    if (_materialType == 'tutorial' || _materialType == 'quiz') ...[
                       SizedBox(height: 16),
 
                       // Due Date and Time
@@ -1218,119 +1530,227 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                   ],
                 ),
               ),
-              SizedBox(height: 24),
 
-              // File Upload Section
-              Container(
-                padding: EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withValues(alpha: 0.1),
-                      blurRadius: 10,
-                      offset: Offset(0, 5),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Attachments',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.purple[600],
-                          ),
-                        ),
-                        TextButton.icon(
-                          onPressed: _isLoading ? null : _selectFiles,
-                          icon: Icon(Icons.attach_file),
-                          label: Text('Add Files'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.purple[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Supported: PDF, DOC, DOCX, PPT, PPTX, TXT, Images, ZIP (Max 10MB per file)',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
+              // Quiz-specific settings
+              // Quiz-specific settings
+              if (_materialType == 'quiz') ...[
+                SizedBox(height: 24),
+                Container(
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        blurRadius: 10,
+                        offset: Offset(0, 5),
                       ),
-                    ),
-                    SizedBox(height: 16),
-
-                    // Existing Files (if in edit mode)
-                    if (widget.editMode && _existingFiles.isNotEmpty) ...[
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        'Existing Files',
+                        'Quiz Settings',
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Colors.grey[700],
+                          color: Colors.purple[600],
                         ),
                       ),
-                      SizedBox(height: 8),
-                      ..._existingFiles.map((file) => Container(
-                        margin: EdgeInsets.only(bottom: 8),
-                        padding: EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.purple[50],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.purple[300]!),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              _getFileIcon(file['name'] ?? ''),
+                      SizedBox(height: 20),
+
+                      // Allow Late Submission
+                      SwitchListTile(
+                        title: Text('Allow Late Submission'),
+                        subtitle: Text('Students can submit after due date'),
+                        value: _allowLateSubmission,
+                        onChanged: (value) {
+                          setState(() {
+                            _allowLateSubmission = value;
+                          });
+                        },
+                        activeColor: Colors.purple[400],
+                        contentPadding: EdgeInsets.zero,
+                      ),
+
+                      SizedBox(height: 12),
+
+                      // Time Limit - Simplified layout
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Time Limit',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Slider(
+                                  value: _quizTimeLimit.toDouble(),
+                                  min: 5,
+                                  max: 180,
+                                  divisions: 35,
+                                  label: '$_quizTimeLimit min',
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _quizTimeLimit = value.toInt();
+                                    });
+                                  },
+                                  activeColor: Colors.purple[400],
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.purple[50],
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '$_quizTimeLimit min',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.purple[700],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+
+                      SizedBox(height: 12),
+
+                      // Show Results Immediately
+                      SwitchListTile(
+                        title: Text('Show Results Immediately'),
+                        subtitle: Text('Students see results after submission'),
+                        value: _showResultsImmediately,
+                        onChanged: (value) {
+                          setState(() {
+                            _showResultsImmediately = value;
+                          });
+                        },
+                        activeColor: Colors.purple[400],
+                        contentPadding: EdgeInsets.zero,
+                      ),
+
+                      SizedBox(height: 12),
+
+                      // Max Attempts - Simplified layout
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Maximum Attempts',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Slider(
+                                  value: _maxAttempts.toDouble(),
+                                  min: 0,
+                                  max: 5,
+                                  divisions: 5,
+                                  label: _maxAttempts == 0 ? 'Unlimited' : '$_maxAttempts',
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _maxAttempts = value.toInt();
+                                    });
+                                  },
+                                  activeColor: Colors.purple[400],
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.purple[50],
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  _maxAttempts == 0 ? 'Unlimited' : '$_maxAttempts',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.purple[700],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              // File Upload Section (only for learning materials and tutorials)
+              if (_materialType != 'quiz') ...[
+                SizedBox(height: 24),
+                Container(
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        blurRadius: 10,
+                        offset: Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Attachments',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
                               color: Colors.purple[600],
                             ),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    file['name'] ?? 'File',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  Text(
-                                    'Existing file',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.purple[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
+                          ),
+                          TextButton.icon(
+                            onPressed: _isLoading ? null : _selectFiles,
+                            icon: Icon(Icons.attach_file),
+                            label: Text('Add Files'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.purple[600],
                             ),
-                            IconButton(
-                              icon: Icon(Icons.close, size: 20),
-                              onPressed: () {
-                                setState(() {
-                                  _existingFiles.remove(file);
-                                });
-                              },
-                              color: Colors.red[400],
-                            ),
-                          ],
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Supported: PDF, DOC, DOCX, PPT, PPTX, TXT, Images, ZIP (Max 10MB per file)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
                         ),
-                      )).toList(),
-                      if (_selectedFiles.isNotEmpty) ...[
-                        SizedBox(height: 8),
+                      ),
+                      SizedBox(height: 16),
+
+                      // Existing Files (if in edit mode)
+                      if (widget.editMode && _existingFiles.isNotEmpty) ...[
                         Text(
-                          'New Files to Upload',
+                          'Existing Files',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
@@ -1338,93 +1758,154 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                           ),
                         ),
                         SizedBox(height: 8),
-                      ],
-                    ],
-
-                    // Selected Files List
-                    if (_selectedFiles.isEmpty && _existingFiles.isEmpty)
-                      Container(
-                        padding: EdgeInsets.all(32),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[50],
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.grey[300]!,
-                            style: BorderStyle.solid,
+                        ..._existingFiles.map((file) => Container(
+                          margin: EdgeInsets.only(bottom: 8),
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.purple[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.purple[300]!),
                           ),
-                        ),
-                        child: Center(
-                          child: Column(
+                          child: Row(
                             children: [
                               Icon(
-                                Icons.cloud_upload_outlined,
-                                size: 48,
-                                color: Colors.grey[400],
+                                _getFileIcon(file['name'] ?? ''),
+                                color: Colors.purple[600],
                               ),
-                              SizedBox(height: 8),
-                              Text(
-                                'No files selected',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 16,
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      file['name'] ?? 'File',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      'Existing file',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.purple[600],
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.close, size: 20),
+                                onPressed: () {
+                                  setState(() {
+                                    _existingFiles.remove(file);
+                                  });
+                                },
+                                color: Colors.red[400],
                               ),
                             ],
                           ),
-                        ),
-                      )
-                    else if (_selectedFiles.isNotEmpty)
-                      ...(_selectedFiles.map((file) => Container(
-                        margin: EdgeInsets.only(bottom: 8),
-                        padding: EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[50],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey[300]!),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              _getFileIcon(file.extension ?? ''),
-                              color: Colors.purple[400],
+                        )).toList(),
+                        if (_selectedFiles.isNotEmpty) ...[
+                          SizedBox(height: 8),
+                          Text(
+                            'New Files to Upload',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey[700],
                             ),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    file.name,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
+                          ),
+                          SizedBox(height: 8),
+                        ],
+                      ],
+
+                      // Selected Files List
+                      if (_selectedFiles.isEmpty && _existingFiles.isEmpty)
+                        Container(
+                          padding: EdgeInsets.all(32),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.grey[300]!,
+                              style: BorderStyle.solid,
+                            ),
+                          ),
+                          child: Center(
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.cloud_upload_outlined,
+                                  size: 48,
+                                  color: Colors.grey[400],
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'No files selected',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 16,
                                   ),
-                                  Text(
-                                    _formatFileSize(file.size),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      else if (_selectedFiles.isNotEmpty)
+                        ...(_selectedFiles.map((file) => Container(
+                          margin: EdgeInsets.only(bottom: 8),
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _getFileIcon(file.extension ?? ''),
+                                color: Colors.purple[400],
                               ),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.close, size: 20),
-                              onPressed: () {
-                                setState(() {
-                                  _selectedFiles.remove(file);
-                                });
-                              },
-                              color: Colors.red[400],
-                            ),
-                          ],
-                        ),
-                      ))),
-                  ],
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      file.name,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      _formatFileSize(file.size),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.close, size: 20),
+                                onPressed: () {
+                                  setState(() {
+                                    _selectedFiles.remove(file);
+                                  });
+                                },
+                                color: Colors.red[400],
+                              ),
+                            ],
+                          ),
+                        ))),
+                    ],
+                  ),
                 ),
-              ),
+              ],
+
               SizedBox(height: 24),
 
               // Upload Progress

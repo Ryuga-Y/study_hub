@@ -201,7 +201,20 @@ class GoalProgressService {
       final userId = _auth.currentUser?.uid;
       if (userId == null) return false;
 
-      String collection = itemType == 'tutorial' ? 'materials' : 'assignments';
+      String collection;
+      switch (itemType) {
+        case 'tutorial':
+          collection = 'materials';
+          break;
+        case 'assignment':
+          collection = 'assignments';
+          break;
+        case 'quiz':
+          collection = 'materials'; // Quizzes are stored as materials
+          break;
+        default:
+          return false;
+      }
 
       final submissionsSnapshot = await _firestore
           .collection('organizations')
@@ -233,7 +246,20 @@ class GoalProgressService {
       final userId = _auth.currentUser?.uid;
       if (userId == null) return null;
 
-      String collection = itemType == 'tutorial' ? 'materials' : 'assignments';
+      String collection;
+      switch (itemType) {
+        case 'tutorial':
+          collection = 'materials';
+          break;
+        case 'assignment':
+          collection = 'assignments';
+          break;
+        case 'quiz':
+          collection = 'materials'; // Quizzes are stored as materials
+          break;
+        default:
+          return null;
+      }
 
       final submissionsSnapshot = await _firestore
           .collection('organizations')
@@ -261,6 +287,149 @@ class GoalProgressService {
       print('❌ Error getting user submission: $e');
       return null;
     }
+  }
+
+  Future<void> awardQuizSubmission(String submissionId, String quizId, {String? quizName}) async {
+    await _awardSubmissionOnceAbsolute(
+      submissionId: submissionId,
+      itemId: quizId,
+      itemName: quizName ?? 'Quiz',
+      type: 'quiz',
+      buckets: 2,
+    );
+  }
+
+  Future<Map<String, dynamic>> submitQuiz({
+    required String courseId,
+    required String quizId,
+    required String orgCode,
+    required Map<String, dynamic> submissionData,
+    String? quizName,
+  }) async {
+    try {
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) {
+        return {'success': false, 'error': 'User not authenticated'};
+      }
+
+      if (!await _verifyStudentAccess()) {
+        return {'success': false, 'error': 'Only students can submit quizzes'};
+      }
+
+      print('🧠 Creating quiz submission for quiz: $quizId');
+
+      // Check if already submitted (for single-attempt quizzes)
+      final maxAttempts = submissionData['maxAttempts'] ?? 1;
+      if (maxAttempts == 1) {
+        final alreadySubmitted = await _hasUserSubmitted(
+          courseId: courseId,
+          itemId: quizId,
+          itemType: 'quiz',
+          orgCode: orgCode,
+        );
+
+        if (alreadySubmitted) {
+          return {'success': false, 'error': 'You have already submitted this quiz'};
+        }
+      }
+
+      // Prepare submission data
+      final completeSubmissionData = {
+        ...submissionData,
+        'studentId': userId,
+        'submittedAt': FieldValue.serverTimestamp(),
+        'status': 'submitted',
+        'type': 'quiz',
+        'quizId': quizId,
+        'courseId': courseId,
+        'organizationCode': orgCode,
+      };
+
+      String submissionId = '';
+
+      // Create submission in Firebase
+      await _firestore.runTransaction((transaction) async {
+        final submissionRef = _firestore
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('materials')
+            .doc(quizId)
+            .collection('submissions')
+            .doc();
+
+        submissionId = submissionRef.id;
+        completeSubmissionData['submissionId'] = submissionId;
+
+        transaction.set(submissionRef, completeSubmissionData);
+        print('✅ Quiz submission created: $submissionId');
+      });
+
+      // ⭐ AUTOMATIC REWARD: Award 2 water buckets (only for first submission)
+      await awardQuizSubmission(
+        submissionId,
+        quizId,
+        quizName: quizName ?? 'Quiz',
+      );
+
+      return {
+        'success': true,
+        'submissionId': submissionId,
+        'message': 'Quiz submitted successfully! You earned 2 water buckets! 💧💧',
+        'rewardBuckets': 2,
+      };
+
+    } catch (e) {
+      print('❌ Error submitting quiz: $e');
+      return {'success': false, 'error': 'Failed to submit quiz: $e'};
+    }
+  }
+
+// Update the _scanCourseQuizzes method for missed quiz submissions
+  Future<int> _scanCourseQuizzes(String courseId, String orgCode, String userId) async {
+    int newRewards = 0;
+
+    try {
+      final materialsSnapshot = await _firestore
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('materials')
+          .where('materialType', isEqualTo: 'quiz')
+          .get();
+
+      for (var quiz in materialsSnapshot.docs) {
+        final quizData = quiz.data();
+        final quizName = quizData['title'] ?? quizData['name'] ?? 'Quiz';
+
+        final submissionsSnapshot = await _firestore
+            .collection('organizations')
+            .doc(orgCode)
+            .collection('courses')
+            .doc(courseId)
+            .collection('materials')
+            .doc(quiz.id)
+            .collection('submissions')
+            .where('studentId', isEqualTo: userId)
+            .get();
+
+        for (var submission in submissionsSnapshot.docs) {
+          final isRewarded = await isSubmissionRewarded(submission.id);
+
+          if (!isRewarded) {
+            await awardQuizSubmission(submission.id, quiz.id, quizName: quizName);
+            newRewards++;
+            print('🎉 Awarded missed quiz reward: ${submission.id} ($quizName)');
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ Error scanning quizzes: $e');
+    }
+
+    return newRewards;
   }
 
   // Verify user is a student before any goal operations
@@ -1370,6 +1539,9 @@ class GoalProgressService {
 
         // Check tutorial submissions
         newRewards += await _scanCourseTutorials(courseRef.id, orgCode, userId);
+
+        // Check quiz submissions
+        newRewards += await _scanCourseQuizzes(courseRef.id, orgCode, userId);
       }
 
       print('✅ Scan completed. Found and rewarded $newRewards missed submissions.');

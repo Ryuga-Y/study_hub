@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:study_hub/Lecturer/quiz_details.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
 import '../community/bloc.dart';
@@ -478,17 +479,33 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
   }
 
   void _navigateToMaterialDetail(Map<String, dynamic> material) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => MaterialDetailPage(
-          material: material,
-          courseId: widget.courseId,
-          courseData: widget.courseData,
-          isLecturer: isLecturer,
+    // Check if this is a quiz and navigate to quiz details instead
+    if (material['materialType'] == 'quiz') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => QuizDetailPage(
+            quiz: material,
+            courseId: widget.courseId,
+            courseData: widget.courseData,
+            isLecturer: isLecturer,
+          ),
         ),
-      ),
-    );
+      );
+    } else {
+      // For regular materials and tutorials, use the existing MaterialDetailPage
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => MaterialDetailPage(
+            material: material,
+            courseId: widget.courseId,
+            courseData: widget.courseData,
+            isLecturer: isLecturer,
+          ),
+        ),
+      );
+    }
   }
 
   void _showEnrollStudentDialog() {
@@ -1089,14 +1106,10 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       elevation: 0,
       title: Row(
         children: [
-          Image.asset(
-            'assets/images/logo.png',
-            height: 32,
-            errorBuilder: (context, error, stackTrace) => Icon(
-              Icons.school,
-              color: Colors.purple[400],
-              size: 32,
-            ),
+          Icon(
+            Icons.school,
+            color: Colors.purple[400],
+            size: 32,
           ),
           SizedBox(width: 12),
           Text(
@@ -1256,11 +1269,13 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 title: material['title'] ?? 'Material',
                 subtitle: material['description'] ?? 'No description',
                 date: _formatDate(material['createdAt']),
-                icon: Icons.description,
-                color: Colors.green,
+                icon: _getMaterialIcon(material['materialType']), // Add this helper
+                color: _getMaterialColor(material['materialType']), // Add this helper
                 onTap: () => _navigateToMaterialDetail(material),
                 onDelete: isLecturer ? () => _deleteMaterial(material) : null,
+                materialData: material, // Pass the material data
               )),
+              SizedBox(height: 24),
             ],
 
             // Empty state
@@ -1296,6 +1311,30 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     );
   }
 
+  IconData _getMaterialIcon(String? materialType) {
+    switch (materialType) {
+      case 'quiz':
+        return Icons.psychology;
+      case 'tutorial':
+        return Icons.quiz;
+      case 'learning':
+      default:
+        return Icons.description;
+    }
+  }
+
+  Color _getMaterialColor(String? materialType) {
+    switch (materialType) {
+      case 'quiz':
+        return Colors.purple;
+      case 'tutorial':
+        return Colors.blue;
+      case 'learning':
+      default:
+        return Colors.green;
+    }
+  }
+
   Widget _buildSectionHeader(String title, IconData icon) {
     return Padding(
       padding: EdgeInsets.only(bottom: 12),
@@ -1324,7 +1363,16 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
     required Color color,
     required VoidCallback onTap,
     VoidCallback? onDelete,
+    Map<String, dynamic>? materialData, // Add this parameter
   }) {
+    // Determine if this is a quiz for special handling
+    final isQuiz = materialData?['materialType'] == 'quiz';
+    final isTutorial = materialData?['materialType'] == 'tutorial';
+
+    // Override icon and color for quizzes
+    final displayIcon = isQuiz ? Icons.psychology : (isTutorial ? Icons.quiz : icon);
+    final displayColor = isQuiz ? Colors.purple : (isTutorial ? Colors.blue : color);
+
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -1349,11 +1397,11 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
+                  color: displayColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
-                  child: Icon(icon, color: color, size: 28),
+                  child: Icon(displayIcon, color: displayColor, size: 28),
                 ),
               ),
               SizedBox(width: 16),
@@ -1361,12 +1409,52 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        // Show quiz badge
+                        if (isQuiz)
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.purple.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Quiz',
+                              style: TextStyle(
+                                color: Colors.purple.withValues(alpha: 0.7),
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        // Show tutorial badge
+                        if (isTutorial)
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Tutorial',
+                              style: TextStyle(
+                                color: Colors.blue.withValues(alpha: 0.7),
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     SizedBox(height: 4),
                     Text(
@@ -1379,12 +1467,39 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
                       overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 4),
-                    Text(
-                      date,
-                      style: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 12,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          date,
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 12,
+                          ),
+                        ),
+                        // Show quiz stats for quizzes
+                        if (isQuiz && materialData != null) ...[
+                          SizedBox(width: 12),
+                          Icon(Icons.quiz, size: 12, color: Colors.grey[500]),
+                          SizedBox(width: 2),
+                          Text(
+                            '${(materialData['questions'] as List?)?.length ?? 0}Q',
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 12,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Icon(Icons.timer, size: 12, color: Colors.grey[500]),
+                          SizedBox(width: 2),
+                          Text(
+                            '${materialData['timeLimit'] ?? 30}m',
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),

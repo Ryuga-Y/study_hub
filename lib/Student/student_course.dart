@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:study_hub/Student/student_quiz.dart';
 import 'package:study_hub/Student/student_tutorial.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -1159,7 +1160,25 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
     final materialType = material['materialType'] ?? 'learning';
     final dueDate = material['dueDate'] as Timestamp?;
     final isTutorial = materialType == 'tutorial';
+    final isQuiz = materialType == 'quiz';
 
+    // Handle quiz differently - navigate to quiz submission page
+    if (isQuiz) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StudentQuizSubmissionPage(
+            courseId: widget.courseId,
+            quizId: material['id'],
+            quizData: material,
+            organizationCode: _organizationCode!,
+          ),
+        ),
+      ).then((_) => _loadData());
+      return;
+    }
+
+    // Rest of the existing _viewMaterial method for tutorials and learning materials...
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1832,10 +1851,31 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
   }
 
   Widget _buildMaterialCardWithStream(Map<String, dynamic> material) {
-    final isTutorial = material['materialType'] == 'tutorial';
+    final materialType = material['materialType'] ?? 'learning';
+    final isTutorial = materialType == 'tutorial';
+    final isQuiz = materialType == 'quiz';
     final dueDate = material['dueDate'] as Timestamp?;
     final isPastDue = dueDate != null && dueDate.toDate().isBefore(DateTime.now());
     final user = _authService.currentUser;
+
+    // Define colors and icons based on material type
+    Color cardColor;
+    IconData cardIcon;
+    String typeLabel;
+
+    if (isQuiz) {
+      cardColor = Colors.purple;
+      cardIcon = Icons.psychology;
+      typeLabel = 'Quiz';
+    } else if (isTutorial) {
+      cardColor = Colors.blue;
+      cardIcon = Icons.quiz;
+      typeLabel = 'Tutorial';
+    } else {
+      cardColor = Colors.green;
+      cardIcon = Icons.menu_book;
+      typeLabel = 'Learning Material';
+    }
 
     return Container(
       margin: EdgeInsets.only(bottom: 12),
@@ -1861,13 +1901,13 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: (isTutorial ? Colors.blue : Colors.green).withValues(alpha: 0.1),
+                  color: cardColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
                   child: Icon(
-                    isTutorial ? Icons.quiz : Icons.menu_book,
-                    color: isTutorial ? Colors.blue : Colors.green,
+                    cardIcon,
+                    color: cardColor,
                     size: 28,
                   ),
                 ),
@@ -1888,23 +1928,21 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                             ),
                           ),
                         ),
-                        if (isTutorial) ...[
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.blue[100],
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'Tutorial',
-                              style: TextStyle(
-                                color: Colors.blue[700],
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: cardColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            typeLabel,
+                            style: TextStyle(
+                              color: cardColor.withValues(alpha: 0.7),
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                        ],
+                        ),
                       ],
                     ),
                     SizedBox(height: 4),
@@ -1918,7 +1956,9 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                       overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 8),
-                    if (isTutorial && user != null && _organizationCode != null)
+
+                    // Show submission status for quizzes and tutorials
+                    if ((isTutorial || isQuiz) && user != null && _organizationCode != null)
                       StreamBuilder<QuerySnapshot>(
                         stream: FirebaseFirestore.instance
                             .collection('organizations')
@@ -1932,6 +1972,15 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                             .snapshots(),
                         builder: (context, snapshot) {
                           final hasSubmitted = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+
+                          // For quizzes, also show score if available
+                          int? score;
+                          int? totalPoints;
+                          if (hasSubmitted && isQuiz && snapshot.data!.docs.isNotEmpty) {
+                            final submissionData = snapshot.data!.docs.first.data() as Map<String, dynamic>;
+                            score = submissionData['score'];
+                            totalPoints = submissionData['totalPoints'] ?? material['totalPoints'];
+                          }
 
                           return Row(
                             children: [
@@ -1961,7 +2010,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
-                                  hasSubmitted ? 'Submitted' : (isPastDue ? 'Missing' : 'Pending'),
+                                  hasSubmitted ? 'Completed' : (isPastDue ? 'Missing' : 'Pending'),
                                   style: TextStyle(
                                     color: hasSubmitted
                                         ? Colors.green
@@ -1971,6 +2020,28 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                   ),
                                 ),
                               ),
+
+                              // Show score for completed quizzes
+                              if (hasSubmitted && isQuiz && score != null && totalPoints != null) ...[
+                                SizedBox(width: 8),
+                                Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.purple[100],
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '$score/$totalPoints',
+                                    style: TextStyle(
+                                      color: Colors.purple[700],
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+
+                              // Show water bucket reward for incomplete items
                               if (!hasSubmitted) ...[
                                 SizedBox(width: 4),
                                 Container(
@@ -1985,7 +2056,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                       Icon(Icons.local_drink, size: 10, color: Colors.orange[700]),
                                       SizedBox(width: 1),
                                       Text(
-                                        '+1',
+                                        isQuiz ? '+2' : (isTutorial ? '+1' : ''),
                                         style: TextStyle(
                                           color: Colors.orange[700],
                                           fontSize: 9,
@@ -2000,7 +2071,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                           );
                         },
                       )
-                    else if (!isTutorial)
+                    else if (!isTutorial && !isQuiz)
                       Text(
                         _formatDate(material['createdAt']),
                         style: TextStyle(
@@ -2014,7 +2085,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
               Icon(
                 material['files'] != null && (material['files'] as List).isNotEmpty
                     ? Icons.download
-                    : Icons.visibility,
+                    : (isQuiz ? Icons.play_arrow : Icons.visibility),
                 color: Colors.grey[400],
                 size: 20,
               ),
