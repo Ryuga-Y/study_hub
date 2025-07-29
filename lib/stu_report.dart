@@ -1,6 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../Authentication/auth_services.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:open_file/open_file.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
+import 'dart:io';
 
 class StudentReportPage extends StatefulWidget {
   const StudentReportPage({Key? key}) : super(key: key);
@@ -15,6 +26,9 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
 
   bool isLoading = true;
   String? organizationCode;
+
+  Map<String, dynamic>? _userData;
+  Map<String, dynamic>? _organizationData;
 
   // Data structures
   List<Map<String, dynamic>> assignmentResults = [];
@@ -49,10 +63,26 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
       final userData = await _authService.getUserData(user.uid);
       if (userData == null) return;
 
+      setState(() {
+        _userData = userData;
+      });
+
       organizationCode = userData['organizationCode'];
       if (organizationCode == null) return;
 
-      // Load all enrolled courses
+// Load organization data
+      final orgDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(organizationCode)
+          .get();
+
+      if (orgDoc.exists) {
+        setState(() {
+          _organizationData = orgDoc.data();
+        });
+      }
+
+// Load all enrolled courses
       final enrollmentsSnapshot = await FirebaseFirestore.instance
           .collectionGroup('enrollments')
           .where('studentId', isEqualTo: user.uid)
@@ -351,6 +381,836 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
     }
   }
 
+  Future<void> _generateAndSharePDF() async {
+    try {
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(child: CircularProgressIndicator()),
+      );
+
+      final pdf = pw.Document();
+
+      // Add page to PDF
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: pw.EdgeInsets.all(32),
+          build: (pw.Context context) {
+            return [
+              // Header
+              pw.Header(
+                level: 0,
+                child: pw.Text(
+                  'Academic Transcript',
+                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Student Info
+              pw.Text(
+                'Student: ${_userData?['fullName'] ?? 'N/A'}',
+                style: pw.TextStyle(fontSize: 16),
+              ),
+              pw.Text(
+                'Organization: ${_organizationData?['name'] ?? 'N/A'}',
+                style: pw.TextStyle(fontSize: 14),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Overall Statistics
+              pw.Container(
+                padding: pw.EdgeInsets.all(16),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey),
+                  borderRadius: pw.BorderRadius.circular(8),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('Academic Performance',
+                        style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                    pw.SizedBox(height: 10),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                      children: [
+                        pw.Text('GPA: ${overallStats['overallGPA'].toStringAsFixed(2)}'),
+                        pw.Text('Assignments: ${overallStats['completedAssignments']}/${overallStats['totalAssignments']}'),
+                        pw.Text('Tutorials: ${overallStats['completedTutorials']}/${overallStats['totalTutorials']}'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 30),
+
+              // Assignments Section
+              if (assignmentResults.isNotEmpty) ...[
+                pw.Text('Assignments',
+                    style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 10),
+                pw.Table(
+                  border: pw.TableBorder.all(),
+                  children: [
+                    // Header
+                    pw.TableRow(
+                      decoration: pw.BoxDecoration(color: PdfColors.grey300),
+                      children: [
+                        pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('Course', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                        pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('Assignment', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                        pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('Grade', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                        pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('Points', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                      ],
+                    ),
+                    // Data rows
+                    ...assignmentResults.take(10).map((assignment) => pw.TableRow(
+                      children: [
+                        pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text(assignment['courseCode'] ?? '')),
+                        pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text(assignment['itemName'] ?? '')),
+                        pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text(assignment['letterGrade'] ?? 'N/A')),
+                        pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('${assignment['grade'] ?? 'N/A'}/${assignment['points'] ?? 'N/A'}')),
+                      ],
+                    )),
+                  ],
+                ),
+              ],
+
+              pw.SizedBox(height: 20),
+
+              // Footer
+              pw.Align(
+                alignment: pw.Alignment.center,
+                child: pw.Text(
+                  'Generated on ${DateTime.now().toString().split(' ')[0]}',
+                  style: pw.TextStyle(fontSize: 10, color: PdfColors.grey),
+                ),
+              ),
+            ];
+          },
+        ),
+      );
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      // Save PDF to device first
+      final output = await getApplicationDocumentsDirectory();
+      final file = File("${output.path}/academic_transcript_${DateTime.now().millisecondsSinceEpoch}.pdf");
+      await file.writeAsBytes(await pdf.save());
+
+      // Show options dialog instead of directly sharing
+      _showPDFOptionsDialog(file);
+
+    } catch (e) {
+      // Close loading dialog if open
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error generating PDF: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showPDFOptionsDialog(File pdfFile) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.picture_as_pdf, color: Colors.purple[600], size: 28),
+              SizedBox(width: 12),
+              Text('PDF Generated', style: TextStyle(fontSize: 20)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Your academic transcript has been generated successfully.',
+                style: TextStyle(fontSize: 14),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'What would you like to do?',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          actions: [
+            Column(
+              children: [
+                // Download button
+                // Download button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await _downloadAndOpenPDF(pdfFile);
+                    },
+                    icon: Icon(Icons.download),
+                    label: Text('Download & Open'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.purple[600],
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 8),
+                // Share button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await Share.shareXFiles([XFile(pdfFile.path)], text: 'Academic Transcript');
+                    },
+                    icon: Icon(Icons.share),
+                    label: Text('Share Only'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green[600],
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 8),
+                // Download and Share button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      // First download
+                      await _downloadPDFFromFile(pdfFile);
+                      // Then share
+                      await Share.shareXFiles([XFile(pdfFile.path)], text: 'Academic Transcript');
+                    },
+                    icon: Icon(Icons.download_done),
+                    label: Text('Download & Share'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue[600],
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 8),
+                // Cancel button
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Cancel', style: TextStyle(color: Colors.grey[600])),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _downloadPDFFromFile(File sourceFile) async {
+    try {
+      // Request storage permission first
+      if (Platform.isAndroid) {
+        // For Android 13+ (API 33+), use different permission
+        PermissionStatus status;
+        if (await Permission.manageExternalStorage.isGranted) {
+          status = PermissionStatus.granted;
+        } else if (await Permission.storage.isGranted) {
+          status = PermissionStatus.granted;
+        } else {
+          // Try requesting storage permission
+          status = await Permission.storage.request();
+          if (!status.isGranted) {
+            // For Android 13+, try manage external storage
+            status = await Permission.manageExternalStorage.request();
+          }
+        }
+
+        if (!status.isGranted) {
+          throw Exception('Storage permission denied');
+        }
+      }
+
+      // For Android, save to public Downloads folder
+      Directory? directory;
+      if (Platform.isAndroid) {
+        // This gets the public Downloads directory
+        directory = Directory('/storage/emulated/0/Download');
+        // Check if it exists, if not try alternative path
+        if (!await directory.exists()) {
+          final externalDir = await getExternalStorageDirectory();
+          if (externalDir != null) {
+            directory = Directory('${externalDir.path.split('Android')[0]}Download');
+          }
+        }
+      } else {
+        // For iOS, use documents directory
+        directory = await getApplicationDocumentsDirectory();
+      }
+
+      if (directory == null) {
+        throw Exception('Cannot access storage');
+      }
+
+      final downloadFile = File("${directory.path}/academic_transcript_${DateTime.now().millisecondsSinceEpoch}.pdf");
+      await sourceFile.copy(downloadFile.path);
+
+      // Debug: Print the file path and check if file exists
+      print('PDF saved at: ${downloadFile.path}');
+      print('File exists: ${await downloadFile.exists()}');
+      print('File size: ${await downloadFile.length()} bytes');
+
+      // Show success message and directly open PDF
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF download successfully!'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: Colors.white,
+            onPressed: () {
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            },
+          ),
+        ),
+      );
+
+      // Instead of using OpenFile, use Share to handle the PDF
+      await Share.shareXFiles(
+        [XFile(downloadFile.path)],
+        text: 'Academic Transcript - Saved to Downloads',
+      );
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error downloading PDF: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _downloadAndOpenPDF(File sourceFile) async {
+    try {
+      // Use getApplicationDocumentsDirectory for better compatibility
+      final directory = await getApplicationDocumentsDirectory();
+
+      final downloadFile = File("${directory.path}/academic_transcript_${DateTime.now().millisecondsSinceEpoch}.pdf");
+      await sourceFile.copy(downloadFile.path);
+
+      // Debug: Print the file path and check if file exists
+      print('PDF saved at: ${downloadFile.path}');
+      print('File exists: ${await downloadFile.exists()}');
+      print('File size: ${await downloadFile.length()} bytes');
+
+      // Show success message with Open button
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF downloaded successfully!'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Open',
+            textColor: Colors.white,
+            onPressed: () async {
+              await _openPDFFile(downloadFile.path);
+            },
+          ),
+        ),
+      );
+
+      // Try to automatically open the PDF file
+      try {
+        final result = await OpenFile.open(downloadFile.path);
+        if (result.type != ResultType.done) {
+          print('Auto-open failed: ${result.message}');
+          // Don't show error immediately, user can use the Open button
+        }
+      } catch (e) {
+        print('Auto-open error: $e');
+        // Don't show error immediately, user can use the Open button
+      }
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error downloading PDF: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openPDFFile(String filePath) async {
+    try {
+      // Use Share instead of OpenFile
+      await Share.shareXFiles(
+        [XFile(filePath)],
+        text: 'Academic Transcript',
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error opening PDF: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showOpenPDFDialog(File pdfFile) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text('Open PDF?'),
+          content: Text('Would you like to open the downloaded PDF?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                try {
+                  final result = await OpenFile.open(pdfFile.path);
+                  if (result.type != ResultType.done) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Cannot open PDF: ${result.message}'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error opening PDF: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              child: Text('Open'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showPDFPreview(File pdfFile) {
+    TextEditingController _nameController = TextEditingController(
+        text: 'academic_transcript_${_userData?['fullName']?.replaceAll(' ', '_') ?? 'student'}'
+    );
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          insetPadding: EdgeInsets.all(10),
+          child: Container(
+            width: MediaQuery.of(context).size.width,
+            height: MediaQuery.of(context).size.height * 0.9,
+            child: Column(
+              children: [
+                // Header
+                Container(
+                  padding: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.purple[50],
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      topRight: Radius.circular(12),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.picture_as_pdf, color: Colors.purple[600]),
+                      SizedBox(width: 8),
+                      Text(
+                        'PDF Ready',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Spacer(),
+                      IconButton(
+                        icon: Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // PDF Name Input
+                Container(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'File Name:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      TextField(
+                        controller: _nameController,
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          suffixText: '.pdf',
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // PDF Preview Section
+                Expanded(
+                  child: Container(
+                    margin: EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.white,
+                    ),
+                    child: Column(
+                      children: [
+                        // Preview Header
+                        Container(
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.purple[50],
+                            borderRadius: BorderRadius.only(
+                              topLeft: Radius.circular(8),
+                              topRight: Radius.circular(8),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.preview, color: Colors.purple[600], size: 16),
+                              SizedBox(width: 8),
+                              Text(
+                                'PDF Preview',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.purple[700],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Simulated PDF Content Preview
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Document Title
+                                Center(
+                                  child: Text(
+                                    'Academic Transcript',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: 16),
+
+                                // Student Info Preview
+                                Text(
+                                  'Student: ${_userData?['fullName'] ?? 'N/A'}',
+                                  style: TextStyle(fontSize: 14),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Organization: ${_organizationData?['name'] ?? 'N/A'}',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                ),
+                                SizedBox(height: 16),
+
+                                // Academic Performance Preview
+                                Container(
+                                  padding: EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.grey[300]!),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Academic Performance',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      SizedBox(height: 8),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              'GPA: ${overallStats['overallGPA'].toStringAsFixed(2)}',
+                                              style: TextStyle(fontSize: 10),
+                                            ),
+                                          ),
+                                          Flexible(
+                                            child: Text(
+                                              'Assignments: ${overallStats['completedAssignments']}/${overallStats['totalAssignments']}',
+                                              style: TextStyle(fontSize: 10),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      SizedBox(height: 4),
+                                      Center(
+                                        child: Text(
+                                          'Tutorials: ${overallStats['completedTutorials']}/${overallStats['totalTutorials']}',
+                                          style: TextStyle(fontSize: 10),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                SizedBox(height: 16),
+
+                                // Assignments Table Preview
+                                if (assignmentResults.isNotEmpty) ...[
+                                  Text(
+                                    'Assignments',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  SizedBox(height: 8),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      border: Border.all(color: Colors.grey[300]!),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        // Table Header
+                                        Container(
+                                          padding: EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.grey[200],
+                                            borderRadius: BorderRadius.only(
+                                              topLeft: Radius.circular(4),
+                                              topRight: Radius.circular(4),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(child: Text('Course', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                                              Expanded(child: Text('Assignment', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                                              Expanded(child: Text('Grade', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                                            ],
+                                          ),
+                                        ),
+                                        // Sample Rows
+                                        ...assignmentResults.take(5).map((assignment) => Container(
+                                          padding: EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            border: Border(top: BorderSide(color: Colors.grey[300]!)),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(child: Text(assignment['courseCode'] ?? '', style: TextStyle(fontSize: 9))),
+                                              Expanded(child: Text(assignment['itemName'] ?? '', style: TextStyle(fontSize: 9), overflow: TextOverflow.ellipsis)),
+                                              Expanded(child: Text(assignment['letterGrade'] ?? 'N/A', style: TextStyle(fontSize: 9))),
+                                            ],
+                                          ),
+                                        )),
+                                        if (assignmentResults.length > 5)
+                                          Container(
+                                            padding: EdgeInsets.all(8),
+                                            child: Text(
+                                              '... and ${assignmentResults.length - 5} more assignments',
+                                              style: TextStyle(fontSize: 9, color: Colors.grey[600], fontStyle: FontStyle.italic),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+
+                                SizedBox(height: 20),
+
+                                // Ready indicator
+                                Center(
+                                  child: Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green[100],
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.check_circle, color: Colors.green[700], size: 16),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'PDF Ready',
+                                          style: TextStyle(
+                                            color: Colors.green[700],
+                                            fontWeight: FontWeight.w500,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Action Buttons
+                Container(
+                  padding: EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            Navigator.pop(context);
+                            await _downloadPDFWithName(pdfFile, _nameController.text);
+                          },
+                          icon: Icon(Icons.download),
+                          label: Text('Download'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green[600],
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            Navigator.pop(context);
+                            await _sharePDFWithName(pdfFile, _nameController.text);
+                          },
+                          icon: Icon(Icons.share),
+                          label: Text('Share'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue[600],
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _downloadPDFWithName(File sourceFile, String fileName) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final downloadFile = File("${directory.path}/${fileName}.pdf");
+      await sourceFile.copy(downloadFile.path);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF downloaded as ${fileName}.pdf'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Open',
+            textColor: Colors.white,
+            onPressed: () async {
+              await Share.shareXFiles([XFile(downloadFile.path)], text: 'Academic Transcript');
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error downloading PDF: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _sharePDFWithName(File sourceFile, String fileName) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final shareFile = File("${directory.path}/${fileName}.pdf");
+      await sourceFile.copy(shareFile.path);
+
+      await Share.shareXFiles([XFile(shareFile.path)], text: 'Academic Transcript');
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sharing PDF: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -383,8 +1243,144 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.purple[600]),
-            onPressed: _loadReportData,
+            icon: Icon(Icons.picture_as_pdf, color: Colors.purple[600]),
+            onPressed: () async {
+              try {
+                // Show loading
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => Center(child: CircularProgressIndicator()),
+                );
+
+                final pdf = pw.Document();
+
+                // Add page to PDF (using existing PDF generation code)
+                pdf.addPage(
+                  pw.MultiPage(
+                    pageFormat: PdfPageFormat.a4,
+                    margin: pw.EdgeInsets.all(32),
+                    build: (pw.Context context) {
+                      return [
+                        // Header
+                        pw.Header(
+                          level: 0,
+                          child: pw.Text(
+                            'Academic Transcript',
+                            style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+                          ),
+                        ),
+                        pw.SizedBox(height: 20),
+
+                        // Student Info
+                        pw.Text(
+                          'Student: ${_userData?['fullName'] ?? 'N/A'}',
+                          style: pw.TextStyle(fontSize: 16),
+                        ),
+                        pw.Text(
+                          'Organization: ${_organizationData?['name'] ?? 'N/A'}',
+                          style: pw.TextStyle(fontSize: 14),
+                        ),
+                        pw.SizedBox(height: 20),
+
+                        // Overall Statistics
+                        pw.Container(
+                          padding: pw.EdgeInsets.all(16),
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border.all(color: PdfColors.grey),
+                            borderRadius: pw.BorderRadius.circular(8),
+                          ),
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Text('Academic Performance',
+                                  style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                              pw.SizedBox(height: 10),
+                              pw.Row(
+                                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                                children: [
+                                  pw.Text('GPA: ${overallStats['overallGPA'].toStringAsFixed(2)}'),
+                                  pw.Text('Assignments: ${overallStats['completedAssignments']}/${overallStats['totalAssignments']}'),
+                                  pw.Text('Tutorials: ${overallStats['completedTutorials']}/${overallStats['totalTutorials']}'),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        pw.SizedBox(height: 30),
+
+                        // Assignments Section
+                        if (assignmentResults.isNotEmpty) ...[
+                          pw.Text('Assignments',
+                              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+                          pw.SizedBox(height: 10),
+                          pw.Table(
+                            border: pw.TableBorder.all(),
+                            children: [
+                              // Header
+                              pw.TableRow(
+                                decoration: pw.BoxDecoration(color: PdfColors.grey300),
+                                children: [
+                                  pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('Course', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                                  pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('Assignment', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                                  pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('Grade', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                                  pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('Points', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                                ],
+                              ),
+                              // Data rows
+                              ...assignmentResults.take(10).map((assignment) => pw.TableRow(
+                                children: [
+                                  pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text(assignment['courseCode'] ?? '')),
+                                  pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text(assignment['itemName'] ?? '')),
+                                  pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text(assignment['letterGrade'] ?? 'N/A')),
+                                  pw.Padding(padding: pw.EdgeInsets.all(8), child: pw.Text('${assignment['grade'] ?? 'N/A'}/${assignment['points'] ?? 'N/A'}')),
+                                ],
+                              )),
+                            ],
+                          ),
+                        ],
+
+                        pw.SizedBox(height: 20),
+
+                        // Footer
+                        pw.Align(
+                          alignment: pw.Alignment.center,
+                          child: pw.Text(
+                            'Generated on ${DateTime.now().toString().split(' ')[0]}',
+                            style: pw.TextStyle(fontSize: 10, color: PdfColors.grey),
+                          ),
+                        ),
+                      ];
+                    },
+                  ),
+                );
+
+                // Close loading dialog
+                Navigator.pop(context);
+
+                // Save PDF to device
+                final output = await getApplicationDocumentsDirectory();
+                final file = File("${output.path}/academic_transcript_${DateTime.now().millisecondsSinceEpoch}.pdf");
+                await file.writeAsBytes(await pdf.save());
+
+                // Show PDF preview with rename option
+                _showPDFPreview(file);
+
+              } catch (e) {
+                // Close loading dialog if open
+                if (Navigator.canPop(context)) {
+                  Navigator.pop(context);
+                }
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error generating PDF: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            tooltip: 'Generate PDF',
           ),
         ],
       ),

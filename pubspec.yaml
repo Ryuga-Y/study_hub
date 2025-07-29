@@ -39,6 +39,8 @@ dependencies:
   shared_preferences: ^2.3.2
   pdf: ^3.11.3
   printing: ^5.14.0
+  open_file: ^3.5.10
+  android_intent_plus: ^5.3.0
 
 
 dev_dependencies:
