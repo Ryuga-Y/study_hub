@@ -38,7 +38,7 @@ dependencies:
   video_player: ^2.8.2
   shared_preferences: ^2.3.2
   pdf: ^3.11.3
-  printing: ^5.14.1
+  printing: ^5.14.0
 
 
 dev_dependencies:
