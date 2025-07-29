@@ -926,10 +926,11 @@ class _EvaluationRubricPageState extends State<EvaluationRubricPage> {
                         ),
                       ElevatedButton.icon(
                         onPressed: _addCriterion,
-                        icon: Icon(Icons.add, size: 18),
+                        icon: Icon(Icons.add, size: 18, color: Colors.white),
                         label: Text('Add Custom'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.purple[400],
+                          foregroundColor: Colors.white,
                         ),
                       ),
                       OutlinedButton.icon(

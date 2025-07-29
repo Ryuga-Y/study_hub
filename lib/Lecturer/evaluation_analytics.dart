@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:typed_data';
+import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 class EvaluationAnalyticsPage extends StatefulWidget {
   final String courseId;
@@ -20,6 +25,7 @@ class EvaluationAnalyticsPage extends StatefulWidget {
 class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   bool isLoading = true;
+  bool isGeneratingPdf = false;
 
   // Analytics data
   Map<String, dynamic> overallStats = {};
@@ -297,6 +303,280 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
     return 'F';
   }
 
+  Future<void> _generatePdfReport() async {
+    setState(() {
+      isGeneratingPdf = true;
+    });
+
+    try {
+      final pdf = pw.Document();
+      final font = await rootBundle.load("assets/fonts/Abeezee-Regular.ttf");
+      final ttf = pw.Font.ttf(font);
+      final boldFont = await rootBundle.load("assets/fonts/Abeezee-Regular.ttf");
+      final boldTtf = pw.Font.ttf(boldFont);
+
+      // Define theme
+      final theme = pw.ThemeData.withFont(
+        base: ttf,
+        bold: boldTtf,
+      );
+
+      // Add pages
+      pdf.addPage(
+        pw.MultiPage(
+          theme: theme,
+          pageFormat: PdfPageFormat.a4,
+          margin: pw.EdgeInsets.all(32),
+          build: (pw.Context context) {
+            return [
+              // Header
+              _buildPdfHeader(),
+              pw.SizedBox(height: 20),
+
+              // Overall Statistics
+              _buildPdfSection('Overall Statistics', [
+                _buildPdfStatRow('Total Assignments', overallStats['totalAssignments'].toString()),
+                _buildPdfStatRow('Total Submissions', overallStats['totalSubmissions'].toString()),
+                _buildPdfStatRow('Graded Submissions', overallStats['gradedSubmissions'].toString()),
+                _buildPdfStatRow('Pending Grading', overallStats['pendingGrading'].toString()),
+                _buildPdfStatRow('Class Average', '${overallStats['averageGrade'].toStringAsFixed(1)}%'),
+              ]),
+              pw.SizedBox(height: 20),
+
+              // Assignment Statistics
+              _buildPdfSection('Assignment Statistics', [
+                _buildPdfAssignmentTable(),
+              ]),
+              pw.SizedBox(height: 20),
+
+              // Student Performance
+              _buildPdfSection('Student Performance', [
+                _buildPdfStudentTable(),
+              ]),
+              pw.SizedBox(height: 20),
+
+              // Grade Distribution
+              _buildPdfSection('Grade Distribution', [
+                _buildPdfGradeDistribution(),
+              ]),
+            ];
+          },
+        ),
+      );
+
+      // Generate and share PDF
+      final Uint8List pdfData = await pdf.save();
+      await Printing.sharePdf(
+        bytes: pdfData,
+        filename: '${widget.courseData['code']}_analytics_report.pdf',
+      );
+    } catch (e) {
+      print('Error generating PDF: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error generating PDF report'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        isGeneratingPdf = false;
+      });
+    }
+  }
+
+  pw.Widget _buildPdfHeader() {
+    return pw.Container(
+      padding: pw.EdgeInsets.all(16),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.purple100,
+        borderRadius: pw.BorderRadius.circular(8),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            'Evaluation Analytics Report',
+            style: pw.TextStyle(
+              fontSize: 24,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.purple900,
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text(
+            'Course: ${widget.courseData['title']}',
+            style: pw.TextStyle(fontSize: 16),
+          ),
+          pw.Text(
+            'Code: ${widget.courseData['code']}',
+            style: pw.TextStyle(fontSize: 14, color: PdfColors.grey700),
+          ),
+          pw.Text(
+            'Generated: ${DateTime.now().toString().split(' ')[0]}',
+            style: pw.TextStyle(fontSize: 12, color: PdfColors.grey600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildPdfSection(String title, List<pw.Widget> content) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(
+          title,
+          style: pw.TextStyle(
+            fontSize: 18,
+            fontWeight: pw.FontWeight.bold,
+            color: PdfColors.purple800,
+          ),
+        ),
+        pw.SizedBox(height: 10),
+        ...content,
+      ],
+    );
+  }
+
+  pw.Widget _buildPdfStatRow(String label, String value) {
+    return pw.Padding(
+      padding: pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label),
+          pw.Text(
+            value,
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildPdfAssignmentTable() {
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey300),
+      children: [
+        // Header row
+        pw.TableRow(
+          decoration: pw.BoxDecoration(color: PdfColors.grey200),
+          children: [
+            _buildPdfTableCell('Assignment', isHeader: true),
+            _buildPdfTableCell('Points', isHeader: true),
+            _buildPdfTableCell('Submitted', isHeader: true),
+            _buildPdfTableCell('Graded', isHeader: true),
+            _buildPdfTableCell('Average', isHeader: true),
+          ],
+        ),
+        // Data rows
+        ...assignmentStats.map((assignment) {
+          return pw.TableRow(
+            children: [
+              _buildPdfTableCell(assignment['title']),
+              _buildPdfTableCell(assignment['points'].toString()),
+              _buildPdfTableCell(assignment['submitted'].toString()),
+              _buildPdfTableCell(assignment['graded'].toString()),
+              _buildPdfTableCell('${assignment['averagePercentage'].toStringAsFixed(1)}%'),
+            ],
+          );
+        }).toList(),
+      ],
+    );
+  }
+
+  pw.Widget _buildPdfStudentTable() {
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey300),
+      children: [
+        // Header row
+        pw.TableRow(
+          decoration: pw.BoxDecoration(color: PdfColors.grey200),
+          children: [
+            _buildPdfTableCell('Student Name', isHeader: true),
+            _buildPdfTableCell('Submissions', isHeader: true),
+            _buildPdfTableCell('Graded', isHeader: true),
+            _buildPdfTableCell('Average', isHeader: true),
+            _buildPdfTableCell('Grade', isHeader: true),
+          ],
+        ),
+        // Data rows
+        ...studentPerformance.take(20).map((student) {
+          return pw.TableRow(
+            children: [
+              _buildPdfTableCell(student['studentName']),
+              _buildPdfTableCell(student['totalSubmissions'].toString()),
+              _buildPdfTableCell(student['gradedSubmissions'].toString()),
+              _buildPdfTableCell('${student['averageGrade'].toStringAsFixed(1)}%'),
+              _buildPdfTableCell(student['letterGrade']),
+            ],
+          );
+        }).toList(),
+      ],
+    );
+  }
+
+  pw.Widget _buildPdfTableCell(String text, {bool isHeader = false}) {
+    return pw.Padding(
+      padding: pw.EdgeInsets.all(8),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
+          fontSize: isHeader ? 10 : 9,
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _buildPdfGradeDistribution() {
+    Map<String, int> distribution = {
+      'A+ (90-100)': 0,
+      'A (80-89)': 0,
+      'A- (75-79)': 0,
+      'B+ (70-74)': 0,
+      'B (65-69)': 0,
+      'B- (60-64)': 0,
+      'C+ (55-59)': 0,
+      'C (50-54)': 0,
+      'F (0-49)': 0,
+    };
+
+    for (var student in studentPerformance) {
+      final grade = (student['averageGrade'] as num).toDouble();
+      if (grade >= 90) distribution['A+ (90-100)'] = distribution['A+ (90-100)']! + 1;
+      else if (grade >= 80) distribution['A (80-89)'] = distribution['A (80-89)']! + 1;
+      else if (grade >= 75) distribution['A- (75-79)'] = distribution['A- (75-79)']! + 1;
+      else if (grade >= 70) distribution['B+ (70-74)'] = distribution['B+ (70-74)']! + 1;
+      else if (grade >= 65) distribution['B (65-69)'] = distribution['B (65-69)']! + 1;
+      else if (grade >= 60) distribution['B- (60-64)'] = distribution['B- (60-64)']! + 1;
+      else if (grade >= 55) distribution['C+ (55-59)'] = distribution['C+ (55-59)']! + 1;
+      else if (grade >= 50) distribution['C (50-54)'] = distribution['C (50-54)']! + 1;
+      else distribution['F (0-49)'] = distribution['F (0-49)']! + 1;
+    }
+
+    return pw.Column(
+      children: distribution.entries.map((entry) {
+        return pw.Padding(
+          padding: pw.EdgeInsets.symmetric(vertical: 2),
+          child: pw.Row(
+            children: [
+              pw.SizedBox(
+                width: 100,
+                child: pw.Text(entry.key, style: pw.TextStyle(fontSize: 10)),
+              ),
+              pw.Text(
+                ': ${entry.value} students',
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -328,6 +608,20 @@ class _EvaluationAnalyticsPageState extends State<EvaluationAnalyticsPage> with 
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          IconButton(
+            icon: isGeneratingPdf
+                ? SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[600]!),
+              ),
+            )
+                : Icon(Icons.picture_as_pdf, color: Colors.purple[600]),
+            onPressed: isGeneratingPdf ? null : _generatePdfReport,
+            tooltip: 'Generate PDF Report',
+          ),
           IconButton(
             icon: Icon(Icons.refresh, color: Colors.purple[600]),
             onPressed: _loadAnalytics,

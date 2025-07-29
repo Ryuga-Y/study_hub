@@ -220,15 +220,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
       backgroundColor: Colors.white,
       elevation: 1,
       title: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(Icons.admin_panel_settings, color: Colors.redAccent, size: 28),
           SizedBox(width: 12),
-          Text(
-            _organizationData?['name'] ?? 'Admin Dashboard',
-            style: TextStyle(
-              color: Colors.black87,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+          Expanded(
+            child: Text(
+              _organizationData?['name'] ?? 'Admin Dashboard',
+              style: TextStyle(
+                color: Colors.black87,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+              softWrap: true, // Allows text to wrap to multiple lines
+              maxLines: 2, // Optional: limit to 2 lines
+              overflow: TextOverflow.ellipsis, // Optional: add ellipsis if still too long
             ),
           ),
         ],

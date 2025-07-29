@@ -954,11 +954,14 @@ class _CourseManagementPageState extends State<CourseManagementPage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Course Templates',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+                  Flexible(
+                    child: Text(
+                      'Course Templates',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis, // Adds "..." if text is too long
                     ),
                   ),
                   IconButton(

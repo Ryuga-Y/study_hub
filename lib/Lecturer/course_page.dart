@@ -11,6 +11,7 @@ import '../profile_page.dart';
 import 'create_assignment.dart';
 import 'assignment_details.dart';
 import 'create_material.dart';
+import 'evaluation_analytics.dart';
 import 'material_details.dart';
 
 class CoursePage extends StatefulWidget {
@@ -623,39 +624,91 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             itemBuilder: (context, index) {
               final student = availableStudents[index];
               return Card(
-                margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.purple[100],
-                    child: Text(
-                      (student['fullName'] ?? 'S').substring(0, 1).toUpperCase(),
-                      style: TextStyle(
-                        color: Colors.purple[600],
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  title: Text(student['fullName'] ?? 'Unknown Student'),
-                  subtitle: Column(
+                margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(student['email'] ?? 'No email'),
-                      if (student['studentId'].toString().isNotEmpty)
-                        Text(
-                          'ID: ${student['studentId']}',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                    ],
-                  ),
-                  trailing: ElevatedButton(
-                    onPressed: () => _enrollStudent(student['id'], student['fullName']),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                      // Header row with avatar and enroll button
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 24,
+                            backgroundColor: Colors.purple[100],
+                            child: Text(
+                              (student['fullName'] ?? 'S').substring(0, 1).toUpperCase(),
+                              style: TextStyle(
+                                color: Colors.purple[600],
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            ),
+                          ),
+                          Spacer(),
+                          ElevatedButton(
+                            onPressed: () => _enrollStudent(student['id'], student['fullName']),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: Text('Enroll', style: TextStyle(color: Colors.white)),
+                          ),
+                        ],
                       ),
-                    ),
-                    child: Text('Enroll', style: TextStyle(color: Colors.white)),
+
+                      SizedBox(height: 12),
+
+                      // Student information
+                      Text(
+                        student['fullName'] ?? 'Unknown Student',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+
+                      SizedBox(height: 6),
+
+                      Row(
+                        children: [
+                          Icon(Icons.email, size: 16, color: Colors.grey[600]),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              student['email'] ?? 'No email',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      if (student['studentId'].toString().isNotEmpty) ...[
+                        SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(Icons.badge, size: 16, color: Colors.grey[600]),
+                            SizedBox(width: 6),
+                            Text(
+                              'ID: ${student['studentId']}',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               );
@@ -1128,9 +1181,18 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
       ),
       actions: [
         IconButton(
-          icon: Icon(Icons.notifications_outlined, color: Colors.black87),
+          icon: Icon(Icons.analytics_outlined, color: Colors.black87),
           onPressed: () {
-            // TODO: Implement notifications
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => EvaluationAnalyticsPage(
+                  courseId: widget.courseId,
+                  organizationCode: _organizationCode ?? '', // Use the private variable
+                  courseData: widget.courseData,
+                ),
+              ),
+            );
           },
         ),
       ],

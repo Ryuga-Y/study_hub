@@ -1232,15 +1232,17 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                     children: [
                       Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
                       SizedBox(width: 8),
-                      Text(
-                        'Material type cannot be changed in edit mode',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 14,
+                      Expanded(
+                        child: Text(
+                          'Material type cannot be changed in edit mode',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                     ],
-                  ),
+                  )
                 ),
               ],
               SizedBox(height: 12),

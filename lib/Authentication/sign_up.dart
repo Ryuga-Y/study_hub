@@ -168,12 +168,14 @@ class _SignUpPageState extends State<SignUpPage> {
                 // Header
                 Row(
                   children: [
-                    Text(
-                      'Join Study Hub Today',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF3E4A89),
+                    Flexible(
+                      child: Text(
+                        'Join Study Hub Today',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF3E4A89),
+                        ),
                       ),
                     ),
                     SizedBox(width: 8),
