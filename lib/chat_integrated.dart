@@ -3641,7 +3641,7 @@ class _ChatScreenState extends State<ChatScreen> {
           title: Row(
             children: [
               Icon(_getFileIcon(message.text), color: Colors.blue),
-              SizedBox(width: 7),
+              SizedBox(width: 8),
               Expanded(
                 child: Text(
                   message.text.isNotEmpty ? message.text : "Document",
