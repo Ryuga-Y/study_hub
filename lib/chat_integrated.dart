@@ -20,6 +20,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File;
+import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Chat Models
 class ChatContact {
@@ -317,16 +319,16 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
     await _loadFriendsAsContacts();
   }
 
-void _startPeriodicRefresh() {
-  _refreshTimer?.cancel(); // Cancel any existing timer
-  _refreshTimer = Timer.periodic(Duration(seconds: 30), (timer) {
-    if (mounted) {
-      _loadFriendsAsContacts();
-    } else {
-      timer.cancel();
-    }
-  });
-}
+  void _startPeriodicRefresh() {
+    _refreshTimer?.cancel(); // Cancel any existing timer
+    _refreshTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+      if (mounted) {
+        _loadFriendsAsContacts();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
 
   Future<void> _createChat(String currentUserId, Friend friend) async {
     final chatId = ChatContact._generateChatId(currentUserId, friend.friendId);
@@ -418,11 +420,11 @@ void _startPeriodicRefresh() {
     await _loadFriendsAsContacts();
   }
 
-    @override
-    void didChangeDependencies() {
-      super.didChangeDependencies();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
 
-    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1302,11 +1304,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-  _messageController.dispose();
-  _scrollController.dispose();
-  _focusNode.dispose();
-  _searchController.dispose();
-  super.dispose();
+    _messageController.dispose();
+    _scrollController.dispose();
+    _focusNode.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
   @override
   Widget build(BuildContext context) {
@@ -2363,26 +2365,81 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildFileMessage(ChatMessage message, bool isMe) {
-    return Container(
-      margin: EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Icon(
-            _getFileIcon(message.text),
-            size: 16,
-            color: isMe ? Colors.white : Colors.black,
+    return GestureDetector(
+      onTap: () => _openFile(message),
+      child: Container(
+        margin: EdgeInsets.only(bottom: 8),
+        padding: EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isMe
+              ? Colors.white.withOpacity(0.1)
+              : Colors.grey.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isMe ? Colors.white.withOpacity(0.3) : Colors.grey.withOpacity(0.3),
           ),
-          SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              message.text.isNotEmpty ? message.text : "document.pdf",
-              style: TextStyle(
-                color: isMe ? Colors.white : Colors.black,
-                decoration: TextDecoration.underline,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              _getFileIcon(message.text),
+              size: 20,
+              color: isMe ? Colors.white : Colors.blue,
+            ),
+            SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    message.text.isNotEmpty ? message.text : "document.pdf",
+                    style: TextStyle(
+                      color: isMe ? Colors.white : Colors.black,
+                      fontWeight: FontWeight.w500,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  FutureBuilder<bool>(
+                    key: ValueKey('download_status_${message.id}_${DateTime.now().millisecondsSinceEpoch}'),
+                    future: _isFileDownloaded(message.attachmentUrl ?? ''),
+                    builder: (context, snapshot) {
+                      bool isDownloaded = snapshot.data ?? false;
+                      return Text(
+                        isDownloaded ? 'Downloaded • Tap to open' : 'Tap to download',
+                        style: TextStyle(
+                          color: isDownloaded
+                              ? (isMe ? Colors.green[200] : Colors.green[600])
+                              : (isMe ? Colors.white70 : Colors.grey[600]),
+                          fontSize: 12,
+                          fontWeight: isDownloaded ? FontWeight.w500 : FontWeight.normal,
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
+            FutureBuilder<bool>(
+              key: ValueKey('download_icon_${message.id}_${DateTime.now().millisecondsSinceEpoch}'),
+              future: _isFileDownloaded(message.attachmentUrl ?? ''),
+              builder: (context, snapshot) {
+                bool isDownloaded = snapshot.data ?? false;
+                return isDownloaded
+                    ? Icon(
+                  Icons.check_circle,
+                  size: 16,
+                  color: Colors.green,
+                )
+                    : Icon(
+                  Icons.download,
+                  size: 16,
+                  color: isMe ? Colors.white70 : Colors.grey[600],
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2456,6 +2513,54 @@ class _ChatScreenState extends State<ChatScreen> {
         return Icons.text_snippet;
       default:
         return Icons.attach_file;
+    }
+  }
+
+  // Check if file has been downloaded before
+  Future<bool> _isFileDownloaded(String fileUrl) async {
+    if (fileUrl.isEmpty) {
+      print('⚠️ Empty file URL for download check');
+      return false;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final downloadedFiles = prefs.getStringList('downloaded_files') ?? [];
+      final isDownloaded = downloadedFiles.contains(fileUrl);
+
+      print('🔍 Checking if downloaded: ${fileUrl.substring(fileUrl.length - 20)}...');
+      print('📋 Downloaded files count: ${downloadedFiles.length}');
+      print('✅ Is downloaded: $isDownloaded');
+
+      return isDownloaded;
+    } catch (e) {
+      print('❌ Error checking if file downloaded: $e');
+      return false;
+    }
+  }
+
+// Mark file as downloaded
+  Future<void> _markFileAsDownloaded(String fileUrl) async {
+    if (fileUrl.isEmpty) {
+      print('⚠️ Empty file URL, cannot mark as downloaded');
+      return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final downloadedFiles = prefs.getStringList('downloaded_files') ?? [];
+
+      print('📝 Current downloaded files: ${downloadedFiles.length}');
+
+      if (!downloadedFiles.contains(fileUrl)) {
+        downloadedFiles.add(fileUrl);
+        await prefs.setStringList('downloaded_files', downloadedFiles);
+        print('✅ Added to downloaded files list. Total: ${downloadedFiles.length}');
+      } else {
+        print('ℹ️ File already in downloaded list');
+      }
+    } catch (e) {
+      print('❌ Error marking file as downloaded: $e');
     }
   }
 
@@ -3522,6 +3627,130 @@ class _ChatScreenState extends State<ChatScreen> {
         return 'image/png';
       default:
         return 'application/octet-stream';
+    }
+  }
+
+  void _openFile(ChatMessage message) async {
+    if (message.attachmentUrl != null && message.attachmentUrl!.isNotEmpty) {
+      // Check if file is already downloaded
+      bool isDownloaded = await _isFileDownloaded(message.attachmentUrl!);
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(_getFileIcon(message.text), color: Colors.blue),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message.text.isNotEmpty ? message.text : "Document",
+                  style: TextStyle(fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(isDownloaded
+                  ? 'This file has been downloaded before.'
+                  : 'What would you like to do with this file?'),
+              SizedBox(height: 16),
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _downloadFile(message.attachmentUrl!, message.text);
+                  },
+                  icon: Icon(isDownloaded ? Icons.open_in_new : Icons.download),
+                  label: Text(isDownloaded ? 'Open Again' : 'Download'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isDownloaded ? Colors.green : Colors.blue,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('File not available'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+  }
+
+  void _downloadFile(String url, String fileName) async {
+    try {
+      print('📁 Downloading file: $fileName');
+      print('🔗 URL: $url');
+
+      final Uri fileUri = Uri.parse(url);
+      if (await canLaunchUrl(fileUri)) {
+        await launchUrl(
+          fileUri,
+          mode: LaunchMode.externalApplication,
+        );
+
+        // Mark file as downloaded
+        await _markFileAsDownloaded(url);
+        print('✅ File marked as downloaded: $url');
+
+        // Force UI refresh by rebuilding the widget tree
+        if (mounted) {
+          setState(() {
+            // Force rebuild of message list
+          });
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Downloaded $fileName'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        throw 'Could not launch $url';
+      }
+    } catch (e) {
+      print('❌ Download error: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to download file: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _viewFileInBrowser(String url) async {
+    try {
+      final Uri fileUri = Uri.parse(url);
+      if (await canLaunchUrl(fileUri)) {
+        await launchUrl(
+          fileUri,
+          mode: LaunchMode.inAppWebView,
+        );
+      } else {
+        throw 'Could not launch $url';
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open file: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 }
