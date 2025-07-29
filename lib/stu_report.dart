@@ -1181,7 +1181,7 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      SizedBox(height: 12),
+                      SizedBox(height: 10),
                       ..._buildRubricDetails(result['rubric'], result['criteriaScores']),
                     ],
                   ],
