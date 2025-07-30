@@ -479,14 +479,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
 
   // Quiz Question Management Methods
   void _addQuizQuestion() {
-    setState(() {
-      _quizQuestions.add(QuizQuestion(
-        question: '',
-        options: ['', '', '', ''],
-        correctAnswerIndex: 0,
-        points: 1,
-      ));
-    });
+    _showQuizQuestionDialog();
   }
 
   void _removeQuizQuestion(int index) {
@@ -876,15 +869,52 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
       return;
     }
 
-    // Validate quiz questions
-    if (_materialType == 'quiz' && _quizQuestions.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Please add at least one question to the quiz'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
+    // Enhanced quiz validation
+    if (_materialType == 'quiz') {
+      if (_quizQuestions.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Please add at least one question to the quiz'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Validate each question is complete
+      for (int i = 0; i < _quizQuestions.length; i++) {
+        final question = _quizQuestions[i];
+
+        if (question.question.trim().isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Question ${i + 1} is missing the question text'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        if (question.options.any((option) => option.trim().isEmpty)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Question ${i + 1} has empty answer options'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        if (question.correctAnswerIndex < 0 || question.correctAnswerIndex >= question.options.length) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Question ${i + 1} does not have a valid correct answer selected'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+      }
     }
 
     print('💾 Starting material save process');
@@ -961,6 +991,9 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         materialData['maxAttempts'] = _maxAttempts;
         materialData['questions'] = _quizQuestions.map((q) => q.toMap()).toList();
         materialData['totalPoints'] = _quizQuestions.fold(0, (sum, q) => sum + q.points);
+
+        print('🧠 Quiz data prepared with ${_quizQuestions.length} questions');
+        print('📊 Total points: ${materialData['totalPoints']}');
       }
       // Learning materials
       else {
@@ -1046,32 +1079,64 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         }
       }
 
-      // Create notifications and calendar events using NotificationService
-      if (_materialType == 'tutorial' || _materialType == 'quiz') {
-        print('📚 Creating notifications and calendar events for $_materialType');
-        await _notificationService.createNewItemNotification(
-          itemType: _materialType,
-          itemTitle: _titleController.text.trim(),
-          dueDate: dueDateTime!,
-          sourceId: materialId!,
-          courseId: widget.courseId,
-          courseName: widget.courseData['title'] ?? widget.courseData['name'],
-          organizationCode: organizationCode,
-        );
-      } else {
-        print('📖 Creating notifications for learning material');
-        await _notificationService.createNewItemNotification(
-          itemType: 'learning',
-          itemTitle: _titleController.text.trim(),
-          dueDate: DateTime.now(), // Dummy date for learning materials
-          sourceId: materialId!,
-          courseId: widget.courseId,
-          courseName: widget.courseData['title'] ?? widget.courseData['name'],
-          organizationCode: organizationCode,
-        );
+      // Create notifications and calendar events only for new materials or if deadline changed
+      bool shouldCreateNotifications = false;
+
+      if (!widget.editMode) {
+        // Always create notifications for new materials
+        shouldCreateNotifications = true;
+        print('📚 Creating notifications for new material');
+      } else if (widget.editMode && _materialType != 'learning') {
+        // For existing tutorials/quizzes, check if due date changed
+        final originalDueDate = widget.materialData?['dueDate'] as Timestamp?;
+        if (originalDueDate == null ||
+            (dueDateTime != null && !originalDueDate.toDate().isAtSameMomentAs(dueDateTime))) {
+          shouldCreateNotifications = true;
+          print('📅 Due date changed, creating new notifications');
+        }
       }
 
-      print('✅ Created notification for material: ${_titleController.text.trim()}');
+      if (shouldCreateNotifications) {
+        try {
+          if (_materialType == 'tutorial' || _materialType == 'quiz') {
+            print('📚 Creating notifications and calendar events for $_materialType');
+            await _notificationService.createNewItemNotification(
+              itemType: _materialType,
+              itemTitle: _titleController.text.trim(),
+              dueDate: dueDateTime!,
+              sourceId: materialId!,
+              courseId: widget.courseId,
+              courseName: widget.courseData['title'] ?? widget.courseData['name'],
+              organizationCode: organizationCode,
+            );
+          } else if (!widget.editMode) {
+            // Only create notifications for new learning materials
+            print('📖 Creating notifications for new learning material');
+            await _notificationService.createNewItemNotification(
+              itemType: 'learning',
+              itemTitle: _titleController.text.trim(),
+              dueDate: DateTime.now(), // Dummy date for learning materials
+              sourceId: materialId!,
+              courseId: widget.courseId,
+              courseName: widget.courseData['title'] ?? widget.courseData['name'],
+              organizationCode: organizationCode,
+            );
+          }
+
+          print('✅ Created notifications for material: ${_titleController.text.trim()}');
+        } catch (notificationError) {
+          print('⚠️ Error creating notifications: $notificationError');
+          // Don't fail the entire operation if notifications fail
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Material saved, but notifications failed to send'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      }
 
       // Navigate back
       if (mounted) {
@@ -1084,6 +1149,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
           SnackBar(
             content: Text('Error ${widget.editMode ? 'updating' : 'creating'} material: $e'),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
           ),
         );
       }
@@ -1092,6 +1158,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
         setState(() {
           _isLoading = false;
           _uploadStatus = '';
+          _uploadProgress = 0;
         });
       }
     }
@@ -1533,8 +1600,7 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                 ),
               ),
 
-              // Quiz-specific settings
-              // Quiz-specific settings
+              // Quiz Questions Section
               if (_materialType == 'quiz') ...[
                 SizedBox(height: 24),
                 Container(
@@ -1553,147 +1619,245 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Quiz Settings',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.purple[600],
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Quiz Questions',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.purple[600],
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: _addQuizQuestion,
+                            icon: Icon(Icons.add),
+                            label: Text('Add Question'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.purple[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 16),
+
+                      // Questions List
+                      if (_quizQuestions.isEmpty)
+                        Container(
+                          padding: EdgeInsets.all(32),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: Center(
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.quiz_outlined,
+                                  size: 48,
+                                  color: Colors.grey[400],
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'No questions added yet',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Click "Add Question" to get started',
+                                  style: TextStyle(
+                                    color: Colors.grey[500],
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      else
+                        ...(_quizQuestions.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final question = entry.value;
+
+                          return Container(
+                            margin: EdgeInsets.only(bottom: 16),
+                            padding: EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[50],
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.grey[300]!),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.purple[600],
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        'Q${index + 1}',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        question.question.isEmpty ? 'Untitled Question' : question.question,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange[100],
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        '${question.points}pt',
+                                        style: TextStyle(
+                                          color: Colors.orange[700],
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    IconButton(
+                                      icon: Icon(Icons.edit, size: 20),
+                                      onPressed: () => _showQuizQuestionDialog(index),
+                                      color: Colors.blue[600],
+                                      tooltip: 'Edit Question',
+                                    ),
+                                    IconButton(
+                                      icon: Icon(Icons.delete, size: 20),
+                                      onPressed: () => _removeQuizQuestion(index),
+                                      color: Colors.red[600],
+                                      tooltip: 'Delete Question',
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 12),
+
+                                // Show options preview
+                                if (question.options.any((opt) => opt.isNotEmpty))
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Options:',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                      SizedBox(height: 4),
+                                      ...question.options.asMap().entries.map((optionEntry) {
+                                        final optionIndex = optionEntry.key;
+                                        final option = optionEntry.value;
+                                        final isCorrect = optionIndex == question.correctAnswerIndex;
+
+                                        if (option.isEmpty) return SizedBox.shrink();
+
+                                        return Padding(
+                                          padding: EdgeInsets.only(bottom: 2),
+                                          child: Row(
+                                            children: [
+                                              Container(
+                                                width: 16,
+                                                height: 16,
+                                                decoration: BoxDecoration(
+                                                  color: isCorrect ? Colors.green[100] : Colors.grey[100],
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  border: Border.all(
+                                                    color: isCorrect ? Colors.green : Colors.grey[400]!,
+                                                  ),
+                                                ),
+                                                child: Center(
+                                                  child: Text(
+                                                    String.fromCharCode(65 + optionIndex),
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: isCorrect ? Colors.green[700] : Colors.grey[600],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  option,
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    color: isCorrect ? Colors.green[700] : Colors.grey[700],
+                                                    fontWeight: isCorrect ? FontWeight.w500 : FontWeight.normal,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              if (isCorrect)
+                                                Icon(
+                                                  Icons.check_circle,
+                                                  size: 14,
+                                                  color: Colors.green,
+                                                ),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                          );
+                        }).toList()),
+
+                      if (_quizQuestions.isNotEmpty) ...[
+                        SizedBox(height: 16),
+                        Container(
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.purple[50],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.info_outline, color: Colors.purple[600], size: 20),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Total Questions: ${_quizQuestions.length} • Total Points: ${_quizQuestions.fold(0, (sum, q) => sum + q.points)}',
+                                  style: TextStyle(
+                                    color: Colors.purple[700],
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      SizedBox(height: 20),
-
-                      // Allow Late Submission
-                      SwitchListTile(
-                        title: Text('Allow Late Submission'),
-                        subtitle: Text('Students can submit after due date'),
-                        value: _allowLateSubmission,
-                        onChanged: (value) {
-                          setState(() {
-                            _allowLateSubmission = value;
-                          });
-                        },
-                        activeColor: Colors.purple[400],
-                        contentPadding: EdgeInsets.zero,
-                      ),
-
-                      SizedBox(height: 12),
-
-                      // Time Limit - Simplified layout
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Time Limit',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Slider(
-                                  value: _quizTimeLimit.toDouble(),
-                                  min: 5,
-                                  max: 180,
-                                  divisions: 35,
-                                  label: '$_quizTimeLimit min',
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _quizTimeLimit = value.toInt();
-                                    });
-                                  },
-                                  activeColor: Colors.purple[400],
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              Container(
-                                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: Colors.purple[50],
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  '$_quizTimeLimit min',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.purple[700],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-
-                      SizedBox(height: 12),
-
-                      // Show Results Immediately
-                      SwitchListTile(
-                        title: Text('Show Results Immediately'),
-                        subtitle: Text('Students see results after submission'),
-                        value: _showResultsImmediately,
-                        onChanged: (value) {
-                          setState(() {
-                            _showResultsImmediately = value;
-                          });
-                        },
-                        activeColor: Colors.purple[400],
-                        contentPadding: EdgeInsets.zero,
-                      ),
-
-                      SizedBox(height: 12),
-
-                      // Max Attempts - Simplified layout
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Maximum Attempts',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Slider(
-                                  value: _maxAttempts.toDouble(),
-                                  min: 0,
-                                  max: 5,
-                                  divisions: 5,
-                                  label: _maxAttempts == 0 ? 'Unlimited' : '$_maxAttempts',
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _maxAttempts = value.toInt();
-                                    });
-                                  },
-                                  activeColor: Colors.purple[400],
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              Container(
-                                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: Colors.purple[50],
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  _maxAttempts == 0 ? 'Unlimited' : '$_maxAttempts',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.purple[700],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                      ],
                     ],
                   ),
                 ),

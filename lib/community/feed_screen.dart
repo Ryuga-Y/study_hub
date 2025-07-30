@@ -79,10 +79,55 @@ class _FeedScreenState extends State<FeedScreen> {
           : _refreshAuthentication();
 
       final bloc = context.read<CommunityBloc>();
+
+      // Load user profile FIRST to get their organization code
       bloc.add(LoadUserProfile(user.uid));
 
-      await Future.delayed(Duration(milliseconds: 500));
-      _loadInitialData();
+      // Wait for user profile to load
+      await Future.delayed(Duration(milliseconds: 1000));
+
+      // Get the actual user's organization code from the loaded profile
+      final userProfile = bloc.state.currentUserProfile;
+      String actualOrgCode = '';
+
+      if (userProfile != null) {
+        actualOrgCode = userProfile.organizationCode;
+        print('✅ User belongs to organization: $actualOrgCode');
+        print('🔄 Widget organizationCode was: ${widget.organizationCode}');
+      } else {
+        // Fallback: try to get organization from Firestore directly
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+
+          if (userDoc.exists) {
+            actualOrgCode = userDoc.data()?['organizationCode'] ?? '';
+            print('✅ Got organization from Firestore: $actualOrgCode');
+          }
+        } catch (e) {
+          print('❌ Failed to get organization from Firestore: $e');
+          actualOrgCode = widget.organizationCode; // Use fallback
+        }
+      }
+
+      // If we couldn't get the organization code, show error
+      if (actualOrgCode.isEmpty) {
+        _showError('Unable to determine user organization. Please contact support.');
+        return;
+      }
+
+      // If user's organization doesn't match widget organization, show warning
+      if (actualOrgCode != widget.organizationCode) {
+        print('⚠️ Organization mismatch detected:');
+        print('   User org: $actualOrgCode');
+        print('   Expected org: ${widget.organizationCode}');
+        print('   Loading user\'s actual organization feed...');
+      }
+
+      // Load data with user's ACTUAL organization code
+      _loadInitialDataWithOrgCode(actualOrgCode);
 
       setState(() {
         _isInitialized = true;
@@ -92,6 +137,31 @@ class _FeedScreenState extends State<FeedScreen> {
       _showError('Error initializing feed: $e');
     }
   }
+
+  void _loadInitialDataWithOrgCode(String orgCode) {
+    final bloc = context.read<CommunityBloc>();
+
+    if (orgCode.isNotEmpty) {
+      print('🔄 Loading feed for organization: $orgCode');
+      bloc.add(LoadFeed(organizationCode: orgCode));
+      bloc.add(LoadNotifications());
+      bloc.add(LoadFriends());
+      bloc.add(LoadPendingRequests());
+      _scheduleCleanup();
+    } else {
+      _showError('Invalid organization code');
+    }
+  }
+
+  Future<void> _refreshFeed() async {
+    final userProfile = context.read<CommunityBloc>().state.currentUserProfile;
+    final orgCode = userProfile?.organizationCode ?? widget.organizationCode;
+
+    context.read<CommunityBloc>().add(
+        LoadFeed(organizationCode: orgCode, refresh: true)
+    );
+  }
+
 
   Future<void> _refreshAuthentication() async {
     try {
