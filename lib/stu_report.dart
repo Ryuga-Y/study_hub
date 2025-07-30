@@ -32,12 +32,9 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
 
   // Data structures
   List<Map<String, dynamic>> assignmentResults = [];
-  List<Map<String, dynamic>> tutorialResults = [];
   Map<String, dynamic> overallStats = {
     'totalAssignments': 0,
     'completedAssignments': 0,
-    'totalTutorials': 0,
-    'completedTutorials': 0,
     'overallGPA': 0.0,
     'totalCredits': 0,
   };
@@ -45,7 +42,7 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 1, vsync: this);
     _loadReportData();
   }
 
@@ -89,7 +86,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
           .get();
 
       List<Map<String, dynamic>> tempAssignments = [];
-      List<Map<String, dynamic>> tempTutorials = [];
 
       for (var enrollment in enrollmentsSnapshot.docs) {
         final courseRef = enrollment.reference.parent.parent;
@@ -108,14 +104,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
             user.uid,
             tempAssignments
         );
-
-        // Load tutorials for this course
-        await _loadTutorialResults(
-            courseId,
-            courseData,
-            user.uid,
-            tempTutorials
-        );
       }
 
       // Sort by date (most recent first)
@@ -126,19 +114,11 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
         return bTime.compareTo(aTime);
       });
 
-      tempTutorials.sort((a, b) {
-        final aTime = a['submittedAt'];
-        final bTime = b['submittedAt'];
-        if (aTime == null || bTime == null) return 0;
-        return bTime.compareTo(aTime);
-      });
-
       // Calculate overall statistics
-      _calculateOverallStats(tempAssignments, tempTutorials);
+      _calculateOverallStats(tempAssignments);
 
       setState(() {
         assignmentResults = tempAssignments;
-        tutorialResults = tempTutorials;
         isLoading = false;
       });
     } catch (e) {
@@ -252,94 +232,11 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
     }
   }
 
-  Future<void> _loadTutorialResults(
-      String courseId,
-      Map<String, dynamic> courseData,
-      String studentId,
-      List<Map<String, dynamic>> results,
-      ) async {
-    try {
-      // Get all tutorials (materials with type 'tutorial')
-      final materialsSnapshot = await FirebaseFirestore.instance
-          .collection('organizations')
-          .doc(organizationCode)
-          .collection('courses')
-          .doc(courseId)
-          .collection('materials')
-          .where('materialType', isEqualTo: 'tutorial')
-          .get();
-
-      for (var materialDoc in materialsSnapshot.docs) {
-        final materialData = materialDoc.data();
-        final materialId = materialDoc.id;
-
-        // Check if student has submission
-        final submissionsSnapshot = await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(organizationCode)
-            .collection('courses')
-            .doc(courseId)
-            .collection('materials')
-            .doc(materialId)
-            .collection('submissions')
-            .where('studentId', isEqualTo: studentId)
-            .orderBy('submittedAt', descending: true)
-            .limit(1)
-            .get();
-
-        if (submissionsSnapshot.docs.isEmpty) continue;
-
-        final submissionDoc = submissionsSnapshot.docs.first;
-        final submissionData = submissionDoc.data();
-
-        // Check for feedback
-        Map<String, dynamic>? feedbackData;
-        final feedbackDoc = await FirebaseFirestore.instance
-            .collection('organizations')
-            .doc(organizationCode)
-            .collection('courses')
-            .doc(courseId)
-            .collection('materials')
-            .doc(materialId)
-            .collection('submissions')
-            .doc(submissionDoc.id)
-            .collection('feedback')
-            .doc('main')
-            .get();
-
-        if (feedbackDoc.exists) {
-          feedbackData = feedbackDoc.data();
-        }
-
-        results.add({
-          'type': 'tutorial',
-          'courseId': courseId,
-          'courseName': courseData['title'] ?? courseData['name'] ?? 'Unknown Course',
-          'courseCode': courseData['code'] ?? '',
-          'itemId': materialId,
-          'itemName': materialData['title'] ?? 'Tutorial',
-          'dueDate': materialData['dueDate'],
-          'submittedAt': submissionData['submittedAt'],
-          'isLate': submissionData['isLate'] ?? false,
-          'status': submissionData['status'] ?? 'submitted',
-          'comments': submissionData['comments'],
-          'feedback': feedbackData,
-          'files': submissionData['files'] ?? [],
-        });
-      }
-    } catch (e) {
-      print('Error loading tutorial results: $e');
-    }
-  }
-
   void _calculateOverallStats(
       List<Map<String, dynamic>> assignments,
-      List<Map<String, dynamic>> tutorials,
       ) {
     int totalAssignments = assignments.length;
     int completedAssignments = assignments.where((a) => a['grade'] != null).length;
-    int totalTutorials = tutorials.length;
-    int completedTutorials = tutorials.where((t) => t['feedback'] != null).length;
 
     // Calculate GPA (using letter grades)
     double totalGradePoints = 0;
@@ -358,8 +255,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
       overallStats = {
         'totalAssignments': totalAssignments,
         'completedAssignments': completedAssignments,
-        'totalTutorials': totalTutorials,
-        'completedTutorials': completedTutorials,
         'overallGPA': gpa,
         'totalCredits': totalGradedItems,
       };
@@ -438,7 +333,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
                       children: [
                         pw.Text('GPA: ${overallStats['overallGPA'].toStringAsFixed(2)}'),
                         pw.Text('Assignments: ${overallStats['completedAssignments']}/${overallStats['totalAssignments']}'),
-                        pw.Text('Tutorials: ${overallStats['completedTutorials']}/${overallStats['totalTutorials']}'),
                       ],
                     ),
                   ],
@@ -1007,13 +901,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
                                           ),
                                         ],
                                       ),
-                                      SizedBox(height: 4),
-                                      Center(
-                                        child: Text(
-                                          'Tutorials: ${overallStats['completedTutorials']}/${overallStats['totalTutorials']}',
-                                          style: TextStyle(fontSize: 10),
-                                        ),
-                                      ),
                                     ],
                                   ),
                                 ),
@@ -1301,7 +1188,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
                                 children: [
                                   pw.Text('GPA: ${overallStats['overallGPA'].toStringAsFixed(2)}'),
                                   pw.Text('Assignments: ${overallStats['completedAssignments']}/${overallStats['totalAssignments']}'),
-                                  pw.Text('Tutorials: ${overallStats['completedTutorials']}/${overallStats['totalTutorials']}'),
                                 ],
                               ),
                             ],
@@ -1435,11 +1321,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
                       '${overallStats['completedAssignments']}/${overallStats['totalAssignments']}',
                       Colors.white,
                     ),
-                    _buildStatItem(
-                      'Tutorials',
-                      '${overallStats['completedTutorials']}/${overallStats['totalTutorials']}',
-                      Colors.white,
-                    ),
                   ],
                 ),
               ],
@@ -1469,7 +1350,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
               labelStyle: TextStyle(fontWeight: FontWeight.bold),
               tabs: [
                 Tab(text: 'Assignments'),
-                Tab(text: 'Tutorials'),
               ],
             ),
           ),
@@ -1480,7 +1360,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
               controller: _tabController,
               children: [
                 _buildAssignmentsTab(),
-                _buildTutorialsTab(),
               ],
             ),
           ),
@@ -1753,240 +1632,6 @@ class _StudentReportPageState extends State<StudentReportPage> with SingleTicker
               ],
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTutorialsTab() {
-    if (tutorialResults.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.quiz_outlined, size: 64, color: Colors.grey[400]),
-            SizedBox(height: 16),
-            Text(
-              'No tutorial submissions yet',
-              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: EdgeInsets.all(16),
-      itemCount: tutorialResults.length,
-      itemBuilder: (context, index) {
-        return _buildTutorialResultCard(tutorialResults[index]);
-      },
-    );
-  }
-
-  Widget _buildTutorialResultCard(Map<String, dynamic> result) {
-    final hasFeedback = result['feedback'] != null;
-
-    return Container(
-      margin: EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 10,
-            offset: Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Course and Tutorial Info
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        result['courseCode'] + ' - ' + result['courseName'],
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 12,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        result['itemName'],
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: hasFeedback ? Colors.green[100] : Colors.blue[100],
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    hasFeedback ? 'Reviewed' : 'Submitted',
-                    style: TextStyle(
-                      color: hasFeedback ? Colors.green[700] : Colors.blue[700],
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 12),
-
-            // Submission Info
-            Row(
-              children: [
-                if (result['dueDate'] != null) ...[
-                  Icon(Icons.calendar_today, size: 14, color: Colors.grey[600]),
-                  SizedBox(width: 4),
-                  Text(
-                    'Due: ${_formatDate(result['dueDate'])}',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
-                  SizedBox(width: 16),
-                ],
-                Icon(Icons.upload_file, size: 14, color: Colors.grey[600]),
-                SizedBox(width: 4),
-                Text(
-                  'Submitted: ${_formatDate(result['submittedAt'])}',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 12,
-                  ),
-                ),
-                if (result['isLate'] == true) ...[
-                  SizedBox(width: 8),
-                  Container(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.red[100],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      'LATE',
-                      style: TextStyle(
-                        color: Colors.red[700],
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-
-            // Files submitted
-            if (result['files'] != null && (result['files'] as List).isNotEmpty) ...[
-              SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.attachment, size: 14, color: Colors.grey[600]),
-                  SizedBox(width: 4),
-                  Text(
-                    '${(result['files'] as List).length} file(s) submitted',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
-            // Student Comments
-            if (result['comments'] != null && result['comments'].toString().isNotEmpty) ...[
-              SizedBox(height: 12),
-              Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[300]!),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Your Comments:',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[700],
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      result['comments'],
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            // Lecturer Feedback
-            if (hasFeedback) ...[
-              SizedBox(height: 12),
-              Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.comment, size: 14, color: Colors.blue[700]),
-                        SizedBox(width: 4),
-                        Text(
-                          'Lecturer Feedback:',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue[700],
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      result['feedback']['comment'] ?? 'No comment',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.blue[900],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
         ),
       ),
     );
