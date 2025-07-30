@@ -265,14 +265,30 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
         bool isPinned = false;
         bool isStuckOnTop = false;
 
+// Check if user has cleared this chat
+        final prefs = await SharedPreferences.getInstance();
+        final clearKey = 'chat_cleared_${chatId}_$currentUserId';
+        final clearTimeString = prefs.getString(clearKey);
+        bool hasClearedChat = clearTimeString != null;
+
         if (chatData != null) {
-          lastMessage = chatData['lastMessage'] ?? "I've accepted your friend request. Now let's chat!";
-          lastMessageTime = chatData['lastMessageTime'] != null
-              ? (chatData['lastMessageTime'] as Timestamp).toDate()
-              : friend.acceptedAt ?? friend.createdAt;
+          // If user cleared chat, show default message instead of last message
+          if (hasClearedChat) {
+            lastMessage = "Start a conversation with ${friend.friendName}";
+            lastMessageTime = friend.acceptedAt ?? friend.createdAt;
+          } else {
+            lastMessage = chatData['lastMessage'] ?? "I've accepted your friend request. Now let's chat!";
+            lastMessageTime = chatData['lastMessageTime'] != null
+                ? (chatData['lastMessageTime'] as Timestamp).toDate()
+                : friend.acceptedAt ?? friend.createdAt;
+          }
           unreadCount = chatData['unreadCount']?[currentUserId] ?? 0;
           isPinned = chatData['isPinned'] ?? false;
-          isStuckOnTop = chatData['isStuckOnTop'] ?? false;
+
+          // Get user-specific stick status from local storage
+          final prefs = await SharedPreferences.getInstance();
+          final stickKey = 'chat_stuck_${chatId}_$currentUserId';
+          isStuckOnTop = prefs.getBool(stickKey) ?? false;
         } else {
           lastMessage = "You became friends with ${friend.friendName}";
           lastMessageTime = friend.acceptedAt ?? friend.createdAt;
@@ -681,6 +697,7 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
                   contactAvatar: contact.avatarUrl,
                   isOnline: contact.isOnline,
                   chatId: contact.chatId,
+                  onContactsChanged: () => _loadFriendsAsContacts(), // ADD THIS LINE
                 ),
               ),
             ).then((_) => _loadFriendsAsContacts());
@@ -1124,13 +1141,13 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
   }
 }
 
-// ✅ SINGLE ChatScreen CLASS
 class ChatScreen extends StatefulWidget {
   final String contactId;
   final String contactName;
   final String? contactAvatar;
   final bool isOnline;
   final String chatId;
+  final VoidCallback? onContactsChanged; // ADD THIS LINE
 
   ChatScreen({
     required this.contactId,
@@ -1138,6 +1155,7 @@ class ChatScreen extends StatefulWidget {
     this.contactAvatar,
     required this.isOnline,
     required this.chatId,
+    this.onContactsChanged, // ADD THIS LINE
   });
 
   @override
@@ -1439,14 +1457,10 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             PopupMenuItem(
               value: 'stick_top',
-              child: StreamBuilder<DocumentSnapshot>(
-                stream: _firestore.collection('chats').doc(widget.chatId).snapshots(),
+              child: FutureBuilder<bool>(
+                future: _getUserStickStatus(),
                 builder: (context, snapshot) {
-                  bool isStuckOnTop = false;
-                  if (snapshot.hasData && snapshot.data!.exists) {
-                    final data = snapshot.data!.data() as Map<String, dynamic>?;
-                    isStuckOnTop = data?['isStuckOnTop'] ?? false;
-                  }
+                  bool isStuckOnTop = snapshot.data ?? false;
                   return Row(
                     children: [
                       Icon(Icons.push_pin, color: Colors.orange),
@@ -1495,13 +1509,19 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _toggleStickOnTop() async {
     try {
-      final chatDoc = await _firestore.collection('chats').doc(widget.chatId).get();
-      final currentStickStatus = chatDoc.data()?['isStuckOnTop'] ?? false;
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null) return;
 
-      await _firestore.collection('chats').doc(widget.chatId).update({
-        'isStuckOnTop': !currentStickStatus,
-        'stuckOnTopAt': !currentStickStatus ? FieldValue.serverTimestamp() : null,
-      });
+      final prefs = await SharedPreferences.getInstance();
+      final stickKey = 'chat_stuck_${widget.chatId}_$currentUserId';
+      final currentStickStatus = prefs.getBool(stickKey) ?? false;
+
+      await prefs.setBool(stickKey, !currentStickStatus);
+
+      // Call the callback to refresh the contact list immediately
+      if (widget.onContactsChanged != null) {
+        widget.onContactsChanged!();
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1563,7 +1583,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Clear Chat'),
-        content: Text('Are you sure you want to clear all messages? This cannot be undone.'),
+        content: Text('Are you sure you want to clear all messages for yourself? This will only clear your view of the chat.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -1583,80 +1603,30 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _clearAllMessages() async {
     try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => Center(
-          child: Container(
-            padding: EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Clearing chat...'),
-              ],
-            ),
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('User not authenticated'),
+            backgroundColor: Colors.red,
           ),
-        ),
-      );
-
-      // Delete all messages in batches (Firestore batch limit is 500)
-      const int batchSize = 500;
-      bool hasMore = true;
-
-      while (hasMore) {
-        final messagesSnapshot = await _firestore
-            .collection('chats')
-            .doc(widget.chatId)
-            .collection('messages')
-            .limit(batchSize)
-            .get();
-
-        if (messagesSnapshot.docs.isEmpty) {
-          hasMore = false;
-          continue;
-        }
-
-        final batch = _firestore.batch();
-
-        for (final doc in messagesSnapshot.docs) {
-          batch.delete(doc.reference);
-        }
-
-        await batch.commit();
-
-        // Check if there are more messages
-        hasMore = messagesSnapshot.docs.length == batchSize;
+        );
+        return;
       }
 
-      // Update the chat document with system message
-      final currentUserId = _auth.currentUser?.uid;
-      final currentUserDoc = await _firestore.collection('users').doc(currentUserId).get();
-      final currentUserName = currentUserDoc.data()?['fullName'] ?? 'Someone';
-
-      await _firestore.collection('chats').doc(widget.chatId).update({
-        'lastMessage': '$currentUserName cleared the chat',
-        'lastMessageTime': FieldValue.serverTimestamp(),
-        'unreadCount.$currentUserId': 0,
-        'unreadCount.${widget.contactId}': 0,
-      });
-
-      Navigator.pop(context);
+      // Store clear timestamp locally using SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final clearKey = 'chat_cleared_${widget.chatId}_$currentUserId';
+      await prefs.setString(clearKey, DateTime.now().toIso8601String());
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Chat cleared successfully'),
+          content: Text('Chat cleared for you'),
           backgroundColor: Colors.green,
           duration: Duration(seconds: 2),
         ),
       );
     } catch (e) {
-      Navigator.pop(context);
       print('Error clearing chat: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1668,70 +1638,106 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // Move this method OUTSIDE and BEFORE _buildMessagesList()
+  Future<DateTime?> _getUserClearTime() async {
+    try {
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null) return null;
+
+      final prefs = await SharedPreferences.getInstance();
+      final clearKey = 'chat_cleared_${widget.chatId}_$currentUserId';
+      final clearTimeString = prefs.getString(clearKey);
+
+      if (clearTimeString != null) {
+        return DateTime.parse(clearTimeString);
+      }
+      return null;
+    } catch (e) {
+      print('Error getting user clear time: $e');
+      return null;
+    }
+  }
+
   Widget _buildMessagesList() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('chats')
-          .doc(widget.chatId)
-          .collection('messages')
-          .orderBy('timestamp', descending: false)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Center(child: CircularProgressIndicator());
-        }
+    return FutureBuilder<DateTime?>(
+      future: _getUserClearTime(),
+      builder: (context, clearTimeSnapshot) {
+        DateTime? userClearTime = clearTimeSnapshot.data;
 
-        var messages = snapshot.data!.docs
-            .map((doc) => ChatMessage.fromFirestore(doc))
-            .where((message) {
-          // Filter out messages deleted by current user
-          final data = snapshot.data!.docs.firstWhere((d) => d.id == message.id).data() as Map<String, dynamic>;
-          final deletedFor = data['deletedFor'] as List<dynamic>?;
-          return deletedFor == null || !deletedFor.contains(_auth.currentUser?.uid);
-        })
-            .toList();
-
-        if (_isSearching && _searchQuery.isNotEmpty) {
-          messages = messages.where((message) =>
-              message.text.toLowerCase().contains(_searchQuery)).toList();
-        }
-
-        if (messages.isEmpty) {
-          return Center(
-            child: Text(
-              'No messages yet. Say hi!',
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-          );
-        }
-
-        // ✅ Auto-scroll to bottom for new messages
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _scrollController.hasClients) {
-            // Add a small delay to ensure messages are fully rendered
-            Future.delayed(Duration(milliseconds: 100), () {
-              if (mounted && _scrollController.hasClients) {
-                _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-              }
-            });
-          }
-        });
-
-        return ListView.builder(
-          controller: _scrollController,
-          padding: EdgeInsets.all(16),
-          reverse: false,  // ✅ Show messages in normal order
-          itemCount: messages.length,
-          itemBuilder: (context, index) {
-            final message = messages[index];
-            final isMe = message.senderId == _auth.currentUser?.uid;
-            final isSystemMessage = message.senderId == 'system';
-
-            if (isSystemMessage) {
-              return _buildSystemMessage(message);
+        return StreamBuilder<QuerySnapshot>(
+          stream: _firestore
+              .collection('chats')
+              .doc(widget.chatId)
+              .collection('messages')
+              .orderBy('timestamp', descending: false)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return Center(child: CircularProgressIndicator());
             }
 
-            return _buildMessageBubble(message, isMe);
+            var messages = snapshot.data!.docs
+                .map((doc) => ChatMessage.fromFirestore(doc))
+                .where((message) {
+              // Filter out messages deleted by current user
+              final data = snapshot.data!.docs.firstWhere((d) => d.id == message.id).data() as Map<String, dynamic>;
+              final deletedFor = data['deletedFor'] as List<dynamic>?;
+              if (deletedFor != null && deletedFor.contains(_auth.currentUser?.uid)) {
+                return false;
+              }
+
+              // Filter out messages sent before user cleared chat
+              if (userClearTime != null && message.timestamp.isBefore(userClearTime)) {
+                return false;
+              }
+
+              return true;
+            })
+                .toList();
+
+            if (_isSearching && _searchQuery.isNotEmpty) {
+              messages = messages.where((message) =>
+                  message.text.toLowerCase().contains(_searchQuery)).toList();
+            }
+
+            if (messages.isEmpty) {
+              return Center(
+                child: Text(
+                  'No messages yet. Say hi!',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              );
+            }
+
+            // Auto-scroll to bottom for new messages
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _scrollController.hasClients) {
+                // Add a small delay to ensure messages are fully rendered
+                Future.delayed(Duration(milliseconds: 100), () {
+                  if (mounted && _scrollController.hasClients) {
+                    _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                  }
+                });
+              }
+            });
+
+            return ListView.builder(
+              controller: _scrollController,
+              padding: EdgeInsets.all(16),
+              reverse: false,
+              itemCount: messages.length,
+              itemBuilder: (context, index) {
+                final message = messages[index];
+                final isMe = message.senderId == _auth.currentUser?.uid;
+                final isSystemMessage = message.senderId == 'system';
+
+                if (isSystemMessage) {
+                  return _buildSystemMessage(message);
+                }
+
+                return _buildMessageBubble(message, isMe);
+              },
+            );
           },
         );
       },
@@ -2922,6 +2928,20 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to send message')),
       );
+    }
+  }
+
+  Future<bool> _getUserStickStatus() async {
+    try {
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null) return false;
+
+      final prefs = await SharedPreferences.getInstance();
+      final stickKey = 'chat_stuck_${widget.chatId}_$currentUserId';
+      return prefs.getBool(stickKey) ?? false;
+    } catch (e) {
+      print('Error getting stick status: $e');
+      return false;
     }
   }
 
