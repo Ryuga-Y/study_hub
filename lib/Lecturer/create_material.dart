@@ -1632,10 +1632,14 @@ class _CreateMaterialPageState extends State<CreateMaterialPage> {
                           ),
                           TextButton.icon(
                             onPressed: _addQuizQuestion,
-                            icon: Icon(Icons.add),
-                            label: Text('Add Question'),
+                            icon: Icon(Icons.add, size: 18),
+                            label: Text(
+                              'Add Question',
+                              style: TextStyle(fontSize: 12),
+                            ),
                             style: TextButton.styleFrom(
                               foregroundColor: Colors.purple[600],
+                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             ),
                           ),
                         ],

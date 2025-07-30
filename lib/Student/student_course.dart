@@ -1982,32 +1982,37 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                             totalPoints = submissionData['totalPoints'] ?? material['totalPoints'];
                           }
 
-                          return Row(
+                          return Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
                             children: [
-                              if (dueDate != null) ...[
-                                Icon(
-                                    Icons.access_time,
-                                    size: 14,
-                                    color: (hasSubmitted && isPastDue) ? Colors.grey[600] : (isPastDue ? Colors.red : Colors.grey[600])
+                              if (dueDate != null)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                        Icons.access_time,
+                                        size: 12,
+                                        color: (hasSubmitted && isPastDue) ? Colors.grey[600] : (isPastDue ? Colors.red : Colors.grey[600])
+                                    ),
+                                    SizedBox(width: 2),
+                                    Text(
+                                      'Due: ${_formatDate(dueDate)}',
+                                      style: TextStyle(
+                                        color: (hasSubmitted && isPastDue) ? Colors.grey[600] : (isPastDue ? Colors.red : Colors.grey[600]),
+                                        fontSize: 11,
+                                        fontWeight: (hasSubmitted && isPastDue) ? FontWeight.normal : (isPastDue ? FontWeight.bold : FontWeight.normal),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Due: ${_formatDate(dueDate)}',
-                                  style: TextStyle(
-                                    color: (hasSubmitted && isPastDue) ? Colors.grey[600] : (isPastDue ? Colors.red : Colors.grey[600]),
-                                    fontSize: 12,
-                                    fontWeight: (hasSubmitted && isPastDue) ? FontWeight.normal : (isPastDue ? FontWeight.bold : FontWeight.normal),
-                                  ),
-                                ),
-                                SizedBox(width: 12),
-                              ],
                               Container(
-                                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: hasSubmitted
                                       ? Colors.green.withValues(alpha: 0.1)
                                       : (isPastDue ? Colors.red.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1)),
-                                  borderRadius: BorderRadius.circular(12),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(
                                   hasSubmitted ? 'Completed' : (isPastDue ? 'Missing' : 'Pending'),
@@ -2015,58 +2020,52 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
                                     color: hasSubmitted
                                         ? Colors.green
                                         : (isPastDue ? Colors.red : Colors.orange),
-                                    fontSize: 12,
+                                    fontSize: 10,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
-
                               // Show score for completed quizzes
-                              if (hasSubmitted && isQuiz && score != null && totalPoints != null) ...[
-                                SizedBox(width: 8),
+                              if (hasSubmitted && isQuiz && score != null && totalPoints != null)
                                 Container(
-                                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                                   decoration: BoxDecoration(
                                     color: Colors.purple[100],
-                                    borderRadius: BorderRadius.circular(8),
+                                    borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
                                     '$score/$totalPoints',
                                     style: TextStyle(
                                       color: Colors.purple[700],
-                                      fontSize: 10,
+                                      fontSize: 9,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
-                              ],
-
                               // Show water bucket reward for incomplete items
-                              if (!hasSubmitted) ...[
-                                SizedBox(width: 4),
+                              if (!hasSubmitted)
                                 Container(
-                                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                  padding: EdgeInsets.symmetric(horizontal: 3, vertical: 2),
                                   decoration: BoxDecoration(
                                     color: Colors.orange[100],
-                                    borderRadius: BorderRadius.circular(8),
+                                    borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.local_drink, size: 10, color: Colors.orange[700]),
+                                      Icon(Icons.local_drink, size: 8, color: Colors.orange[700]),
                                       SizedBox(width: 1),
                                       Text(
                                         isQuiz ? '+2' : (isTutorial ? '+1' : ''),
                                         style: TextStyle(
                                           color: Colors.orange[700],
-                                          fontSize: 9,
+                                          fontSize: 8,
                                           fontWeight: FontWeight.bold,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
-                              ],
                             ],
                           );
                         },
