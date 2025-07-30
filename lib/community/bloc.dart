@@ -302,6 +302,37 @@ class AdminDeletePost extends CommunityEvent {
   List<Object> get props => [postId, reason];
 }
 
+class HidePost extends CommunityEvent {
+  final String postId;
+  final String reason;
+
+  HidePost({
+    required this.postId,
+    required this.reason,
+  });
+
+  @override
+  List<Object> get props => [postId, reason];
+}
+
+class UnhidePost extends CommunityEvent {
+  final String postId;
+
+  UnhidePost({required this.postId});
+
+  @override
+  List<Object> get props => [postId];
+}
+
+class LoadHiddenPosts extends CommunityEvent {
+  final String organizationCode;
+
+  LoadHiddenPosts({required this.organizationCode});
+
+  @override
+  List<Object> get props => [organizationCode];
+}
+
 // Comment Events
 class LoadComments extends CommunityEvent {
   final String postId;
@@ -527,6 +558,7 @@ class CommunityState extends Equatable {
   final List<PostReport> reportedPosts;
   final Map<String, int> analytics;
   final Map<String, Poll> polls;
+  final List<Post> hiddenPosts;
 
   const CommunityState({
     this.feedPosts = const [],
@@ -554,6 +586,7 @@ class CommunityState extends Equatable {
       'pendingReports': 0,
     },
     this.polls = const {},
+    this.hiddenPosts = const [],
   });
 
   CommunityState copyWith({
@@ -576,6 +609,7 @@ class CommunityState extends Equatable {
     List<PostReport>? reportedPosts,
     Map<String, int>? analytics,
     Map<String, Poll>? polls,
+    List<Post>? hiddenPosts,
   }) {
     return CommunityState(
       feedPosts: feedPosts ?? this.feedPosts,
@@ -597,6 +631,7 @@ class CommunityState extends Equatable {
       reportedPosts: reportedPosts ?? this.reportedPosts,
       analytics: analytics ?? this.analytics,
       polls: polls ?? this.polls,
+      hiddenPosts: hiddenPosts ?? this.hiddenPosts,
     );
   }
 
@@ -621,6 +656,7 @@ class CommunityState extends Equatable {
     reportedPosts,
     analytics,
     polls,
+    hiddenPosts,
   ];
 }
 
@@ -650,6 +686,10 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<LoadReportedPosts>(_onLoadReportedPosts);
     on<ReviewReport>(_onReviewReport);
     on<AdminDeletePost>(_onAdminDeletePost);
+
+    on<HidePost>(_onHidePost);
+    on<UnhidePost>(_onUnhidePost);
+    on<LoadHiddenPosts>(_onLoadHiddenPosts);
 
     on<LoadAnalytics>(_onLoadAnalytics);
 
@@ -684,6 +724,73 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
     on<MarkNotificationRead>(_onMarkNotificationRead);
     on<MarkAllNotificationsRead>(_onMarkAllNotificationsRead);
   }
+
+  // 🆕 NEW: Hide post handler
+  Future<void> _onHidePost(HidePost event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.hidePost(event.postId, event.reason);
+
+      // Remove from feed posts and reported posts
+      final updatedFeedPosts = state.feedPosts
+          .where((post) => post.id != event.postId)
+          .toList();
+
+      emit(state.copyWith(
+        feedPosts: updatedFeedPosts,
+        successMessage: 'Post hidden successfully',
+      ));
+
+      // Reload reported posts to refresh the list
+      final orgCode = state.currentUserProfile?.organizationCode ?? '';
+      if (orgCode.isNotEmpty) {
+        add(LoadReportedPosts(organizationCode: orgCode));
+        add(LoadHiddenPosts(organizationCode: orgCode));
+      }
+
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  // 🆕 NEW: Unhide post handler
+  Future<void> _onUnhidePost(UnhidePost event, Emitter<CommunityState> emit) async {
+    try {
+      await _service.unhidePost(event.postId);
+
+      // Remove from hidden posts list
+      final updatedHiddenPosts = state.hiddenPosts
+          .where((post) => post.id != event.postId)
+          .toList();
+
+      emit(state.copyWith(
+        hiddenPosts: updatedHiddenPosts,
+        successMessage: 'Post unhidden successfully',
+      ));
+
+      // Reload feed to show the unhidden post
+      add(LoadFeed(
+        organizationCode: state.currentUserProfile?.organizationCode ?? '',
+        refresh: true,
+      ));
+
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
+  // 🆕 NEW: Load hidden posts handler
+  Future<void> _onLoadHiddenPosts(LoadHiddenPosts event, Emitter<CommunityState> emit) async {
+    try {
+      await emit.forEach(
+        _service.getHiddenPosts(event.organizationCode),
+        onData: (hiddenPosts) => state.copyWith(hiddenPosts: hiddenPosts),
+        onError: (error, stackTrace) => state.copyWith(error: error.toString()),
+      );
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
+  }
+
 
   Future<void> _onLoadAnalytics(LoadAnalytics event, Emitter<CommunityState> emit) async {
     try {

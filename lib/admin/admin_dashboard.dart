@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
+import '../community/bloc.dart';
 import 'user_management.dart';
 import 'community_management.dart';
 import 'course_management.dart';
@@ -31,6 +33,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
     'lecturers': 0,
     'faculties': 0,
     'programs': 0,
+  };
+
+  // 🆕 NEW: Community statistics
+  Map<String, int> _communityStats = {
+    'totalPosts': 0,
+    'totalReports': 0,
+    'pendingReports': 0,
+    'hiddenPosts': 0,
   };
 
   @override
@@ -66,6 +76,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
         // Load statistics
         await _loadStatistics(orgCode);
+        // 🆕 NEW: Load community statistics
+        await _loadCommunityStatistics(orgCode);
       }
     } catch (e) {
       print('Error loading data: $e');
@@ -101,7 +113,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             .where('isActive', isEqualTo: true)
             .count()
             .get(),
-
       ]);
 
       // Count programs
@@ -136,6 +147,76 @@ class _AdminDashboardState extends State<AdminDashboard> {
       });
     } catch (e) {
       print('Error loading statistics: $e');
+    }
+  }
+
+  // 🆕 NEW: Load community statistics
+  Future<void> _loadCommunityStatistics(String orgCode) async {
+    try {
+      // Get user IDs from the organization
+      final usersSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('organizationCode', isEqualTo: orgCode)
+          .get();
+
+      final userIds = usersSnapshot.docs.map((doc) => doc.id).toList();
+
+      if (userIds.isEmpty) {
+        setState(() {
+          _communityStats = {
+            'totalPosts': 0,
+            'totalReports': 0,
+            'pendingReports': 0,
+            'hiddenPosts': 0,
+          };
+        });
+        return;
+      }
+
+      // Count posts from organization users
+      final postsSnapshot = await FirebaseFirestore.instance
+          .collection('posts')
+          .where('userId', whereIn: userIds.take(10).toList()) // Firestore 'in' limit is 10
+          .get();
+
+      // Count hidden posts
+      final hiddenPostsSnapshot = await FirebaseFirestore.instance
+          .collection('posts')
+          .where('userId', whereIn: userIds.take(10).toList())
+          .where('isHidden', isEqualTo: true)
+          .get();
+
+      // Count reports for this organization
+      final reportsSnapshot = await FirebaseFirestore.instance
+          .collection('postReports')
+          .where('organizationCode', isEqualTo: orgCode)
+          .get();
+
+      // Count pending reports
+      final pendingReportsSnapshot = await FirebaseFirestore.instance
+          .collection('postReports')
+          .where('organizationCode', isEqualTo: orgCode)
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      setState(() {
+        _communityStats = {
+          'totalPosts': postsSnapshot.docs.length,
+          'totalReports': reportsSnapshot.docs.length,
+          'pendingReports': pendingReportsSnapshot.docs.length,
+          'hiddenPosts': hiddenPostsSnapshot.docs.length,
+        };
+      });
+    } catch (e) {
+      print('Error loading community statistics: $e');
+      setState(() {
+        _communityStats = {
+          'totalPosts': 0,
+          'totalReports': 0,
+          'pendingReports': 0,
+          'hiddenPosts': 0,
+        };
+      });
     }
   }
 
@@ -232,9 +313,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
               ),
-              softWrap: true, // Allows text to wrap to multiple lines
-              maxLines: 2, // Optional: limit to 2 lines
-              overflow: TextOverflow.ellipsis, // Optional: add ellipsis if still too long
+              softWrap: true,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -247,6 +328,45 @@ class _AdminDashboardState extends State<AdminDashboard> {
           : null,
       automaticallyImplyLeading: false,
       actions: [
+        // 🆕 NEW: Community alerts badge
+        if (_communityStats['pendingReports']! > 0)
+          Container(
+            margin: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+            child: Stack(
+              children: [
+                IconButton(
+                  icon: Icon(Icons.notifications, color: Colors.orange),
+                  onPressed: () => _navigateTo('Community'),
+                  tooltip: '${_communityStats['pendingReports']} pending reports',
+                ),
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    constraints: BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      '${_communityStats['pendingReports']}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
         // Organization Code
         Container(
           margin: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -371,11 +491,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   isSelected: _currentPage == 'Courses',
                   onTap: () => _navigateTo('Courses'),
                 ),
+                // 🔄 UPDATED: Community menu item with badge
                 _buildMenuItem(
                   icon: Icons.people_outline,
                   title: 'Community',
                   isSelected: _currentPage == 'Community',
                   onTap: () => _navigateTo('Community'),
+                  badge: _communityStats['pendingReports']! > 0
+                      ? _communityStats['pendingReports'].toString()
+                      : null,
                 ),
                 Divider(height: 32),
                 _buildMenuItem(
@@ -515,11 +639,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
               isSelected: _currentPage == 'Courses',
               onTap: () => _navigateTo('Courses'),
             ),
+            // 🔄 UPDATED: Community drawer item with badge
             _buildDrawerItem(
               icon: Icons.people_outline,
               title: 'Community',
               isSelected: _currentPage == 'Community',
               onTap: () => _navigateTo('Community'),
+              badge: _communityStats['pendingReports']! > 0
+                  ? _communityStats['pendingReports'].toString()
+                  : null,
             ),
             Divider(),
             _buildDrawerItem(
@@ -535,11 +663,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // 🔄 UPDATED: Menu item with badge support
   Widget _buildMenuItem({
     required IconData icon,
     required String title,
     required bool isSelected,
     required VoidCallback onTap,
+    String? badge,
   }) {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -552,12 +682,35 @@ class _AdminDashboardState extends State<AdminDashboard> {
           icon,
           color: isSelected ? Colors.redAccent : Colors.grey[700],
         ),
-        title: Text(
-          title,
-          style: TextStyle(
-            color: isSelected ? Colors.redAccent : Colors.grey[800],
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          ),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: isSelected ? Colors.redAccent : Colors.grey[800],
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ),
+            // 🆕 NEW: Badge for notifications
+            if (badge != null)
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  badge,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+          ],
         ),
         onTap: onTap,
         shape: RoundedRectangleBorder(
@@ -567,24 +720,49 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // 🔄 UPDATED: Drawer item with badge support
   Widget _buildDrawerItem({
     required IconData icon,
     required String title,
     required bool isSelected,
     required VoidCallback onTap,
     Color? textColor,
+    String? badge,
   }) {
     return ListTile(
       leading: Icon(
         icon,
         color: textColor ?? (isSelected ? Colors.redAccent : Colors.grey[700]),
       ),
-      title: Text(
-        title,
-        style: TextStyle(
-          color: textColor ?? (isSelected ? Colors.redAccent : Colors.grey[800]),
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                color: textColor ?? (isSelected ? Colors.redAccent : Colors.grey[800]),
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+          // 🆕 NEW: Badge for notifications
+          if (badge != null)
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                badge,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+        ],
       ),
       selected: isSelected,
       selectedTileColor: Colors.redAccent.withValues(alpha: 0.1),
@@ -605,7 +783,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
       case 'Courses':
         return CourseManagementPage(organizationId: _organizationData?['code'] ?? '');
       case 'Community':
-        return CommunityManagementPage(organizationId: _organizationData?['code'] ?? '');
+      // 🔄 FIXED: Use correct class name and parameter
+        return BlocProvider.value(
+          value: context.read<CommunityBloc>(),
+          child: CommunityManagementScreen(
+            organizationCode: _organizationData?['code'] ?? '',
+          ),
+        );
       case 'Profile':
         return _buildProfileContent();
       default:
@@ -714,6 +898,66 @@ class _AdminDashboardState extends State<AdminDashboard> {
               );
             },
           ),
+
+          SizedBox(height: 32),
+
+          // 🆕 NEW: Community Management Stats Section
+          Text(
+            'Community Overview',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final crossAxisCount = constraints.maxWidth < 600 ? 1 :
+              constraints.maxWidth < 900 ? 2 : 4;
+
+              return GridView.count(
+                shrinkWrap: true,
+                physics: NeverScrollableScrollPhysics(),
+                crossAxisCount: crossAxisCount,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: constraints.maxWidth < 600 ? 2 : 1.5,
+                children: [
+                  _buildCommunityStatCard(
+                    title: 'Total Posts',
+                    value: _communityStats['totalPosts'].toString(),
+                    icon: Icons.post_add,
+                    color: Colors.indigo,
+                    onTap: () => _navigateTo('Community'),
+                  ),
+                  _buildCommunityStatCard(
+                    title: 'Total Reports',
+                    value: _communityStats['totalReports'].toString(),
+                    icon: Icons.flag,
+                    color: Colors.orange,
+                    onTap: () => _navigateTo('Community'),
+                  ),
+                  _buildCommunityStatCard(
+                    title: 'Pending Reports',
+                    value: _communityStats['pendingReports'].toString(),
+                    icon: Icons.pending_actions,
+                    color: _communityStats['pendingReports']! > 0 ? Colors.red : Colors.green,
+                    onTap: () => _navigateTo('Community'),
+                    isAlert: _communityStats['pendingReports']! > 0,
+                  ),
+                  _buildCommunityStatCard(
+                    title: 'Hidden Posts',
+                    value: _communityStats['hiddenPosts'].toString(),
+                    icon: Icons.visibility_off,
+                    color: Colors.grey,
+                    onTap: () => _navigateTo('Community'),
+                  ),
+                ],
+              );
+            },
+          ),
+
           SizedBox(height: 32),
 
           // Quick Actions
@@ -750,6 +994,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 label: MediaQuery.of(context).size.width > 400 ? 'Add Course' : 'Course',
                 onTap: () => _navigateTo('Courses'),
               ),
+              // 🆕 NEW: Community management quick action
+              _buildQuickAction(
+                icon: Icons.people_outline,
+                label: MediaQuery.of(context).size.width > 400 ? 'Manage Community' : 'Community',
+                onTap: () => _navigateTo('Community'),
+                color: _communityStats['pendingReports']! > 0 ? Colors.orange : Colors.redAccent,
+                badge: _communityStats['pendingReports']! > 0 ? _communityStats['pendingReports'].toString() : null,
+              ),
             ],
           ),
 
@@ -758,6 +1010,94 @@ class _AdminDashboardState extends State<AdminDashboard> {
           // Recent Activity
           _buildRecentActivity(),
         ],
+      ),
+    );
+  }
+
+  // 🆕 NEW: Community stat card with tap functionality
+  Widget _buildCommunityStatCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+    bool isAlert = false,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: isAlert ? Border.all(color: Colors.red, width: 2) : null,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withValues(alpha: 0.1),
+              blurRadius: 5,
+            ),
+            if (isAlert)
+              BoxShadow(
+                color: Colors.red.withValues(alpha: 0.1),
+                blurRadius: 10,
+                offset: Offset(0, 2),
+              ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon,
+                color: color,
+                size: 28,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 2),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[600],
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (isAlert) ...[
+              SizedBox(height: 4),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'ACTION REQUIRED',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1249,51 +1589,52 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ],
       ),
-      child: Expanded(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: [
-            Container(
-              padding: EdgeInsets.all(8), // Reduced from 12
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                icon,
-                color: color,
-                size: 28, // Reduced from 32
-              ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
+          Container(
+            padding: EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
             ),
-            SizedBox(height: 8), // Reduced from 16
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 28, // Reduced from 32
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-              textAlign: TextAlign.center,
+            child: Icon(
+              icon,
+              color: color,
+              size: 28,
             ),
-            SizedBox(height: 2), // Reduced from 4
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
-              ),
-              textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
             ),
-          ],
-        ),
-      )
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 2),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[600],
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
     );
   }
 
+  // 🔄 UPDATED: Quick action with badge support
   Widget _buildQuickAction({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+    Color? color,
+    String? badge,
   }) {
     return Material(
       color: Colors.transparent,
@@ -1304,7 +1645,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           decoration: BoxDecoration(
             border: Border.all(
-              color: Colors.redAccent.withValues(alpha: 0.3),
+              color: (color ?? Colors.redAccent).withValues(alpha: 0.3),
             ),
             borderRadius: BorderRadius.circular(12),
           ),
@@ -1313,17 +1654,36 @@ class _AdminDashboardState extends State<AdminDashboard> {
             children: [
               Icon(
                 icon,
-                color: Colors.redAccent,
+                color: color ?? Colors.redAccent,
                 size: 20,
               ),
               SizedBox(width: 8),
               Text(
                 label,
                 style: TextStyle(
-                  color: Colors.redAccent,
+                  color: color ?? Colors.redAccent,
                   fontWeight: FontWeight.w600,
                 ),
               ),
+              // 🆕 NEW: Badge for quick actions
+              if (badge != null) ...[
+                SizedBox(width: 8),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    badge,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

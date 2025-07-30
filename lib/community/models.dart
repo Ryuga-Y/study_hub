@@ -122,6 +122,9 @@ class Post {
   final int shareCount;
   final String? pollId;
   final bool hasPoll;
+  final bool isHidden; // 🆕 NEW: Add hidden field
+  final String? hiddenReason; // 🆕 NEW: Reason for hiding
+  final DateTime? hiddenAt; // 🆕 NEW: When it was hidden
 
   Post({
     required this.id,
@@ -147,6 +150,9 @@ class Post {
     this.shareCount = 0,
     this.pollId,
     this.hasPoll = false,
+    this.isHidden = false, // 🆕 NEW: Default to not hidden
+    this.hiddenReason,
+    this.hiddenAt,
   });
 
   factory Post.fromFirestore(DocumentSnapshot doc) {
@@ -198,6 +204,9 @@ class Post {
       shareCount: data['shareCount'] ?? 0,
       pollId: data['pollId'],
       hasPoll: data['hasPoll'] ?? false,
+      isHidden: data['isHidden'] ?? false, // 🆕 NEW
+      hiddenReason: data['hiddenReason'], // 🆕 NEW
+      hiddenAt: (data['hiddenAt'] as Timestamp?)?.toDate(), // 🆕 NEW
     );
   }
 
@@ -280,6 +289,9 @@ class Post {
       'shareCount': shareCount,
       'pollId': pollId,
       'hasPoll': hasPoll,
+      'isHidden': isHidden, // 🆕 NEW
+      'hiddenReason': hiddenReason, // 🆕 NEW
+      'hiddenAt': hiddenAt != null ? Timestamp.fromDate(hiddenAt!) : null, // 🆕 NEW
     };
   }
 
@@ -295,6 +307,9 @@ class Post {
     PostPrivacy? privacy,
     String? pollId,
     bool? hasPoll,
+    bool? isHidden, // 🆕 NEW
+    String? hiddenReason, // 🆕 NEW
+    DateTime? hiddenAt, // 🆕 NEW
   }) {
     return Post(
       id: id,
@@ -313,6 +328,9 @@ class Post {
       userReactions: userReactions ?? this.userReactions,
       isEdited: isEdited ?? this.isEdited,
       editedAt: editedAt ?? this.editedAt,
+      isHidden: isHidden ?? this.isHidden, // 🆕 NEW
+      hiddenReason: hiddenReason ?? this.hiddenReason, // 🆕 NEW
+      hiddenAt: hiddenAt ?? this.hiddenAt, // 🆕 NEW
     );
   }
 }

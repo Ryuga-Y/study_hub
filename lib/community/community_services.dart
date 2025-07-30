@@ -597,6 +597,7 @@ class CommunityService {
 
     Query query = _firestore
         .collection('posts')
+        .where('isHidden', isEqualTo: false) // 🆕 NEW: Filter out hidden posts
         .orderBy('createdAt', descending: true)
         .limit(limit);
 
@@ -614,6 +615,9 @@ class CommunityService {
       for (final doc in snapshot.docs) {
         final post = Post.fromFirestore(doc);
 
+        // Skip hidden posts (double check since we already filter in query)
+        if (post.isHidden) continue;
+
         // Get post creator's organization
         final userDoc = await _firestore.collection('users').doc(post.userId).get();
         final userOrgCode = userDoc.data()?['organizationCode'];
@@ -626,17 +630,12 @@ class CommunityService {
 
         switch (post.privacy) {
           case PostPrivacy.public:
-          // Public posts are visible to everyone in the same organization
             shouldShow = true;
             break;
-
           case PostPrivacy.friendsOnly:
-          // Friends-only posts are visible to the poster and their friends
             shouldShow = post.userId == userId || friendIds.contains(post.userId);
             break;
-
           case PostPrivacy.private:
-          // Private posts are only visible to the poster
             shouldShow = post.userId == userId;
             break;
         }
@@ -653,19 +652,38 @@ class CommunityService {
   Stream<List<Post>> getUserPosts(String userId, {int limit = 20}) {
     final currentUser = currentUserId;
 
-    return _firestore
+    // For admin users, show all posts including hidden ones
+    // For regular users, hide hidden posts unless it's their own profile
+    final shouldShowHidden = currentUser == userId; // Users can see their own hidden posts
+
+    Query query = _firestore
         .collection('posts')
         .where('userId', isEqualTo: userId)
         .orderBy('createdAt', descending: true)
-        .limit(limit)
-        .snapshots()
-        .asyncMap((snapshot) async {
+        .limit(limit);
+
+    // Only add hidden filter if not showing hidden posts
+    if (!shouldShowHidden) {
+      query = query.where('isHidden', isEqualTo: false);
+    }
+
+    return query.snapshots().asyncMap((snapshot) async {
       // Check if current user can see these posts
       final isFriend = currentUser != null ? await _areFriends(currentUser, userId) : false;
 
       final posts = <Post>[];
       for (final doc in snapshot.docs) {
         final post = Post.fromFirestore(doc);
+
+        // Skip hidden posts for non-owners (unless it's an admin viewing)
+        if (post.isHidden && currentUser != userId) {
+          final currentUserDoc = currentUser != null
+              ? await _firestore.collection('users').doc(currentUser).get()
+              : null;
+          final isAdmin = currentUserDoc?.data()?['role'] == 'admin';
+
+          if (!isAdmin) continue; // Skip hidden posts for non-admins
+        }
 
         bool shouldShow = false;
         switch (post.privacy) {
@@ -2224,6 +2242,119 @@ class CommunityService {
         .toList());
   }
 
+  // 🆕 NEW: Get hidden posts for admin review
+  Stream<List<Post>> getHiddenPosts(String organizationCode) {
+    return _firestore
+        .collection('posts')
+        .where('isHidden', isEqualTo: true)
+        .orderBy('hiddenAt', descending: true)
+        .snapshots()
+        .asyncMap((snapshot) async {
+      final List<Post> hiddenPosts = [];
+
+      for (final doc in snapshot.docs) {
+        final post = Post.fromFirestore(doc);
+
+        // Get post creator's organization
+        final userDoc = await _firestore.collection('users').doc(post.userId).get();
+        final userOrgCode = userDoc.data()?['organizationCode'];
+
+        // Only include posts from the same organization
+        if (userOrgCode == organizationCode) {
+          hiddenPosts.add(post);
+        }
+      }
+
+      return hiddenPosts;
+    });
+  }
+
+  // 🆕 NEW: Hide post method
+  Future<void> hidePost(String postId, String reason) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Verify admin status
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (userDoc.data()?['role'] != 'admin') {
+        throw Exception('Unauthorized: Admin access required');
+      }
+
+      // Get post data before hiding
+      final postDoc = await _firestore.collection('posts').doc(postId).get();
+      if (!postDoc.exists) throw Exception('Post not found');
+
+      final postData = postDoc.data()!;
+      final postOwnerId = postData['userId'];
+
+      // Hide the post (don't delete it)
+      await _firestore.collection('posts').doc(postId).update({
+        'isHidden': true,
+        'hiddenReason': reason,
+        'hiddenAt': FieldValue.serverTimestamp(),
+        'hiddenBy': userId,
+      });
+
+      // Create hiding log
+      await _firestore.collection('postHidingLogs').add({
+        'postId': postId,
+        'postData': postData,
+        'hiddenBy': userId,
+        'hiddenByName': userDoc.data()?['fullName'] ?? 'Admin',
+        'reason': reason,
+        'hiddenAt': FieldValue.serverTimestamp(),
+        'action': 'hidden', // vs 'deleted' for adminDeletePost
+      });
+
+      // Notify post owner
+      await _createNotification(
+        userId: postOwnerId,
+        type: NotificationType.general,
+        title: 'Post Hidden',
+        message: 'Your post was hidden by an administrator due to an invalid report.',
+        actionUserId: userId,
+        data: {'reason': reason, 'action': 'hidden'},
+      );
+
+      print('✅ Post hidden successfully: $postId');
+
+    } catch (e) {
+      print('❌ Error hiding post: $e');
+      throw Exception('Failed to hide post: $e');
+    }
+  }
+
+  // 🆕 NEW: Unhide post method (for admin use)
+  Future<void> unhidePost(String postId) async {
+    try {
+      final userId = currentUserId;
+      if (userId == null) throw Exception('User not authenticated');
+
+      // Verify admin status
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (userDoc.data()?['role'] != 'admin') {
+        throw Exception('Unauthorized: Admin access required');
+      }
+
+      // Unhide the post
+      await _firestore.collection('posts').doc(postId).update({
+        'isHidden': false,
+        'hiddenReason': FieldValue.delete(),
+        'hiddenAt': FieldValue.delete(),
+        'hiddenBy': FieldValue.delete(),
+        'unhiddenAt': FieldValue.serverTimestamp(),
+        'unhiddenBy': userId,
+      });
+
+      print('✅ Post unhidden successfully: $postId');
+
+    } catch (e) {
+      print('❌ Error unhiding post: $e');
+      throw Exception('Failed to unhide post: $e');
+    }
+  }
+
   Future<void> reviewReport({
     required String reportId,
     required String postId,
@@ -2247,11 +2378,19 @@ class CommunityService {
         'adminNotes': adminNotes,
       });
 
-      // If valid, delete the post
+      // 🔄 UPDATED: Handle both valid and invalid reports
       if (isValid) {
+        // Valid report: Delete the post (existing behavior)
         await adminDeletePost(postId, 'Violated community guidelines: $adminNotes');
+      } else {
+        // 🆕 NEW: Invalid report: Hide the post
+        await hidePost(postId, 'Post hidden due to invalid report: $adminNotes');
       }
+
+      print('✅ Report reviewed successfully: $reportId (${isValid ? 'valid' : 'invalid'})');
+
     } catch (e) {
+      print('❌ Error reviewing report: $e');
       throw Exception('Failed to review report: $e');
     }
   }
