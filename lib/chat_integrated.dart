@@ -22,6 +22,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_hub/translation_service%20.dart';
+import 'TranslationScreen.dart';
 
 // Chat Models
 class ChatContact {
@@ -1977,6 +1979,19 @@ class _ChatScreenState extends State<ChatScreen> {
                 Future.delayed(Duration(milliseconds: 200), () {
                   _replyToMessage(message);
                 });
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.translate, color: Colors.green),
+              title: Text('Translate'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => TranslationScreen(initialText: message.text),
+                  ),
+                );
               },
             ),
             ListTile(

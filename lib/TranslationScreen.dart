@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:study_hub/translation_service%20.dart';
 
-
 class TranslationScreen extends StatefulWidget {
+  final String? initialText;
+
+  const TranslationScreen({Key? key, this.initialText}) : super(key: key);
+
   @override
   _TranslationScreenState createState() => _TranslationScreenState();
 }
@@ -19,6 +22,15 @@ class _TranslationScreenState extends State<TranslationScreen> {
     'Spanish', 'French', 'German', 'Italian',
     'Portuguese', 'Chinese', 'Japanese', 'Korean'
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-fill the text field if initialText is provided
+    if (widget.initialText != null && widget.initialText!.isNotEmpty) {
+      _textController.text = widget.initialText!;
+    }
+  }
 
   Future<void> _translateText() async {
     if (_textController.text.isEmpty) return;

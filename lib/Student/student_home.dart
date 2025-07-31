@@ -1028,12 +1028,11 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => TranslationScreen(),
+                    builder: (context) => TranslationScreen(initialText: null),
                   ),
                 );
               },
             ),
-
 
             const Divider(),
             ListTile(
