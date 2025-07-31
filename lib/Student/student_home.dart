@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'dart:async'; // Add Timer import
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
+import '../TranslationScreen.dart';
 import '../community/bloc.dart';
 import '../community/feed_screen.dart';
 import '../community/models.dart';
@@ -583,6 +584,7 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
     );
   }
 
+
   void _navigateToGoalSystem() async {
     // Check if user is a student before allowing access
     final isStudent = await _goalService.isCurrentUserStudent();
@@ -1017,6 +1019,21 @@ class _StudentHomePageState extends State<StudentHomePage> with WidgetsBindingOb
                 _navigateToReport(); // Navigate to report page
               },
             ),
+
+            ListTile(
+              leading: const Icon(Icons.translate),
+              title: const Text('Translate'),
+              onTap: () {
+                Navigator.pop(context); // Close the drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => TranslationScreen(),
+                  ),
+                );
+              },
+            ),
+
 
             const Divider(),
             ListTile(

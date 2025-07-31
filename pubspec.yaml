@@ -41,6 +41,8 @@ dependencies:
   printing: ^5.14.0
   open_file: ^3.5.10
   android_intent_plus: ^5.3.0
+  google_generative_ai: ^0.4.3
+  flutter_dotenv: ^5.1.0
 
 
 dev_dependencies:
