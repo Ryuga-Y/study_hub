@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:study_hub/Student/student_quiz.dart';
 import 'package:study_hub/Student/student_tutorial.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -8,6 +9,10 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:async';
 import '../Authentication/auth_services.dart';
 import '../Authentication/custom_widgets.dart';
+import '../community/bloc.dart';
+import '../community/feed_screen.dart';
+import '../community/models.dart';
+import '../profile_page.dart';
 import 'student_assignment_details.dart';
 import '../goal_progress_service.dart';
 import '../Stu_goal.dart';
@@ -385,7 +390,7 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         'description': '$type deadline',
         'startTime': Timestamp.fromDate(startTime),
         'endTime': Timestamp.fromDate(endTime),
-        'color': type == 'assignment' ? Colors.red.value : Colors.red.value,
+        'color': type == 'assignment' ? Colors.red.toARGB32() : Colors.red.toARGB32(),
         'calendar': type == 'assignment' ? 'assignments' : 'tutorials',
         'eventType': 0, // EventType.normal
         'recurrenceType': 0, // RecurrenceType.none
@@ -2857,7 +2862,8 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
             Navigator.pop(context);
             break;
           case 1:
-          // TODO: Navigate to community
+          // Navigate to community
+            _navigateToCommunity();
             break;
           case 2:
           // Navigate to chat
@@ -2866,7 +2872,12 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
               MaterialPageRoute(
                 builder: (context) => ChatContactPage(),
               ),
-            );
+            ).then((_) {
+              // Reset bottom navigation to Courses tab when returning from chat
+              setState(() {
+                _currentIndex = 0;
+              });
+            });
             break;
           case 3:
           // Navigate to Goal System (flower page)
@@ -2875,10 +2886,24 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
               MaterialPageRoute(
                 builder: (context) => StuGoal(),
               ),
-            );
+            ).then((_) {
+              // Reset bottom navigation to Courses tab when returning from goals
+              setState(() {
+                _currentIndex = 0;
+              });
+            });
             break;
           case 4:
-          // TODO: Navigate to profile
+          // Navigate to profile
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => ProfilePage()),
+            ).then((_) {
+              // Reset bottom navigation to Courses tab when returning from profile
+              setState(() {
+                _currentIndex = 0;
+              });
+            });
             break;
         }
       },
@@ -2908,6 +2933,121 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
         ),
       ],
     );
+  }
+
+  Future<void> _navigateToCommunity() async {
+    try {
+      final organizationCode = _organizationCode ?? '';
+      if (organizationCode.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Organization code not found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Get current user data
+      final user = _authService.currentUser;
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('User not authenticated'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final userData = await _authService.getUserData(user.uid);
+      if (userData == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('User data not found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Create community user object
+      final communityUser = CommunityUser(
+        uid: user.uid,
+        fullName: userData['fullName'] ?? 'Unknown',
+        email: userData['email'] ?? '',
+        avatarUrl: userData['avatarUrl'],
+        bio: userData['bio'],
+        organizationCode: userData['organizationCode'] ?? '',
+        role: userData['role'] ?? 'student',
+        postCount: userData['postCount'] ?? 0,
+        friendCount: userData['friendCount'] ?? 0,
+        joinDate: userData['createdAt'] != null
+            ? (userData['createdAt'] as Timestamp).toDate()
+            : DateTime.now(),
+        isActive: userData['isActive'] ?? true,
+      );
+
+      // Get or create CommunityBloc
+      CommunityBloc communityBloc;
+      try {
+        // Try to get existing bloc
+        communityBloc = BlocProvider.of<CommunityBloc>(context);
+      } catch (e) {
+        // If no bloc exists, create a new one
+        communityBloc = CommunityBloc();
+      }
+
+      // Initialize the bloc with user profile
+      communityBloc.add(LoadUserProfile(communityUser.uid));
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      // Navigate to community feed
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => BlocProvider.value(
+            value: communityBloc,
+            child: FeedScreen(
+              organizationCode: organizationCode,
+            ),
+          ),
+        ),
+      ).then((_) {
+        // Reset bottom navigation to Courses tab when returning from community
+        setState(() {
+          _currentIndex = 0;
+        });
+      });
+    } catch (e) {
+      // Close loading dialog if open
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error accessing community: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+
+      // Reset navigation index on error as well
+      setState(() {
+        _currentIndex = 0;
+      });
+    }
   }
 
   // Utility methods

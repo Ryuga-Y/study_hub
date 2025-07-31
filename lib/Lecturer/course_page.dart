@@ -8,6 +8,7 @@ import '../community/bloc.dart';
 import '../community/feed_screen.dart';
 import '../community/models.dart';
 import '../profile_page.dart';
+import '../chat_integrated.dart'; // ✅ ADD THIS IMPORT
 import 'create_assignment.dart';
 import 'assignment_details.dart';
 import 'create_material.dart';
@@ -1960,13 +1961,16 @@ class _CoursePageState extends State<CoursePage> with TickerProviderStateMixin {
             _navigateToCommunity();
             break;
           case 2:
-          // Navigate to chat (TODO)
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Chat feature coming soon'),
-                backgroundColor: Colors.orange,
-              ),
-            );
+          // ✅ UPDATED: Navigate to chat
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => ChatContactPage()),
+            ).then((_) {
+              // Reset bottom navigation to Courses tab when returning from chat
+              setState(() {
+                _currentIndex = 0;
+              });
+            });
             break;
           case 3:
           // Navigate to profile
