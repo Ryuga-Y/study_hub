@@ -8,6 +8,7 @@ import '../Student/student_course.dart';
 import '../Student/student_submit_view.dart';
 import '../Student/student_tutorial.dart';
 import '../Student/calendar.dart';
+import '../Student/student_quiz.dart';
 import 'Stu_goal.dart';
 import 'set_goal.dart';
 
@@ -1170,6 +1171,7 @@ class NotificationService {
 enum NotificationType {
   assignment,
   tutorial,
+  quiz,              // ADD THIS LINE
   goal,
   reminder,
   announcement,
@@ -1243,6 +1245,8 @@ class NotificationModel {
         return NotificationType.assignment;
       case 'tutorial':
         return NotificationType.tutorial;
+      case 'quiz':                        // ADD THIS CASE
+        return NotificationType.quiz;
       case 'goal':
         return NotificationType.goal;
       case 'announcement':
@@ -1287,6 +1291,8 @@ class NotificationModel {
         return Icons.assignment;
       case NotificationType.tutorial:
         return Icons.book;
+      case NotificationType.quiz:           // ADD THIS CASE
+        return Icons.psychology;
       case NotificationType.goal:
         return Icons.flag;
       case NotificationType.announcement:
@@ -1338,8 +1344,10 @@ class _NotificationDialogState extends State<NotificationDialog> {
   }
 
   // AFTER: Replace the entire _navigateToSource method in notification.dart
-  Future<void> _navigateToSource(BuildContext context, NotificationModel notification) async {
-    print('🔍 Navigating to: ${notification.sourceType} - ${notification.title}');
+  Future<void> _navigateToSource(BuildContext context,
+      NotificationModel notification) async {
+    print(
+        '🔍 Navigating to: ${notification.sourceType} - ${notification.title}');
 
     // Mark as read
     if (!notification.isRead) {
@@ -1347,7 +1355,8 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
 
     // Get organization code
-    String? orgCode = notification.organizationCode ?? _notificationService.userOrgCode;
+    String? orgCode = notification.organizationCode ??
+        _notificationService.userOrgCode;
     if (orgCode == null) {
       _showNavigationError(context, 'Organization code missing');
       return;
@@ -1357,23 +1366,60 @@ class _NotificationDialogState extends State<NotificationDialog> {
     Navigator.pop(context);
 
     // Get the main app context for error messages
-    final scaffoldContext = Navigator.of(context, rootNavigator: true).context;
+    final scaffoldContext = Navigator
+        .of(context, rootNavigator: true)
+        .context;
 
     try {
       // FIXED: Handle different notification types more specifically
 
       // 1. Handle "New Material" or "New Tutorial" notifications specifically
+      // 1. Handle "New Material" or "New Tutorial" notifications specifically
       if (notification.title.toLowerCase().contains('new material') ||
           notification.title.toLowerCase().contains('new tutorial')) {
-        print('🔍 Detected new material/tutorial notification');
-        await _navigateToTutorialDirectly(scaffoldContext, notification, orgCode);
-        return;
+        print('🔍 Detected new material notification');
+
+        // Check if it's actually a quiz by looking at the sourceType or getting material data
+        if (notification.sourceType == 'quiz') {
+          print('🔍 New material is actually a quiz');
+          await _navigateToQuiz(scaffoldContext, notification, orgCode);
+          return;
+        } else {
+          // Check material type from Firestore if sourceType is not available
+          try {
+            final materialDoc = await FirebaseFirestore.instance
+                .collection('organizations')
+                .doc(orgCode)
+                .collection('courses')
+                .doc(notification.courseId!)
+                .collection('materials')
+                .doc(notification.sourceId!)
+                .get();
+
+            if (materialDoc.exists) {
+              final materialData = materialDoc.data()!;
+              if (materialData['materialType'] == 'quiz') {
+                print('🔍 Confirmed: New material is a quiz');
+                await _navigateToQuiz(scaffoldContext, notification, orgCode);
+                return;
+              }
+            }
+          } catch (e) {
+            print('❌ Error checking material type: $e');
+          }
+
+          // Default to tutorial navigation
+          await _navigateToTutorialDirectly(
+              scaffoldContext, notification, orgCode);
+          return;
+        }
       }
 
       // 2. Handle assignment due notifications
       if (notification.title.toLowerCase().contains('assignment due')) {
         print('🔍 Detected assignment due notification');
-        await _navigateToAssignmentWithStatusCheck(scaffoldContext, notification, orgCode);
+        await _navigateToAssignmentWithStatusCheck(
+            scaffoldContext, notification, orgCode);
         return;
       }
 
@@ -1385,53 +1431,69 @@ class _NotificationDialogState extends State<NotificationDialog> {
         return;
       }
 
-// 4. Handle based on notification type
       switch (notification.type) {
         case NotificationType.assignment:
-          await _navigateToAssignmentWithStatusCheck(scaffoldContext, notification, orgCode);
+          await _navigateToAssignmentWithStatusCheck(
+              scaffoldContext, notification, orgCode);
           break;
 
         case NotificationType.tutorial:
-          await _navigateToTutorialDirectly(scaffoldContext, notification, orgCode);
+          await _navigateToTutorialDirectly(
+              scaffoldContext, notification, orgCode);
+          break;
+
+        case NotificationType.quiz:                    // ADD THIS CASE
+          await _navigateToQuiz(scaffoldContext, notification, orgCode);
           break;
 
         case NotificationType.learning:
-          await _navigateToLearningMaterial(scaffoldContext, notification, orgCode);
+          await _navigateToLearningMaterial(
+              scaffoldContext, notification, orgCode);
           break;
 
         case NotificationType.reminder:
-          await _handleReminderNavigation(scaffoldContext, notification, orgCode);
+          await _handleReminderNavigation(
+              scaffoldContext, notification, orgCode);
           break;
 
         case NotificationType.goal:
         case NotificationType.milestone:
         case NotificationType.achievement:
-// Handle goal-related notifications (tree rewards, milestones, level-ups)
           await _navigateToGoalPage(scaffoldContext, notification);
           break;
 
         default:
         // Handle based on sourceType as fallback
-          if (notification.sourceType == 'assignment' && notification.sourceId != null) {
-            await _navigateToAssignmentWithStatusCheck(scaffoldContext, notification, orgCode);
-          } else if (notification.sourceType == 'tutorial' && notification.sourceId != null) {
-            await _navigateToTutorialDirectly(scaffoldContext, notification, orgCode);
-          } else if (notification.sourceType == 'learning' && notification.sourceId != null) {
-            await _navigateToLearningMaterial(scaffoldContext, notification, orgCode);
+          if (notification.sourceType == 'assignment' &&
+              notification.sourceId != null) {
+            await _navigateToAssignmentWithStatusCheck(
+                scaffoldContext, notification, orgCode);
+          } else if (notification.sourceType == 'tutorial' &&
+              notification.sourceId != null) {
+            await _navigateToTutorialDirectly(
+                scaffoldContext, notification, orgCode);
+          } else if (notification.sourceType == 'learning' &&
+              notification.sourceId != null) {
+            await _navigateToLearningMaterial(
+                scaffoldContext, notification, orgCode);
+          } else if (notification.sourceType == 'quiz' &&
+              notification.sourceId != null) {
+            await _navigateToQuiz(scaffoldContext, notification, orgCode);
           } else if (notification.sourceType == 'goal' ||
 
-      notification.sourceType == 'tree_goal' ||
-      notification.title.toLowerCase().contains('halfway') ||
-      notification.title.toLowerCase().contains('level up') ||
-      notification.title.toLowerCase().contains('congratulations') ||
-      notification.title.toLowerCase().contains('tree') ||
-      notification.title.toLowerCase().contains('milestone') ||
-      notification.title.toLowerCase().contains('achievement')) {
-      // Handle tree/goal notifications that might not have the correct type
-      await _navigateToGoalPage(scaffoldContext, notification);
-      } else {
-      _showNavigationError(scaffoldContext, 'Cannot open this notification type');
-      }
+              notification.sourceType == 'tree_goal' ||
+              notification.title.toLowerCase().contains('halfway') ||
+              notification.title.toLowerCase().contains('level up') ||
+              notification.title.toLowerCase().contains('congratulations') ||
+              notification.title.toLowerCase().contains('tree') ||
+              notification.title.toLowerCase().contains('milestone') ||
+              notification.title.toLowerCase().contains('achievement')) {
+            // Handle tree/goal notifications that might not have the correct type
+            await _navigateToGoalPage(scaffoldContext, notification);
+          } else {
+            _showNavigationError(
+                scaffoldContext, 'Cannot open this notification type');
+          }
       }
     } catch (e) {
       print('❌ Navigation error: $e');
@@ -1440,14 +1502,16 @@ class _NotificationDialogState extends State<NotificationDialog> {
   }
 
   // Navigate to course page with tutorial modal
-  Future<void> _navigateToTutorialDirectly(BuildContext context, NotificationModel notification, String orgCode) async {
+  Future<void> _navigateToTutorialDirectly(BuildContext context,
+      NotificationModel notification, String orgCode) async {
     try {
       print('🔍 Direct tutorial navigation for: ${notification.sourceId}');
 
       // Find course ID if missing
       String? courseId = notification.courseId;
       if (courseId == null && notification.sourceId != null) {
-        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'tutorial');
+        courseId = await _notificationService.findCourseIdFromContent(
+            orgCode, notification.sourceId!, 'tutorial');
       }
 
       if (courseId == null) {
@@ -1474,15 +1538,18 @@ class _NotificationDialogState extends State<NotificationDialog> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => StudentCoursePage(
-            courseId: courseId!,
-            courseData: courseData,
-            highlightMaterialId: notification.sourceId, // This passes the tutorial ID
-          ),
+          builder: (context) =>
+              StudentCoursePage(
+                courseId: courseId!,
+                courseData: courseData,
+                highlightMaterialId: notification
+                    .sourceId, // This passes the tutorial ID
+              ),
         ),
       );
 
-      print('✅ Successfully navigated to course page with tutorial highlighted');
+      print(
+          '✅ Successfully navigated to course page with tutorial highlighted');
     } catch (e) {
       print('❌ Error in direct tutorial navigation: $e');
       _showNavigationError(context, 'Failed to load tutorial: $e');
@@ -1490,7 +1557,8 @@ class _NotificationDialogState extends State<NotificationDialog> {
   }
 
   // Add this new method for navigating to calendar events
-  Future<void> _navigateToCalendarEvent(BuildContext context, NotificationModel notification, String orgCode) async {
+  Future<void> _navigateToCalendarEvent(BuildContext context,
+      NotificationModel notification, String orgCode) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
@@ -1517,26 +1585,29 @@ class _NotificationDialogState extends State<NotificationDialog> {
       final eventDateTime = (eventData['startTime'] as Timestamp).toDate();
 
       // Create CalendarEvent object for the event details
-      final calendarEvent = CalendarEvent.fromMap(notification.eventId!, eventData);
+      final calendarEvent = CalendarEvent.fromMap(
+          notification.eventId!, eventData);
 
       // Navigate to calendar page with the specific date selected
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => CalendarPage(
-            selectedDate: eventDateTime,
-            autoShowEventId: notification.eventId, // Pass the event ID to auto-show
-          ),
+          builder: (context) =>
+              CalendarPage(
+                selectedDate: eventDateTime,
+                autoShowEventId: notification
+                    .eventId, // Pass the event ID to auto-show
+              ),
         ),
       );
-
     } catch (e) {
       _showNavigationError(context, 'Failed to navigate to calendar event: $e');
     }
   }
 
   // NEW: Navigate to goal page for tree rewards and milestones
-  Future<void> _navigateToGoalPage(BuildContext context, NotificationModel notification) async {
+  Future<void> _navigateToGoalPage(BuildContext context,
+      NotificationModel notification) async {
     try {
       print('🌳 Navigating to goal page for: ${notification.title}');
 
@@ -1559,7 +1630,8 @@ class _NotificationDialogState extends State<NotificationDialog> {
   }
 
   // Navigate to Set Goals page for goal management notifications
-  Future<void> _navigateToSetGoalsPage(BuildContext context, NotificationModel notification) async {
+  Future<void> _navigateToSetGoalsPage(BuildContext context,
+      NotificationModel notification) async {
     try {
       print('🎯 Navigating to Set Goals page for: ${notification.title}');
 
@@ -1582,7 +1654,8 @@ class _NotificationDialogState extends State<NotificationDialog> {
   }
 
   // NEW: Handle reminder notifications
-  Future<void> _handleReminderNavigation(BuildContext context, NotificationModel notification, String orgCode) async {
+  Future<void> _handleReminderNavigation(BuildContext context,
+      NotificationModel notification, String orgCode) async {
     try {
       if (notification.eventId != null) {
         // Check if it's a personal calendar event (no sourceType or sourceId)
@@ -1592,7 +1665,8 @@ class _NotificationDialogState extends State<NotificationDialog> {
         }
 
         // Handle assignment/tutorial reminders
-        final courseId = await _notificationService.findCourseIdFromEventId(orgCode, notification.eventId!);
+        final courseId = await _notificationService.findCourseIdFromEventId(
+            orgCode, notification.eventId!);
         if (courseId != null && notification.sourceId != null) {
           final updatedNotification = NotificationModel(
             id: notification.id,
@@ -1610,9 +1684,11 @@ class _NotificationDialogState extends State<NotificationDialog> {
           );
 
           if (notification.sourceType == 'assignment') {
-            await _navigateToAssignmentWithStatusCheck(context, updatedNotification, orgCode);
+            await _navigateToAssignmentWithStatusCheck(
+                context, updatedNotification, orgCode);
           } else if (notification.sourceType == 'tutorial') {
-            await _navigateToTutorialDirectly(context, updatedNotification, orgCode);
+            await _navigateToTutorialDirectly(
+                context, updatedNotification, orgCode);
           }
         } else {
           _showNavigationError(context, 'Cannot find related content');
@@ -1625,7 +1701,8 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
-  Future<void> _navigateToAssignmentWithStatusCheck(BuildContext context, NotificationModel notification, String orgCode) async {
+  Future<void> _navigateToAssignmentWithStatusCheck(BuildContext context,
+      NotificationModel notification, String orgCode) async {
     try {
       if (!mounted) return;
 
@@ -1633,10 +1710,12 @@ class _NotificationDialogState extends State<NotificationDialog> {
       String? courseId = notification.courseId;
       if (courseId == null) {
         if (notification.sourceId != null) {
-          courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'assignment');
+          courseId = await _notificationService.findCourseIdFromContent(
+              orgCode, notification.sourceId!, 'assignment');
         }
         if (courseId == null && notification.eventId != null) {
-          courseId = await _notificationService.findCourseIdFromEventId(orgCode, notification.eventId!);
+          courseId = await _notificationService.findCourseIdFromEventId(
+              orgCode, notification.eventId!);
         }
         if (courseId == null) {
           _showNavigationError(context, 'Assignment not found');
@@ -1694,7 +1773,8 @@ class _NotificationDialogState extends State<NotificationDialog> {
           });
 
           final submission = sortedDocs.first.data();
-          isCompleted = submission['grade'] != null; // Check if graded (completed)
+          isCompleted =
+              submission['grade'] != null; // Check if graded (completed)
         }
 
         if (isCompleted) {
@@ -1709,17 +1789,21 @@ class _NotificationDialogState extends State<NotificationDialog> {
               .get();
 
           if (assignmentDoc.exists && mounted) {
-            final assignmentData = {'id': assignmentDoc.id, ...assignmentDoc.data()!};
+            final assignmentData = {
+              'id': assignmentDoc.id,
+              ...assignmentDoc.data()!
+            };
 
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => StudentSubmissionView(
-                  courseId: courseId!,
-                  assignmentId: assignmentId!,
-                  assignmentData: assignmentData,
-                  organizationCode: orgCode,
-                ),
+                builder: (context) =>
+                    StudentSubmissionView(
+                      courseId: courseId!,
+                      assignmentId: assignmentId!,
+                      assignmentData: assignmentData,
+                      organizationCode: orgCode,
+                    ),
               ),
             );
             return;
@@ -1736,12 +1820,14 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
-  Future<void> _navigateToAssignment(BuildContext context, NotificationModel notification, String orgCode) async {
+  Future<void> _navigateToAssignment(BuildContext context,
+      NotificationModel notification, String orgCode) async {
     try {
       // Find course ID if missing
       String? courseId = notification.courseId;
       if (courseId == null) {
-        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'assignment');
+        courseId = await _notificationService.findCourseIdFromContent(
+            orgCode, notification.sourceId!, 'assignment');
         if (courseId == null) {
           _showNavigationError(context, 'Assignment not found');
           return;
@@ -1796,12 +1882,13 @@ class _NotificationDialogState extends State<NotificationDialog> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => StudentSubmissionView(
-                  courseId: courseId!,
-                  assignmentId: notification.sourceId!,
-                  assignmentData: assignmentData,
-                  organizationCode: orgCode,
-                ),
+                builder: (context) =>
+                    StudentSubmissionView(
+                      courseId: courseId!,
+                      assignmentId: notification.sourceId!,
+                      assignmentData: assignmentData,
+                      organizationCode: orgCode,
+                    ),
               ),
             );
             return;
@@ -1813,12 +1900,13 @@ class _NotificationDialogState extends State<NotificationDialog> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => StudentAssignmentDetailsPage(
-            assignment: assignmentData,
-            courseId: courseId!,
-            courseData: courseData,
-            organizationCode: orgCode,
-          ),
+          builder: (context) =>
+              StudentAssignmentDetailsPage(
+                assignment: assignmentData,
+                courseId: courseId!,
+                courseData: courseData,
+                organizationCode: orgCode,
+              ),
         ),
       );
     } catch (e) {
@@ -1826,12 +1914,14 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
-  Future<void> _navigateToLearningMaterial(BuildContext context, NotificationModel notification, String orgCode) async {
+  Future<void> _navigateToLearningMaterial(BuildContext context,
+      NotificationModel notification, String orgCode) async {
     try {
       // Find course ID if missing
       String? courseId = notification.courseId;
       if (courseId == null) {
-        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'learning');
+        courseId = await _notificationService.findCourseIdFromContent(
+            orgCode, notification.sourceId!, 'learning');
         if (courseId == null) {
           _showNavigationError(context, 'Learning material not found');
           return;
@@ -1857,10 +1947,11 @@ class _NotificationDialogState extends State<NotificationDialog> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => StudentCoursePage(
-            courseId: courseId!,
-            courseData: courseData,
-          ),
+          builder: (context) =>
+              StudentCoursePage(
+                courseId: courseId!,
+                courseData: courseData,
+              ),
         ),
       );
     } catch (e) {
@@ -1868,12 +1959,14 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
-  Future<void> _navigateToTutorial(BuildContext context, NotificationModel notification, String orgCode) async {
+  Future<void> _navigateToTutorial(BuildContext context,
+      NotificationModel notification, String orgCode) async {
     try {
       // Find course ID if missing
       String? courseId = notification.courseId;
       if (courseId == null) {
-        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'tutorial');
+        courseId = await _notificationService.findCourseIdFromContent(
+            orgCode, notification.sourceId!, 'tutorial');
         if (courseId == null) {
           _showNavigationError(context, 'Tutorial not found');
           return;
@@ -1903,12 +1996,13 @@ class _NotificationDialogState extends State<NotificationDialog> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => StudentTutorialSubmissionView(
-              courseId: courseId!,
-              materialId: notification.sourceId!,
-              materialData: materialData,
-              organizationCode: orgCode,
-            ),
+            builder: (context) =>
+                StudentTutorialSubmissionView(
+                  courseId: courseId!,
+                  materialId: notification.sourceId!,
+                  materialData: materialData,
+                  organizationCode: orgCode,
+                ),
           ),
         );
       } else {
@@ -1930,11 +2024,12 @@ class _NotificationDialogState extends State<NotificationDialog> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => StudentCoursePage(
-              courseId: courseId!,
-              courseData: courseData,
-              highlightMaterialId: notification.sourceId,
-            ),
+            builder: (context) =>
+                StudentCoursePage(
+                  courseId: courseId!,
+                  courseData: courseData,
+                  highlightMaterialId: notification.sourceId,
+                ),
           ),
         );
       }
@@ -1943,8 +2038,61 @@ class _NotificationDialogState extends State<NotificationDialog> {
     }
   }
 
-  // FIXED _showNavigationError method with mounted check
-  void _showNavigationError(BuildContext context, String message) {
+// NEW: Navigate to quiz
+  Future<void> _navigateToQuiz(BuildContext context, NotificationModel notification, String orgCode) async {
+    try {
+      print('🎯 Navigating to quiz: ${notification.sourceId}');
+
+      // Find course ID if missing
+      String? courseId = notification.courseId;
+      if (courseId == null && notification.sourceId != null) {
+        courseId = await _notificationService.findCourseIdFromContent(orgCode, notification.sourceId!, 'quiz');
+      }
+
+      if (courseId == null) {
+        _showNavigationError(context, 'Quiz not found');
+        return;
+      }
+
+      // Load quiz material data
+      final materialDoc = await FirebaseFirestore.instance
+          .collection('organizations')
+          .doc(orgCode)
+          .collection('courses')
+          .doc(courseId)
+          .collection('materials')
+          .doc(notification.sourceId!)
+          .get();
+
+      if (!materialDoc.exists) {
+        _showNavigationError(context, 'Quiz not found');
+        return;
+      }
+
+      final quizData = {'id': materialDoc.id, ...materialDoc.data()!};
+
+      // Navigate directly to quiz submission page
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StudentQuizSubmissionPage(
+            courseId: courseId!,
+            quizId: notification.sourceId!,
+            quizData: quizData,
+            organizationCode: orgCode,
+          ),
+        ),
+      );
+
+      print('✅ Successfully navigated to quiz');
+    } catch (e) {
+      print('❌ Error navigating to quiz: $e');
+      _showNavigationError(context, 'Failed to load quiz: $e');
+    }
+  }
+
+// FIXED _showNavigationError method with mounted check
+void _showNavigationError(BuildContext context, String message) {
     // Check if the widgets is still mounted and context is valid
     if (!mounted) return;
 

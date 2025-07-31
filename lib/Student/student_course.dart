@@ -237,14 +237,17 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
           // Check if this is a new tutorial (not initial load)
           final isNew = materials.where((m) => m['id'] == materialId).isEmpty;
 
-          if (isNew && materialData['materialType'] == 'tutorial') {
-            // Show notification for new tutorial
-            _showNewItemNotification('tutorial', materialData['title'] ?? 'Tutorial');
+          if (isNew && (materialData['materialType'] == 'tutorial' || materialData['materialType'] == 'quiz')) {
+            final itemType = materialData['materialType'] == 'quiz' ? 'quiz' : 'tutorial';
+            final itemTitle = materialData['title'] ?? (materialData['materialType'] == 'quiz' ? 'Quiz' : 'Tutorial');
+
+            // Show notification for new tutorial/quiz
+            _showNewItemNotification(itemType, itemTitle);
 
             // ✅ ENHANCED: Create notification with complete navigation data
             await _createEnhancedFirestoreNotification(
-              type: 'tutorial',
-              title: materialData['title'] ?? 'Tutorial',
+              type: itemType,
+              title: itemTitle,
               sourceId: materialId,
               courseId: widget.courseId,
               courseName: widget.courseData['title'] ?? widget.courseData['name'] ?? 'Course',
@@ -312,7 +315,9 @@ class _StudentCoursePageState extends State<StudentCoursePage> with TickerProvid
 
         // Create comprehensive notification data
         final notificationData = {
-          'title': type == 'assignment' ? '📝 New Assignment Posted' : '📚 New Tutorial Posted',
+          'title': type == 'assignment' ? '📝 New Assignment: $title' :
+          type == 'tutorial' ? '📚 New Tutorial: $title' :
+          type == 'quiz' ? '🧠 New Quiz: $title' : '📖 New Material: $title',
           'body': '$title has been posted in $courseName',
           'type': 'NotificationType.$type',
           'sourceId': sourceId,
