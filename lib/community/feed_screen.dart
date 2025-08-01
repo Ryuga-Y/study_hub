@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -8,6 +9,7 @@ import 'package:study_hub/community/post_card.dart';
 import '../community/bloc.dart';
 import '../community/models.dart';
 import '../Authentication/auth_services.dart';
+import 'AI_Content.dart';
 import 'edit_dialogs.dart';
 import 'media_picker.dart';
 import 'profile_screen.dart';
@@ -697,6 +699,7 @@ class _CreatePostModalState extends State<CreatePostModal> {
 
   @override
   void dispose() {
+    _moderationDebounce?.cancel();
     _captionController.dispose();
     _pollQuestionController.dispose();
     _scrollController.dispose();
@@ -732,6 +735,11 @@ class _CreatePostModalState extends State<CreatePostModal> {
   }
 
   bool _canCreate() {
+    // Block if there's any moderation warning/block
+    if (_contentWarning != null) {
+      return false;
+    }
+
     // Check if we have media or poll with valid data
     bool hasMedia = _selectedMedia.isNotEmpty;
     bool hasValidPoll = false;
@@ -747,7 +755,21 @@ class _CreatePostModalState extends State<CreatePostModal> {
     return hasMedia || hasValidPoll;
   }
 
-  void _createPost(CommunityState state) {
+  void _createPost(CommunityState state) async {
+    // Final moderation check before creating post
+    if (_captionController.text.isNotEmpty) {
+      final moderationResult = await PerspectiveModerationService.shouldModerateContent(_captionController.text);
+      if (moderationResult.type == ModerationActionType.block) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Cannot post: ${moderationResult.reason}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
     // Determine if we have a valid poll
     bool hasValidPoll = false;
     List<String>? validOptions;
@@ -952,7 +974,7 @@ class _CreatePostModalState extends State<CreatePostModal> {
 
                       SizedBox(height: 16),
 
-                      // Caption
+                      // Caption input
                       TextField(
                         controller: _captionController,
                         maxLines: 4,
@@ -960,7 +982,32 @@ class _CreatePostModalState extends State<CreatePostModal> {
                           hintText: 'Write a caption...',
                           border: InputBorder.none,
                         ),
+                        onChanged: _checkContent, // 🆕 ADD: Real-time checking
                       ),
+
+                      // 🆕 ADD: Warning display
+                      if (_contentWarning != null)
+                        Container(
+                          margin: EdgeInsets.only(top: 8),
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.orange[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange[200]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.warning_amber, size: 16, color: Colors.orange[700]),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _contentWarning!,
+                                  style: TextStyle(fontSize: 12, color: Colors.orange[800]),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
 
                       SizedBox(height: 16),
 
@@ -1015,6 +1062,7 @@ class _CreatePostModalState extends State<CreatePostModal> {
               ),
             ],
           ),
+
         );
       },
     );
@@ -1179,5 +1227,45 @@ class _CreatePostModalState extends State<CreatePostModal> {
         ),
       ],
     );
+  }
+
+  String? _contentWarning;
+  Timer? _moderationDebounce;
+
+  // Add this method
+  void _checkContent(String text) {
+    _moderationDebounce?.cancel();
+
+    if (text.isEmpty) {
+      setState(() => _contentWarning = null);
+      return;
+    }
+
+    _moderationDebounce = Timer(Duration(milliseconds: 500), () async {
+      try {
+        final result = await PerspectiveModerationService.shouldModerateContent(text);
+
+        if (mounted) {
+          setState(() {
+            switch (result.type) {
+              case ModerationActionType.block:
+                _contentWarning = 'This content violates community guidelines and cannot be posted';
+                break;
+              case ModerationActionType.flag:
+                _contentWarning = 'This content may be inappropriate - please review before posting';
+                break;
+              case ModerationActionType.warn:
+                _contentWarning = 'Please consider revising your message for a more positive tone';
+                break;
+              case ModerationActionType.allow:
+                _contentWarning = null;
+                break;
+            }
+          });
+        }
+      } catch (e) {
+        print('Moderation error: $e');
+      }
+    });
   }
 }

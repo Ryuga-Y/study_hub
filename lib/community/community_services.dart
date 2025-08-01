@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:share_plus/share_plus.dart';
+import 'AI_Content.dart';
 import 'models.dart';
 import '../chat_integrated.dart';
 import '../chat.dart';
@@ -61,6 +62,27 @@ class CommunityService {
     try {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
+
+      // 🆕 ADD: Content moderation check
+      if (caption.isNotEmpty) {
+        final moderationResult = await PerspectiveModerationService.shouldModerateContent(caption);
+
+        switch (moderationResult.type) {
+          case ModerationActionType.block:
+            throw Exception(moderationResult.reason);
+          case ModerationActionType.flag:
+          // You might want to flag for review but still allow posting
+            print('Content flagged: ${moderationResult.reason}');
+            break;
+          case ModerationActionType.warn:
+          // You could return a warning that the UI can display
+            print('Warning: ${moderationResult.reason}');
+            break;
+          case ModerationActionType.allow:
+          // Continue with post creation
+            break;
+        }
+      }
 
       // Get user data
       final userDoc = await _firestore.collection('users').doc(userId).get();
@@ -130,6 +152,19 @@ class CommunityService {
     bool isAnonymous = false,
   }) async {
     try {
+      // 🆕 ADD: Moderate poll question
+      final questionModeration = await PerspectiveModerationService.shouldModerateContent(question);
+      if (questionModeration.type == ModerationActionType.block) {
+        throw Exception('Poll question ${questionModeration.reason}');
+      }
+
+      // 🆕 ADD: Moderate each option
+      for (final option in options) {
+        final optionModeration = await PerspectiveModerationService.shouldModerateContent(option);
+        if (optionModeration.type == ModerationActionType.block) {
+          throw Exception('Poll option "${option}" ${optionModeration.reason}');
+        }
+      }
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
 
@@ -841,6 +876,24 @@ class CommunityService {
     try {
       final userId = currentUserId;
       if (userId == null) throw Exception('User not authenticated');
+
+      // 🆕 ADD: Content moderation check
+      final moderationResult = await PerspectiveModerationService.shouldModerateContent(content);
+
+      switch (moderationResult.type) {
+        case ModerationActionType.block:
+          throw Exception(moderationResult.reason);
+        case ModerationActionType.flag:
+        // Log for review but allow
+          print('Comment flagged: ${moderationResult.reason}');
+          break;
+        case ModerationActionType.warn:
+        // Could return warning
+          print('Warning: ${moderationResult.reason}');
+          break;
+        case ModerationActionType.allow:
+          break;
+      }
 
       final userData = await _firestore.collection('users').doc(userId).get();
       final userDataMap = userData.data()!;
@@ -2045,49 +2098,21 @@ class CommunityService {
     try {
       print('🔄 External share started for post: ${post.id}');
 
-      final shareText = StringBuffer();
-
       // Build the text content
-      if (post.isRepost && post.originalPost != null) {
-        shareText.write('Check out this post by ${post.originalPost!.userName}');
-        if (post.repostComment != null && post.repostComment!.isNotEmpty) {
-          shareText.write('\n\n"${post.repostComment}"');
-        }
-        shareText.write('\n\nOriginal: "${post.originalPost!.caption}"');
-      } else {
-        shareText.write('Check out this post by ${post.userName}');
-        if (post.caption.isNotEmpty) {
-          shareText.write('\n\n"${post.caption}"');
-        }
-      }
-      shareText.write('\n\n📚 Shared from Study Hub');
+      final text = post.isRepost && post.originalPost != null
+          ? 'Check out this post by ${post.originalPost!.userName}: "${post.originalPost!.caption}"'
+          : 'Check out this post by ${post.userName}: "${post.caption}"';
 
-      final textToShare = shareText.toString();
+      final textToShare = '$text\n\n📚 Shared from Study Hub';
       print('📤 Sharing text: $textToShare');
 
-      // Get media URLs for sharing
-      final mediaUrls = post.isRepost && post.originalPost != null
-          ? post.originalPost!.mediaUrls
-          : post.mediaUrls;
+      // Use the correct SharePlus API with ShareParams
+      await SharePlus.instance.share(ShareParams(
+        text: textToShare,
+        subject: 'Check out this post from Study Hub',
+      ));
 
-      if (mediaUrls.isNotEmpty) {
-        // Share with subject for posts with media
-        try {
-          await SharePlus.instance.share(
-            textToShare as ShareParams,
-          );
-          print('✅ Share with subject completed successfully');
-        } catch (e) {
-          print('❌ Failed to share with subject, falling back to simple share: $e');
-          // Fallback to simple share
-          await SharePlus.instance.share(textToShare as ShareParams);
-          print('✅ Simple share completed successfully');
-        }
-      } else {
-        // Share text only for posts without media
-        await SharePlus.instance.share(textToShare as ShareParams);
-        print('✅ Text-only share completed successfully');
-      }
+      print('✅ External share completed successfully');
 
     } catch (e) {
       print('❌ External share error: $e');
@@ -2591,4 +2616,13 @@ class CommunityService {
   Future<void> cleanupBrokenPosts() async {
     await cleanupBrokenImagePosts();
   }
+}
+
+class ModerationSettings {
+  static double toxicityThreshold = 0.7;
+  static double severeThreshold = 0.5;
+  static double spamThreshold = 0.8;
+  static bool enableRealTimeChecking = true;
+  static bool blockOnHighToxicity = true;
+  static bool flagForReview = true;
 }

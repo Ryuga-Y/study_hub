@@ -917,10 +917,18 @@ class CommunityBloc extends Bloc<CommunityEvent, CommunityState> {
       ));
 
     } catch (e) {
-      print('❌ Error creating post with poll: $e');
+      // 🆕 ADD: Better error handling for moderation
+      String errorMessage = e.toString();
+
+      if (errorMessage.contains('violates community guidelines')) {
+        errorMessage = 'Your post contains content that violates our community guidelines. Please revise and try again.';
+      } else if (errorMessage.contains('Spam detected')) {
+        errorMessage = 'Your post appears to contain spam. Please remove promotional content and try again.';
+      }
+
       emit(state.copyWith(
         isCreatingPost: false,
-        error: 'Failed to create poll: ${e.toString()}',
+        error: errorMessage,
       ));
     }
   }
