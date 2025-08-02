@@ -10,6 +10,7 @@ import 'package:study_hub/community/search_screen.dart';
 import 'bloc.dart';
 import 'community_services.dart';
 import 'models.dart';
+import '../chat_integrated.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userId;
@@ -409,7 +410,31 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           Expanded(
             child: ElevatedButton(
               onPressed: () {
-                // Navigate to chat or other friend actions
+                // UPDATED: Navigate to chat screen
+                final currentUserId = _service.currentUserId;
+                if (currentUserId != null) {
+                  // Generate chat ID locally
+                  final sortedIds = [currentUserId, widget.userId]..sort();
+                  final chatId = '${sortedIds[0]}_${sortedIds[1]}';
+
+                  // Get user data from state - ADD THIS LINE HERE
+                  final user = widget.isCurrentUser
+                      ? state.currentUserProfile
+                      : state.viewingUserProfile;
+
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ChatScreen(
+                        contactId: widget.userId,
+                        contactName: user?.fullName ?? 'Unknown User',
+                        contactAvatar: user?.avatarUrl,
+                        isOnline: false,
+                        chatId: chatId,
+                      ),
+                    ),
+                  );
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.grey[200],
