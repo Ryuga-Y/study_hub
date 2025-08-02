@@ -5,11 +5,16 @@ class PerspectiveModerationService {
   static const String _perspectiveApiKey = 'AIzaSyBr0AG8OE5et8DA_5dCuizUIQr76ch00Uc'; // Replace with your actual API key
   static const String _perspectiveApiUrl = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze';
   // Stricter thresholds
-  static const double TOXICITY_BLOCK_THRESHOLD = 0.8;      // Was 0.6
-  static const double SEVERE_TOXICITY_BLOCK_THRESHOLD = 0.6; // Was 0.4
-  static const double PROFANITY_BLOCK_THRESHOLD = 0.8;     // Was 0.6
-  static const double INSULT_BLOCK_THRESHOLD = 0.8;        // Was 0.6
-  static const double HARASSMENT_WARN_THRESHOLD = 0.7;     // New threshold
+  // More sensitive thresholds for better user experience
+  static const double TOXICITY_BLOCK_THRESHOLD = 0.7;      // Lowered from 0.8
+  static const double SEVERE_TOXICITY_BLOCK_THRESHOLD = 0.5; // Lowered from 0.6
+  static const double PROFANITY_BLOCK_THRESHOLD = 0.6;     // Lowered from 0.8
+  static const double INSULT_BLOCK_THRESHOLD = 0.7;        // Lowered from 0.8
+  static const double HARASSMENT_WARN_THRESHOLD = 0.5;     // Lowered from 0.7
+
+  // Add more granular warning thresholds
+  static const double MILD_TOXICITY_WARN_THRESHOLD = 0.4;  // New
+  static const double MILD_INSULT_WARN_THRESHOLD = 0.4;   // New threshold
 
   static Future<ModerationAction> shouldModerateContent(String content) async {
     // Check for explicit words first (local check)
@@ -45,6 +50,31 @@ class PerspectiveModerationService {
         return ModerationAction.warn(reason: 'Consider using more constructive language');
       }
     }
+
+    if (result.isFlagged) {
+      // Block only for serious violations
+      if (result.categoryScores['severe_toxicity']! > SEVERE_TOXICITY_BLOCK_THRESHOLD ||
+          result.categoryScores['toxicity']! > TOXICITY_BLOCK_THRESHOLD ||
+          result.categoryScores['profanity']! > PROFANITY_BLOCK_THRESHOLD ||
+          result.categoryScores['threat']! > 0.7 ||
+          result.categoryScores['identity_attack']! > 0.7) {
+        return ModerationAction.block(reason: 'Content violates community guidelines');
+      }
+      // Flag for moderate violations
+      else if (result.categoryScores['harassment']! > HARASSMENT_WARN_THRESHOLD ||
+          result.categoryScores['insult']! > INSULT_BLOCK_THRESHOLD) {
+        return ModerationAction.flag(reason: 'Please be respectful in your language');
+      }
+    }
+
+    // Add more sensitive warning for mild issues
+    if (result.categoryScores['toxicity']! > MILD_TOXICITY_WARN_THRESHOLD ||
+        result.categoryScores['insult']! > MILD_INSULT_WARN_THRESHOLD ||
+        result.categoryScores['profanity']! > 0.4) {
+      return ModerationAction.warn(reason: 'Consider using more constructive language');
+    }
+
+    return ModerationAction.allow();
 
     return ModerationAction.allow();
   }

@@ -688,6 +688,8 @@ class _CreatePostModalState extends State<CreatePostModal> {
   PostPrivacy _privacy = PostPrivacy.public;
   bool _hasPoll = false;
 
+  ModerationActionType? _moderationLevel;
+
   // Poll data
   final TextEditingController _pollQuestionController = TextEditingController();
   final List<TextEditingController> _pollOptionControllers = [
@@ -735,8 +737,8 @@ class _CreatePostModalState extends State<CreatePostModal> {
   }
 
   bool _canCreate() {
-    // Block if there's any moderation warning/block
-    if (_contentWarning != null) {
+    // 🆕 FIXED: Only block on "block" level, allow warn/flag with warnings
+    if (_moderationLevel == ModerationActionType.block) {
       return false;
     }
 
@@ -896,7 +898,7 @@ class _CreatePostModalState extends State<CreatePostModal> {
                       ),
                     ),
                     TextButton(
-                      onPressed: state.isCreatingPost || !_canCreate()
+                      onPressed: state.isCreatingPost || (_moderationLevel == ModerationActionType.block) || !_canCreate()
                           ? null
                           : () => _createPost(state),
                       child: state.isCreatingPost
@@ -906,9 +908,14 @@ class _CreatePostModalState extends State<CreatePostModal> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                           : Text(
-                        'Share',
+                        (_moderationLevel == ModerationActionType.warn || _moderationLevel == ModerationActionType.flag)
+                            ? 'Share Anyway'
+                            : 'Share',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
+                          color: (_moderationLevel == ModerationActionType.warn || _moderationLevel == ModerationActionType.flag)
+                              ? Colors.orange
+                              : null,
                         ),
                       ),
                     ),
@@ -991,18 +998,25 @@ class _CreatePostModalState extends State<CreatePostModal> {
                           margin: EdgeInsets.only(top: 8),
                           padding: EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.orange[50],
+                            color: _getWarningColor(),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange[200]!),
+                            border: Border.all(color: _getWarningBorderColor()),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.warning_amber, size: 16, color: Colors.orange[700]),
+                              Icon(
+                                  _getWarningIcon(),
+                                  size: 16,
+                                  color: _getWarningIconColor()
+                              ),
                               SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   _contentWarning!,
-                                  style: TextStyle(fontSize: 12, color: Colors.orange[800]),
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: _getWarningTextColor()
+                                  ),
                                 ),
                               ),
                             ],
@@ -1237,7 +1251,10 @@ class _CreatePostModalState extends State<CreatePostModal> {
     _moderationDebounce?.cancel();
 
     if (text.isEmpty) {
-      setState(() => _contentWarning = null);
+      setState(() {
+        _contentWarning = null;
+        _moderationLevel = null;
+      });
       return;
     }
 
@@ -1247,6 +1264,8 @@ class _CreatePostModalState extends State<CreatePostModal> {
 
         if (mounted) {
           setState(() {
+            _moderationLevel = result.type; // 🆕 Store the moderation level
+
             switch (result.type) {
               case ModerationActionType.block:
                 _contentWarning = 'This content violates community guidelines and cannot be posted';
@@ -1267,5 +1286,35 @@ class _CreatePostModalState extends State<CreatePostModal> {
         print('Moderation error: $e');
       }
     });
+  }
+  // Add helper methods:
+  Color _getWarningColor() {
+    if (_contentWarning!.contains('violates')) return Colors.red[50]!;
+    if (_contentWarning!.contains('inappropriate')) return Colors.orange[50]!;
+    return Colors.yellow[50]!;
+  }
+
+  Color _getWarningBorderColor() {
+    if (_contentWarning!.contains('violates')) return Colors.red[200]!;
+    if (_contentWarning!.contains('inappropriate')) return Colors.orange[200]!;
+    return Colors.yellow[200]!;
+  }
+
+  IconData _getWarningIcon() {
+    if (_contentWarning!.contains('violates')) return Icons.block;
+    if (_contentWarning!.contains('inappropriate')) return Icons.warning;
+    return Icons.info_outline;
+  }
+
+  Color _getWarningIconColor() {
+    if (_contentWarning!.contains('violates')) return Colors.red[700]!;
+    if (_contentWarning!.contains('inappropriate')) return Colors.orange[700]!;
+    return Colors.yellow[700]!;
+  }
+
+  Color _getWarningTextColor() {
+    if (_contentWarning!.contains('violates')) return Colors.red[800]!;
+    if (_contentWarning!.contains('inappropriate')) return Colors.orange[800]!;
+    return Colors.yellow[800]!;
   }
 }
