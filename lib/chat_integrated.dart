@@ -268,14 +268,38 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
         bool isStuckOnTop = false;
 
 // Check if user has cleared this chat
+        // Check if user has cleared this chat
         final prefs = await SharedPreferences.getInstance();
         final clearKey = 'chat_cleared_${chatId}_$currentUserId';
         final clearTimeString = prefs.getString(clearKey);
-        bool hasClearedChat = clearTimeString != null;
+        DateTime? userClearTime;
+        if (clearTimeString != null) {
+          userClearTime = DateTime.parse(clearTimeString);
+        }
 
         if (chatData != null) {
-          // If user cleared chat, show default message instead of last message
-          if (hasClearedChat) {
+          // Check if there are messages after clear time
+          bool hasMessagesAfterClear = true;
+          if (userClearTime != null) {
+            try {
+              final messagesAfterClear = await _firestore
+                  .collection('chats')
+                  .doc(chatId)
+                  .collection('messages')
+                  .where('timestamp', isGreaterThan: Timestamp.fromDate(userClearTime))
+                  .orderBy('timestamp', descending: true)
+                  .limit(1)
+                  .get();
+
+              hasMessagesAfterClear = messagesAfterClear.docs.isNotEmpty;
+            } catch (e) {
+              print('Error checking messages after clear: $e');
+              hasMessagesAfterClear = false;
+            }
+          }
+
+          // Show appropriate message
+          if (userClearTime != null && !hasMessagesAfterClear) {
             lastMessage = "Start a conversation with ${friend.friendName}";
             lastMessageTime = friend.acceptedAt ?? friend.createdAt;
           } else {
@@ -292,8 +316,31 @@ class _ChatContactPageState extends State<ChatContactPage> with WidgetsBindingOb
           final stickKey = 'chat_stuck_${chatId}_$currentUserId';
           isStuckOnTop = prefs.getBool(stickKey) ?? false;
         } else {
-          lastMessage = "You became friends with ${friend.friendName}";
-          lastMessageTime = friend.acceptedAt ?? friend.createdAt;
+          // No chat document exists, check if there are any messages
+          try {
+            final messagesSnapshot = await _firestore
+                .collection('chats')
+                .doc(chatId)
+                .collection('messages')
+                .orderBy('timestamp', descending: true)
+                .limit(1)
+                .get();
+
+            if (messagesSnapshot.docs.isNotEmpty) {
+              final latestMessage = ChatMessage.fromFirestore(messagesSnapshot.docs.first);
+              lastMessage = latestMessage.text.isNotEmpty ? latestMessage.text :
+              (latestMessage.attachmentType == 'image' ? '📷 Photo' :
+              latestMessage.attachmentType == 'video' ? '🎥 Video' : '📎 File');
+              lastMessageTime = latestMessage.timestamp;
+            } else {
+              lastMessage = "You became friends with ${friend.friendName}";
+              lastMessageTime = friend.acceptedAt ?? friend.createdAt;
+            }
+          } catch (e) {
+            print('Error checking messages: $e');
+            lastMessage = "You became friends with ${friend.friendName}";
+            lastMessageTime = friend.acceptedAt ?? friend.createdAt;
+          }
           unreadCount = 0;
           isPinned = false;
           isStuckOnTop = false;
@@ -1403,25 +1450,13 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.contactName,
-                  style: TextStyle(
-                    color: Colors.black,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  widget.isOnline ? "Active now" : "Offline",
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+            child: Text(
+              widget.contactName,
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
