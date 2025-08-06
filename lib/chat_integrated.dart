@@ -89,6 +89,8 @@ class ChatMessage {
   final int? videoDuration;
   final String? messageType;
   final Map<String, dynamic>? replyTo;
+  final bool isEdited;
+  final DateTime? editedAt;
 
   ChatMessage({
     required this.id,
@@ -102,6 +104,8 @@ class ChatMessage {
     this.videoDuration,
     this.messageType,
     this.replyTo,
+    this.isEdited = false,
+    this.editedAt,
   });
 
   factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -121,9 +125,14 @@ class ChatMessage {
           : null,
       videoDuration: data['videoDuration'],
       messageType: data['messageType'],
-      replyTo: data['replyTo'] as Map<String, dynamic>?, // Add this line
+      replyTo: data['replyTo'] as Map<String, dynamic>?,
+      isEdited: data['isEdited'] ?? false,      // ADD THIS LINE
+      editedAt: data['editedAt'] != null        // ADD THIS LINE
+          ? (data['editedAt'] as Timestamp).toDate()  // ADD THIS LINE
+          : null,                               // ADD THIS LINE
     );
   }
+
   Map<String, dynamic> toMap() {
     Map<String, dynamic> map = {
       'text': text,
@@ -1204,7 +1213,7 @@ class ChatScreen extends StatefulWidget {
     this.contactAvatar,
     required this.isOnline,
     required this.chatId,
-    this.onContactsChanged, // ADD THIS LINE
+    this.onContactsChanged,
   });
 
   @override
@@ -1222,6 +1231,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isVerifiedFriend = false;
   ChatMessage? _replyingToMessage;
   bool _isReplying = false;
+  ChatMessage? _editingMessage;
+  bool _isEditing = false;
   bool _isSearching = false;
   String _searchQuery = '';
   List<ChatMessage> _searchResults = [];
@@ -1848,7 +1859,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   Flexible(
                     child: Text(
-                      "${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}",
+                      "${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}${message.isEdited ? ' • edited' : ''}",
                       style: TextStyle(
                         color: isMe ? Colors.white70 : Colors.grey[600],
                         fontSize: 12,
@@ -2030,11 +2041,27 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
             ListTile(
-              leading: Icon(Icons.edit, color: Colors.orange),
-              title: Text('Edit'),
-              onTap: () {
+              leading: Icon(
+                  Icons.edit,
+                  color: _canEditMessage(message) ? Colors.orange : Colors.grey
+              ),
+              title: Text(
+                'Edit',
+                style: TextStyle(
+                  color: _canEditMessage(message) ? Colors.black : Colors.grey,
+                ),
+              ),
+              onTap: _canEditMessage(message) ? () {
                 Navigator.pop(context);
                 _editMessage(message);
+              } : () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Messages can only be edited within 2 minutes'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
               },
             ),
             ListTile(
@@ -2071,10 +2098,31 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _editMessage(ChatMessage message) {
+    if (!_canEditMessage(message)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Messages can only be edited within 2 minutes'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     setState(() {
+      _editingMessage = message;
+      _isEditing = true;
       _messageController.text = message.text;
+      _isReplying = false;  // Cancel reply mode if active
+      _replyingToMessage = null;
     });
     _focusNode.requestFocus();
+  }
+  void _cancelEdit() {
+    setState(() {
+      _editingMessage = null;
+      _isEditing = false;
+      _messageController.clear();
+    });
   }
 
   void _deleteMessageForEveryone(ChatMessage message) {
@@ -2624,6 +2672,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Column(
       children: [
         if (_isReplying) _buildReplyPreview(),
+        if (_isEditing) _buildEditPreview(),  // ADD THIS LINE
         Container(
           padding: EdgeInsets.all(8),
           color: Colors.white,
@@ -2700,6 +2749,61 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             icon: Icon(Icons.close, color: Colors.grey[600], size: 20),
             onPressed: _cancelReply,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditPreview() {
+    if (_editingMessage == null) return SizedBox.shrink();
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: Colors.orange[50],
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.orange,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          SizedBox(width: 12),
+          Icon(Icons.edit, color: Colors.orange, size: 20),
+          SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Edit Message',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    color: Colors.orange,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  _editingMessage!.text.length > 30
+                      ? '${_editingMessage!.text.substring(0, 30)}...'
+                      : _editingMessage!.text,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.close, color: Colors.grey[600], size: 20),
+            onPressed: _cancelEdit,
           ),
         ],
       ),
@@ -2885,6 +2989,12 @@ class _ChatScreenState extends State<ChatScreen> {
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
 
+    // Handle editing existing message
+    if (_isEditing && _editingMessage != null && text.trim().isNotEmpty) {
+      await _updateExistingMessage(text.trim());
+      return;
+    }
+
     try {
       // Base message data - always include these fields
       Map<String, dynamic> messageData = {
@@ -2981,6 +3091,72 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _updateExistingMessage(String newText) async {
+    if (_editingMessage == null || newText.trim().isEmpty) return;
+
+    try {
+      final trimmedText = newText.trim();
+
+      // Update the message in Firestore
+      await _firestore
+          .collection('chats')
+          .doc(widget.chatId)
+          .collection('messages')
+          .doc(_editingMessage!.id)
+          .update({
+        'text': trimmedText,
+        'isEdited': true,
+        'editedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update last message in chat if this was the last message
+      final messagesSnapshot = await _firestore
+          .collection('chats')
+          .doc(widget.chatId)
+          .collection('messages')
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+
+      if (messagesSnapshot.docs.isNotEmpty) {
+        final lastMessageDoc = messagesSnapshot.docs.first;
+        if (lastMessageDoc.id == _editingMessage!.id) {
+          await _firestore.collection('chats').doc(widget.chatId).update({
+            'lastMessage': trimmedText,
+            'lastMessageTime': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      _messageController.clear();
+      _cancelEdit();
+
+      // Force rebuild to show updated message
+      if (mounted) {
+        setState(() {});
+      }
+
+      HapticFeedback.lightImpact();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Message edited successfully'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      print('Error editing message: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to edit message: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   Future<bool> _getUserStickStatus() async {
     try {
       final currentUserId = _auth.currentUser?.uid;
@@ -2993,6 +3169,20 @@ class _ChatScreenState extends State<ChatScreen> {
       print('Error getting stick status: $e');
       return false;
     }
+  }
+
+  bool _canEditMessage(ChatMessage message) {
+    // Only allow editing own messages
+    if (message.senderId != _auth.currentUser?.uid) {
+      return false;
+    }
+
+    // Check if message is within 2 minutes
+    final now = DateTime.now();
+    final messageTime = message.timestamp;
+    final timeDifference = now.difference(messageTime).inMinutes;
+
+    return timeDifference <= 2;
   }
 
   Future<void> _markMessageAsReadAfterCreation(String messageId) async {
