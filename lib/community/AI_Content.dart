@@ -1,130 +1,145 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 
 class PerspectiveModerationService {
-  static const String _perspectiveApiKey = 'AIzaSyBr0AG8OE5et8DA_5dCuizUIQr76ch00Uc'; // Replace with your actual API key
+  static String? _perspectiveApiKey;
   static const String _perspectiveApiUrl = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze';
-  // Stricter thresholds
-  // More sensitive thresholds for better user experience
-  static const double TOXICITY_BLOCK_THRESHOLD = 0.7;      // Lowered from 0.8
-  static const double SEVERE_TOXICITY_BLOCK_THRESHOLD = 0.5; // Lowered from 0.6
-  static const double PROFANITY_BLOCK_THRESHOLD = 0.6;     // Lowered from 0.8
-  static const double INSULT_BLOCK_THRESHOLD = 0.7;        // Lowered from 0.8
-  static const double HARASSMENT_WARN_THRESHOLD = 0.5;     // Lowered from 0.7
 
-  // Add more granular warning thresholds
-  static const double MILD_TOXICITY_WARN_THRESHOLD = 0.4;  // New
-  static const double MILD_INSULT_WARN_THRESHOLD = 0.4;   // New threshold
+  // STRICTER thresholds to prevent API violations
+  static const double TOXICITY_BLOCK_THRESHOLD = 0.5;      // Much lower
+  static const double SEVERE_TOXICITY_BLOCK_THRESHOLD = 0.3; // Much lower
+  static const double PROFANITY_BLOCK_THRESHOLD = 0.4;     // Much lower
+  static const double INSULT_BLOCK_THRESHOLD = 0.5;        // Much lower
 
+  // Rate limiting to prevent API abuse
+  static DateTime _lastApiCall = DateTime.now().subtract(Duration(seconds: 2));
+  static const Duration _minTimeBetweenCalls = Duration(seconds: 1); // 1 second between calls
+  static int _apiCallsToday = 0;
+  static DateTime _lastResetDate = DateTime.now();
+  static const int _maxDailyApiCalls = 1000; // Conservative limit
+
+  // STEP 1: Easy setup - Initialize API key from assets
+  static Future<void> initializeApiKey() async {
+    try {
+      final String response = await rootBundle.loadString('assets/config.json');
+      final data = json.decode(response);
+      _perspectiveApiKey = data['perspective_api_key'];
+    } catch (e) {
+      print('Failed to load API key: $e');
+      // Fallback to local-only moderation if no API key
+      _perspectiveApiKey = null;
+    }
+  }
+
+  // STEP 2: Enhanced content filtering to prevent violations
   static Future<ModerationAction> shouldModerateContent(String content) async {
-    // Check for explicit words first (local check)
-    if (_containsExplicitContent(content)) {
-      return ModerationAction.block(reason: 'Content contains inappropriate language');
+    // Reset daily counter if needed
+    _resetDailyCounterIfNeeded();
+
+    // FIRST: Always do local checks to avoid unnecessary API calls
+    final localResult = _performLocalModerationChecks(content);
+    if (localResult.type != ModerationActionType.allow) {
+      return localResult;
     }
 
-    // Check for spam
+    // SECOND: Check rate limits before making API call
+    if (!_canMakeApiCall()) {
+      // If we can't make API call, rely on local checks only
+      return _performStrictLocalModeration(content);
+    }
+
+    // THIRD: Make API call only if content passes local checks
+    try {
+      if (_perspectiveApiKey == null) {
+        await initializeApiKey();
+      }
+
+      if (_perspectiveApiKey == null || _perspectiveApiKey!.isEmpty) {
+        // No API key available, use local-only moderation
+        return _performStrictLocalModeration(content);
+      }
+
+      final result = await _analyzeContentSafely(content);
+      _recordApiCall();
+
+      return _processApiResult(result);
+
+    } catch (e) {
+      print('API error: $e - falling back to local moderation');
+      return _performStrictLocalModeration(content);
+    }
+  }
+
+  // Enhanced local checks to prevent sending inappropriate content to API
+  static ModerationAction _performLocalModerationChecks(String content) {
+    // Block empty or very short content
+    if (content.trim().length < 3) {
+      return ModerationAction.block(reason: 'Content too short');
+    }
+
+    // Block excessively long content
+    if (content.length > 3000) {
+      return ModerationAction.block(reason: 'Content too long');
+    }
+
+    // Check for explicit content
+    if (_containsExplicitContent(content)) {
+      return ModerationAction.block(reason: 'Contains inappropriate language');
+    }
+
+    // Check for spam patterns
     if (_detectSpam(content)) {
       return ModerationAction.block(reason: 'Spam detected');
     }
 
-    // Check toxicity with Perspective API
-    final result = await analyzeContent(content);
-
-    if (result.isFlagged) {
-      // Block only for serious violations
-      if (result.categoryScores['severe_toxicity']! > SEVERE_TOXICITY_BLOCK_THRESHOLD ||
-          result.categoryScores['toxicity']! > TOXICITY_BLOCK_THRESHOLD ||
-          result.categoryScores['profanity']! > PROFANITY_BLOCK_THRESHOLD ||
-          result.categoryScores['threat']! > 0.8 ||  // Increased from 0.7
-          result.categoryScores['identity_attack']! > 0.8) {  // Increased from 0.7
-        return ModerationAction.block(reason: 'Content violates community guidelines');
-      }
-      // Flag for moderate violations
-      else if (result.categoryScores['harassment']! > HARASSMENT_WARN_THRESHOLD ||
-          result.categoryScores['insult']! > INSULT_BLOCK_THRESHOLD) {
-        return ModerationAction.flag(reason: 'Please be respectful in your language');
-      }
-      // Warn for mild issues
-      else if (result.categoryScores['toxicity']! > 0.6 ||
-          result.categoryScores['insult']! > 0.6) {
-        return ModerationAction.warn(reason: 'Consider using more constructive language');
-      }
+    // Check for obvious harassment patterns
+    if (_containsHarassmentPatterns(content)) {
+      return ModerationAction.block(reason: 'Harassment detected');
     }
 
-    if (result.isFlagged) {
-      // Block only for serious violations
-      if (result.categoryScores['severe_toxicity']! > SEVERE_TOXICITY_BLOCK_THRESHOLD ||
-          result.categoryScores['toxicity']! > TOXICITY_BLOCK_THRESHOLD ||
-          result.categoryScores['profanity']! > PROFANITY_BLOCK_THRESHOLD ||
-          result.categoryScores['threat']! > 0.7 ||
-          result.categoryScores['identity_attack']! > 0.7) {
-        return ModerationAction.block(reason: 'Content violates community guidelines');
-      }
-      // Flag for moderate violations
-      else if (result.categoryScores['harassment']! > HARASSMENT_WARN_THRESHOLD ||
-          result.categoryScores['insult']! > INSULT_BLOCK_THRESHOLD) {
-        return ModerationAction.flag(reason: 'Please be respectful in your language');
-      }
+    // Check for hate speech indicators
+    if (_containsHateSpeechIndicators(content)) {
+      return ModerationAction.block(reason: 'Hate speech detected');
     }
-
-    // Add more sensitive warning for mild issues
-    if (result.categoryScores['toxicity']! > MILD_TOXICITY_WARN_THRESHOLD ||
-        result.categoryScores['insult']! > MILD_INSULT_WARN_THRESHOLD ||
-        result.categoryScores['profanity']! > 0.4) {
-      return ModerationAction.warn(reason: 'Consider using more constructive language');
-    }
-
-    return ModerationAction.allow();
 
     return ModerationAction.allow();
   }
 
-  static bool _isLikelyOffensive(String text, Map<String, double> scores) {
-    // If it's a short message with high insult score, it's more likely offensive
-    if (text.split(' ').length < 10 && scores['insult']! > 0.7) {
-      return true;
-    }
+  // Strict local moderation when API is unavailable
+  static ModerationAction _performStrictLocalModeration(String content) {
+    final lowerContent = content.toLowerCase();
 
-    // Check for patterns that indicate constructive criticism vs personal attacks
-    final constructivePatterns = [
-      'bug', 'code', 'design', 'idea', 'plan', 'mistake', 'error'
+    // Be very conservative when we can't use API
+    final suspiciousWords = [
+      'kill', 'die', 'death', 'hurt', 'pain', 'hate', 'stupid', 'idiot',
+      'ugly', 'fat', 'loser', 'dumb', 'worthless', 'pathetic'
     ];
 
-    final lowerText = text.toLowerCase();
-    final hasConstructiveContext = constructivePatterns.any(
-            (pattern) => lowerText.contains(pattern)
-    );
+    for (final word in suspiciousWords) {
+      if (lowerContent.contains(word)) {
+        return ModerationAction.warn(reason: 'Please use more positive language');
+      }
+    }
 
-    // Be more lenient if it seems like constructive criticism
-    return !hasConstructiveContext;
+    return ModerationAction.allow();
   }
 
-  // Local explicit content detection
+  // Enhanced explicit content detection
   static bool _containsExplicitContent(String text) {
     final explicitWords = [
+      // Keep your existing list but add more variations
       'fuck', 'shit', 'bitch', 'ass', 'damn', 'crap', 'piss',
       'bastard', 'slut', 'whore', 'dick', 'cock', 'pussy', 'tits',
-      // Add more as needed, but be careful with context
+      // Add common variations and bypasses
+      'f*ck', 'f**k', 'sh*t', 'b*tch', 'fck', 'sht', 'btch',
+      'fuk', 'shyt', 'bytch', 'azz', 'fuq', 'shiit'
     ];
 
-    final lowerText = text.toLowerCase();
+    final lowerText = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\s]'), '');
 
-    // Check for whole words to avoid false positives
     for (final word in explicitWords) {
-      final regex = RegExp(r'\b' + RegExp.escape(word) + r'\b');
-      if (regex.hasMatch(lowerText)) {
-        return true;
-      }
-    }
-
-    // Check for variations with special characters
-    final variations = [
-      'f*ck', 'f**k', 'f***', 'sh*t', 'b*tch', 'd*mn',
-      'fck', 'sht', 'btch', 'dmn', 'fuk', 'fok'
-    ];
-
-    for (final variation in variations) {
-      if (lowerText.contains(variation)) {
+      if (lowerText.contains(word)) {
         return true;
       }
     }
@@ -132,51 +147,62 @@ class PerspectiveModerationService {
     return false;
   }
 
-  // Enhanced spam detection
-  static bool _detectSpam(String text) {
-    final spamKeywords = [
-      'free money', 'click here', 'limited time', 'act now',
-      'guaranteed', 'no risk', 'winner', 'congratulations',
-      'urgent', 'immediately', 'special offer', 'buy now',
-      'make money fast', 'work from home', 'get rich quick'
+  // New: Detect harassment patterns
+  static bool _containsHarassmentPatterns(String text) {
+    final harassmentPatterns = [
+      'you should kill yourself', 'kill yourself', 'kys',
+      'you\'re worthless', 'nobody likes you', 'you\'re pathetic',
+      'go die', 'i hate you', 'you suck', 'you\'re ugly',
+      'piece of shit', 'waste of space'
     ];
 
     final lowerText = text.toLowerCase();
+    return harassmentPatterns.any((pattern) => lowerText.contains(pattern));
+  }
 
-    // Check for spam keywords
-    if (spamKeywords.any((keyword) => lowerText.contains(keyword))) {
-      return true;
+  // New: Detect hate speech indicators
+  static bool _containsHateSpeechIndicators(String text) {
+    final hateSpeechWords = [
+      // This is a minimal list - add more based on your specific needs
+      'terrorist', 'nazi', 'fascist', 'commie', 'libtard', 'retard'
+    ];
+
+    final lowerText = text.toLowerCase();
+    return hateSpeechWords.any((word) => lowerText.contains(word));
+  }
+
+  // Rate limiting functions
+  static bool _canMakeApiCall() {
+    final now = DateTime.now();
+
+    // Check if enough time has passed since last call
+    if (now.difference(_lastApiCall) < _minTimeBetweenCalls) {
+      return false;
     }
 
-    // Check for excessive capitalization
-    if (_hasExcessiveCaps(text)) {
-      return true;
+    // Check daily limit
+    if (_apiCallsToday >= _maxDailyApiCalls) {
+      return false;
     }
 
-    return _hasExcessiveLinks(text) || _hasRepeatedCharacters(text);
+    return true;
   }
 
-  static bool _hasExcessiveCaps(String text) {
-    if (text.length < 10) return false;
-
-    final capsCount = text.split('').where((char) =>
-    char == char.toUpperCase() && char != char.toLowerCase()).length;
-
-    return (capsCount / text.length) > 0.7; // More than 70% caps
+  static void _recordApiCall() {
+    _lastApiCall = DateTime.now();
+    _apiCallsToday++;
   }
 
-  // Rest of your existing methods remain the same...
-  static bool _hasExcessiveLinks(String text) {
-    final linkRegex = RegExp(r'https?://[^\s]+');
-    return linkRegex.allMatches(text).length > 2;
+  static void _resetDailyCounterIfNeeded() {
+    final now = DateTime.now();
+    if (now.day != _lastResetDate.day) {
+      _apiCallsToday = 0;
+      _lastResetDate = now;
+    }
   }
 
-  static bool _hasRepeatedCharacters(String text) {
-    final repeatedRegex = RegExp(r'(.)\1{4,}'); // 5+ repeated characters
-    return repeatedRegex.hasMatch(text);
-  }
-  // Google Perspective API - FREE and very accurate for toxicity detection
-  static Future<ContentModerationResult> analyzeContent(String text) async {
+  // Safe API call with better error handling
+  static Future<ContentModerationResult> _analyzeContentSafely(String text) async {
     try {
       final response = await http.post(
         Uri.parse('$_perspectiveApiUrl?key=$_perspectiveApiKey'),
@@ -194,39 +220,86 @@ class PerspectiveModerationService {
             'INSULT': {},
             'PROFANITY': {},
             'THREAT': {},
-            'SEXUALLY_EXPLICIT': {},
-            'FLIRTATION': {},
           },
           'languages': ['en'],
-          'doNotStore': true,
+          'doNotStore': true, // Important: Don't store data
         }),
-      );
+      ).timeout(Duration(seconds: 10)); // Add timeout
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return ContentModerationResult.fromPerspective(data);
+      } else {
+        throw Exception('API returned status ${response.statusCode}');
       }
-
-      return ContentModerationResult.safe();
     } catch (e) {
-      print('Perspective API moderation error: $e');
-      // In case of API failure, use local check
-      if (_containsExplicitContent(text)) {
-        return ContentModerationResult(
-          isFlagged: true,
-          categories: {'profanity': true},
-          categoryScores: {'toxicity': 0.9, 'profanity': 0.9},
-          toxicityScore: 0.9,
-          spamScore: 0.0,
-          threatScore: 0.0,
-          isSafe: false,
-        );
-      }
-      return ContentModerationResult.safe();
+      throw Exception('API call failed: $e');
     }
+  }
+
+  // Process API results with stricter thresholds
+  static ModerationAction _processApiResult(ContentModerationResult result) {
+    if (result.isFlagged) {
+      // Much stricter blocking criteria
+      if (result.categoryScores['severe_toxicity']! > SEVERE_TOXICITY_BLOCK_THRESHOLD ||
+          result.categoryScores['toxicity']! > TOXICITY_BLOCK_THRESHOLD ||
+          result.categoryScores['profanity']! > PROFANITY_BLOCK_THRESHOLD ||
+          result.categoryScores['threat']! > 0.3 ||  // Very low threshold
+          result.categoryScores['identity_attack']! > 0.3) {
+        return ModerationAction.block(reason: 'Content violates community guidelines');
+      }
+      // Flag for even moderate violations
+      else if (result.categoryScores['insult']! > INSULT_BLOCK_THRESHOLD ||
+          result.categoryScores['toxicity']! > 0.3) {
+        return ModerationAction.flag(reason: 'Please be respectful in your language');
+      }
+    }
+
+    // Warn for very mild issues
+    if (result.categoryScores['toxicity']! > 0.2 ||
+        result.categoryScores['insult']! > 0.2) {
+      return ModerationAction.warn(reason: 'Consider using more constructive language');
+    }
+
+    return ModerationAction.allow();
+  }
+
+  // Keep your existing spam detection
+  static bool _detectSpam(String text) {
+    final spamKeywords = [
+      'free money', 'click here', 'limited time', 'act now',
+      'guaranteed', 'no risk', 'winner', 'congratulations',
+      'urgent', 'immediately', 'special offer', 'buy now',
+      'make money fast', 'work from home', 'get rich quick'
+    ];
+
+    final lowerText = text.toLowerCase();
+    if (spamKeywords.any((keyword) => lowerText.contains(keyword))) {
+      return true;
+    }
+
+    return _hasExcessiveCaps(text) || _hasExcessiveLinks(text) || _hasRepeatedCharacters(text);
+  }
+
+  static bool _hasExcessiveCaps(String text) {
+    if (text.length < 10) return false;
+    final capsCount = text.split('').where((char) =>
+    char == char.toUpperCase() && char != char.toLowerCase()).length;
+    return (capsCount / text.length) > 0.7;
+  }
+
+  static bool _hasExcessiveLinks(String text) {
+    final linkRegex = RegExp(r'https?://[^\s]+');
+    return linkRegex.allMatches(text).length > 2;
+  }
+
+  static bool _hasRepeatedCharacters(String text) {
+    final repeatedRegex = RegExp(r'(.)\1{4,}');
+    return repeatedRegex.hasMatch(text);
   }
 }
 
+// Keep your existing classes with minor updates
 class ContentModerationResult {
   final bool isFlagged;
   final Map<String, bool> categories;
@@ -246,11 +319,9 @@ class ContentModerationResult {
     required this.isSafe,
   });
 
-  // Factory for Perspective API response
   factory ContentModerationResult.fromPerspective(Map<String, dynamic> json) {
     final attributes = json['attributeScores'] as Map<String, dynamic>? ?? {};
 
-    // Extract scores from Perspective API
     double getScore(String attribute) {
       return attributes[attribute]?['summaryScore']?['value']?.toDouble() ?? 0.0;
     }
@@ -261,21 +332,7 @@ class ContentModerationResult {
     final insult = getScore('INSULT');
     final profanity = getScore('PROFANITY');
     final threat = getScore('THREAT');
-    final sexuallyExplicit = getScore('SEXUALLY_EXPLICIT');
-    final flirtation = getScore('FLIRTATION');
 
-    // Map Perspective scores to categories (using thresholds)
-    final categories = <String, bool>{
-      'hate': identityAttack > 0.7,
-      'harassment': toxicity > 0.7 || insult > 0.7,
-      'threat': threat > 0.7,
-      'violence': threat > 0.8, // High threat score indicates violence
-      'sexual': sexuallyExplicit > 0.7,
-      'insult': insult > 0.7,
-      'profanity': profanity > 0.7,
-    };
-
-    // Map scores to match expected format
     final categoryScores = <String, double>{
       'toxicity': toxicity,
       'severe_toxicity': severeToxicity,
@@ -284,80 +341,25 @@ class ContentModerationResult {
       'insult': insult,
       'hate': identityAttack,
       'threat': threat,
-      'violence': threat,
-      'sexual': sexuallyExplicit,
       'profanity': profanity,
     };
 
-    // Determine if content should be flagged
-    final isFlagged = toxicity > 0.8 ||  // Changed from 0.7
-        severeToxicity > 0.6 ||  // Changed from 0.5
-        threat > 0.8 ||  // Changed from 0.7
-        identityAttack > 0.8 ||  // Changed from 0.7
-        insult > 0.8 ||  // Add insult check
-        profanity > 0.8;  // Add profanity check
+    // More sensitive flagging
+    final isFlagged = toxicity > 0.5 ||  // Lower threshold
+        severeToxicity > 0.3 ||
+        threat > 0.3 ||
+        identityAttack > 0.3 ||
+        insult > 0.5 ||
+        profanity > 0.4;
 
     return ContentModerationResult(
       isFlagged: isFlagged,
-      categories: categories,
-      categoryScores: categoryScores,
-      toxicityScore: toxicity,
-      spamScore: 0.0, // Perspective doesn't have spam detection
-      threatScore: threat,
-      isSafe: !isFlagged && toxicity < 0.6,
-    );
-  }
-
-  // Keep the OpenAI factory for backwards compatibility if needed
-  factory ContentModerationResult.fromOpenAI(Map<String, dynamic> json) {
-    final results = json['results'][0] as Map<String, dynamic>;
-    final flagged = results['flagged'] as bool;
-    final categories = Map<String, bool>.from(results['categories']);
-    final categoryScores = Map<String, double>.from(
-      (results['category_scores'] as Map<String, dynamic>).map(
-            (key, value) => MapEntry(key, (value as num).toDouble()),
-      ),
-    );
-
-    // Calculate overall toxicity score from OpenAI categories
-    final toxicityScore = [
-      categoryScores['hate'] ?? 0.0,
-      categoryScores['harassment'] ?? 0.0,
-      categoryScores['violence'] ?? 0.0,
-    ].reduce((a, b) => a > b ? a : b); // Get max score
-
-    return ContentModerationResult(
-      isFlagged: flagged,
-      categories: categories,
-      categoryScores: categoryScores,
-      toxicityScore: toxicityScore,
-      spamScore: 0.0, // OpenAI doesn't have spam detection
-      threatScore: categoryScores['violence/graphic'] ?? 0.0,
-      isSafe: !flagged,
-    );
-  }
-
-  // Factory for backwards compatibility
-  factory ContentModerationResult.fromJson(Map<String, dynamic> json) {
-    // This is for Google Perspective API format
-    final attributes = json['attributeScores'] as Map<String, dynamic>? ?? {};
-
-    double getToxicityScore(String attribute) {
-      return attributes[attribute]?['summaryScore']?['value']?.toDouble() ?? 0.0;
-    }
-
-    final toxicity = getToxicityScore('TOXICITY');
-    final spam = getToxicityScore('SPAM');
-    final threat = getToxicityScore('THREAT');
-
-    return ContentModerationResult(
-      isFlagged: toxicity > 0.7,
       categories: {},
-      categoryScores: {},
+      categoryScores: categoryScores,
       toxicityScore: toxicity,
-      spamScore: spam,
+      spamScore: 0.0,
       threatScore: threat,
-      isSafe: toxicity < 0.6 && spam < 0.7 && threat < 0.5,
+      isSafe: !isFlagged && toxicity < 0.3,
     );
   }
 
