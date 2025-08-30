@@ -7,10 +7,11 @@ class PerspectiveModerationService {
   static const String _perspectiveApiUrl = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze';
 
   // STRICTER thresholds to prevent API violations
-  static const double TOXICITY_BLOCK_THRESHOLD = 0.5;      // Much lower
-  static const double SEVERE_TOXICITY_BLOCK_THRESHOLD = 0.3; // Much lower
-  static const double PROFANITY_BLOCK_THRESHOLD = 0.4;     // Much lower
-  static const double INSULT_BLOCK_THRESHOLD = 0.5;        // Much lower
+  static const double TOXICITY_BLOCK_THRESHOLD = 0.7;
+  static const double SEVERE_TOXICITY_BLOCK_THRESHOLD = 0.5;
+  static const double PROFANITY_BLOCK_THRESHOLD = 0.6;
+  static const double INSULT_BLOCK_THRESHOLD = 0.7;
+  static const double HARASSMENT_WARN_THRESHOLD = 0.5;
 
   // Rate limiting to prevent API abuse
   static DateTime _lastApiCall = DateTime.now().subtract(Duration(seconds: 2));
@@ -19,7 +20,6 @@ class PerspectiveModerationService {
   static DateTime _lastResetDate = DateTime.now();
   static const int _maxDailyApiCalls = 1000; // Conservative limit
 
-  // STEP 1: Easy setup - Initialize API key from assets
   static Future<void> initializeApiKey() async {
     try {
       final String response = await rootBundle.loadString('assets/config.json');
@@ -32,24 +32,21 @@ class PerspectiveModerationService {
     }
   }
 
-  // STEP 2: Enhanced content filtering to prevent violations
   static Future<ModerationAction> shouldModerateContent(String content) async {
-    // Reset daily counter if needed
     _resetDailyCounterIfNeeded();
 
-    // FIRST: Always do local checks to avoid unnecessary API calls
     final localResult = _performLocalModerationChecks(content);
     if (localResult.type != ModerationActionType.allow) {
       return localResult;
     }
 
-    // SECOND: Check rate limits before making API call
+    // Check rate limits before making API call
     if (!_canMakeApiCall()) {
       // If we can't make API call, rely on local checks only
       return _performStrictLocalModeration(content);
     }
 
-    // THIRD: Make API call only if content passes local checks
+    // Make API call only if content passes local checks
     try {
       if (_perspectiveApiKey == null) {
         await initializeApiKey();
@@ -147,7 +144,7 @@ class PerspectiveModerationService {
     return false;
   }
 
-  // New: Detect harassment patterns
+  // New Detect harassment patterns
   static bool _containsHarassmentPatterns(String text) {
     final harassmentPatterns = [
       'you should kill yourself', 'kill yourself', 'kys',
